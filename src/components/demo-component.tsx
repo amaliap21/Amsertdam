@@ -1,34 +1,45 @@
-'use client'
+"use client";
 
-import { useQuery } from '@tanstack/react-query'
-import { useStore } from '@/store/use-store'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+import { useQuery } from "@tanstack/react-query";
+import { useStore } from "@/store/use-store";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from "recharts";
 
 const sampleData = [
-  { name: 'Jan', value: 400 },
-  { name: 'Feb', value: 300 },
-  { name: 'Mar', value: 600 },
-  { name: 'Apr', value: 800 },
-  { name: 'May', value: 500 },
-]
+  { name: "Jan", value: 400 },
+  { name: "Feb", value: 300 },
+  { name: "Mar", value: 600 },
+  { name: "Apr", value: 800 },
+  { name: "May", value: 500 },
+];
 
 async function fetchData() {
   // Simulate API call
-  await new Promise((resolve) => setTimeout(resolve, 1000))
-  return { message: 'Hello from TanStack Query!' }
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  return { message: "Hello from TanStack Query!" };
 }
 
 export function DemoComponent() {
-  const { count, increment, decrement } = useStore()
+  const { count, increment, decrement } = useStore();
   const { data, isLoading } = useQuery({
-    queryKey: ['demo'],
+    queryKey: ["demo"],
     queryFn: fetchData,
-  })
+  });
 
   return (
     <div className="space-y-8 p-8">
       <div className="rounded-lg border bg-card p-6">
-        <h2 className="mb-4 text-2xl font-bold">Zustand State Management</h2>
+        <h2 className="bg-yellow-primary mb-4 text-2xl font-bold">
+          Zustand State Management
+        </h2>
         <div className="flex items-center gap-4">
           <button
             onClick={decrement}
@@ -69,5 +80,5 @@ export function DemoComponent() {
         </ResponsiveContainer>
       </div>
     </div>
-  )
+  );
 }
