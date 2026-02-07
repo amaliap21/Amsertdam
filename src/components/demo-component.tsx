@@ -35,7 +35,7 @@ export function DemoComponent() {
   });
 
   return (
-    <div className="space-y-8 p-8">
+    <main className="w-full">
       <div className="rounded-lg border bg-card p-6">
         <h2 className="bg-yellow-primary mb-4 text-2xl font-bold">
           Zustand State Management
@@ -79,6 +79,6 @@ export function DemoComponent() {
           </BarChart>
         </ResponsiveContainer>
       </div>
-    </div>
+    </main>
   );
 }

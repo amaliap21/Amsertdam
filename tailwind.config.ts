@@ -6,8 +6,10 @@ module.exports = {
     theme: {
         extend: {
             colors: {
-                "yellow-primary": "#fca311",
-                "yellow-hover": "#ffd966",
+                "indigo-primary": "#3D42E5",
+                "blue-primary": "#587ECE",
+                "teal-primary": "#6EAFBB",
+                "green-primary": "#84E0A3",
             }
         },
     },
