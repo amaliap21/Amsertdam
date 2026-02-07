@@ -10,6 +10,8 @@ module.exports = {
                 "blue-primary": "#587ECE",
                 "teal-primary": "#6EAFBB",
                 "green-primary": "#84E0A3",
+                "black-primary": "#303030",
+                "gray-primary": "#6B6B6B",
             }
         },
     },
