@@ -59,7 +59,7 @@ export default function Sidebar({ className }: { className?: string }) {
             className="cursor-pointer rounded"
             onClick={() => setIsOpen(!isOpen)}
           >
-            <HamburgerIcon size={20} className="stroke-[#303030]" />
+            <HamburgerIcon size={20} className="stroke-black-primary" />
           </button>
         </div>
 
@@ -76,7 +76,7 @@ export default function Sidebar({ className }: { className?: string }) {
                   ${
                     isActive
                       ? "text-indigo-primary stroke-indigo-primary"
-                      : "text-[#303030] stroke-[#303030] hover:text-indigo-primary hover:stroke-indigo-primary"
+                      : "text-black-primary stroke-black-primary hover:text-indigo-primary hover:stroke-indigo-primary"
                   }
                 `}
               >
@@ -97,7 +97,7 @@ export default function Sidebar({ className }: { className?: string }) {
       <div className="space-y-6">
         {/* LOGOUT */}
         <button
-          className="flex items-center gap-3 w-full px-2 text-[#303030] hover:text-indigo-primary rounded-md transition cursor-pointer"
+          className="flex items-center gap-3 w-full px-2 text-black-primary hover:text-indigo-primary rounded-md transition cursor-pointer"
           onClick={() => {
             localStorage.clear();
             window.location.href = "/login";
