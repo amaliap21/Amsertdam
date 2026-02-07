@@ -34,10 +34,10 @@ const Navbar: React.FC<NavbarProps> = (className) => {
 
       <div className="flex items-center gap-4">
         <div className="flex flex-col">
-          <span className="text-base text-[#303030] font-medium">
+          <span className="text-black-primary font-medium">
             Adinda Putri
           </span>
-          <span className="text-[14px] text-[#6B6B6B] font-normal">
+          <span className="text-[14px] text-gray-primary">
             Computer Science
           </span>
         </div>
