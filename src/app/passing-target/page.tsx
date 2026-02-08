@@ -1,16 +1,7 @@
 "use client";
-import { CirclePlus, PencilLine } from "lucide-react";
+import { CirclePlus, PencilLine, Check } from "lucide-react";
 import { useState } from "react";
-
-type Tasks = {
-  cardColor: string;
-  type: string;
-  icon: React.ReactNode;
-  image: string;
-  taskCount: number;
-  taskCountColor: string;
-  text: string;
-};
+import CourseForm from "@/components/ui/course-form";
 
 type Courses = {
   courseName: string;
@@ -18,33 +9,49 @@ type Courses = {
   fromTime: number;
   toTime: number;
   typeTracking: string;
-  threshold: string;
+  threshold: number;
   assessments?: {
     name: string;
     weight: number;
     score?: number;
     date?: string;
+    isEditing?: boolean;
   }[];
   passingRequirement?: string;
+  requirements?: {
+    name: string;
+    score: number;
+  }[];
+};
+
+const calculateAverage = (scores: number[]): number => {
+  if (scores.length === 0) return 0;
+  const sum = scores.reduce((acc, score) => acc + score, 0);
+  return parseFloat((sum / scores.length).toFixed(2));
 };
 
 export default function PassingTarget() {
   const [expandedCourses, setExpandedCourses] = useState<number[]>([]);
-
-  const courseItems: Courses[] = [
+  const [showForm, setShowForm] = useState(false);
+  const [courseItems, setCourseItems] = useState<Courses[]>([
     {
       courseName: "Introduction to Computer Science",
       credits: 4,
       fromTime: 10,
       toTime: 11,
       typeTracking: "On Track",
-      threshold: "80.7",
+      threshold: 76.3,
       passingRequirement:
-        "To pass this course, you need at least 85.9 on Project (20%) and 62.3 on Midterm Exam (35%)",
+        "To pass this course, you need at least 85.9 on Project, 62.3 on Midterm Exam, and 80.7 on Final Exam",
       assessments: [
         { name: "Project", weight: 30, score: 80, date: "Feb 15" },
         { name: "Midterm Exam", weight: 35, score: 75, date: "Mar 10" },
         { name: "Final Exam", weight: 35, date: "May 25" },
+      ],
+      requirements: [
+        { name: "Project", score: 85.9 },
+        { name: "Midterm Exam", score: 62.3 },
+        { name: "Final Exam", score: 80.7 },
       ],
     },
     {
@@ -53,12 +60,17 @@ export default function PassingTarget() {
       fromTime: 8,
       toTime: 10,
       typeTracking: "On Track",
-      threshold: "75.5",
+      threshold: 75.5,
       passingRequirement: "To pass this course, you need at least 75.5 overall",
       assessments: [
         { name: "Assignments", weight: 20, score: 85 },
         { name: "Midterm", weight: 30, score: 72 },
         { name: "Final Exam", weight: 50 },
+      ],
+      requirements: [
+        { name: "Assignments", score: 75.5 },
+        { name: "Midterm", score: 75.5 },
+        { name: "Final Exam", score: 75.5 },
       ],
     },
     {
@@ -67,12 +79,17 @@ export default function PassingTarget() {
       fromTime: 9,
       toTime: 11,
       typeTracking: "Worth Reviewing",
-      threshold: "78.0",
+      threshold: 78.0,
       passingRequirement: "To pass this course, you need at least 78.0 overall",
       assessments: [
         { name: "Labs", weight: 25, score: 80 },
         { name: "Midterm", weight: 35, score: 68 },
         { name: "Final Project", weight: 40 },
+      ],
+      requirements: [
+        { name: "Labs", score: 78.0 },
+        { name: "Midterm", score: 78.0 },
+        { name: "Final Project", score: 78.0 },
       ],
     },
     {
@@ -81,12 +98,17 @@ export default function PassingTarget() {
       fromTime: 11,
       toTime: 13,
       typeTracking: "On Track",
-      threshold: "82.3",
+      threshold: 82.3,
       passingRequirement: "To pass this course, you need at least 82.3 overall",
       assessments: [
         { name: "Assignments", weight: 30, score: 88 },
         { name: "Midterm", weight: 30, score: 79 },
         { name: "Final Exam", weight: 40 },
+      ],
+      requirements: [
+        { name: "Assignments", score: 82.3 },
+        { name: "Midterm", score: 82.3 },
+        { name: "Final Exam", score: 82.3 },
       ],
     },
     {
@@ -95,20 +117,89 @@ export default function PassingTarget() {
       fromTime: 14,
       toTime: 16,
       typeTracking: "Worth Reviewing",
-      threshold: "77.8",
-      passingRequirement: "To pass this course, you need at least 77.8 overall",
+      threshold: 75.53,
+      passingRequirement:
+        "To pass this course, you need at least 75.5 on Labs, 75.6 on Quizzes, and 75.5 on Final Project",
       assessments: [
         { name: "Labs", weight: 20, score: 75 },
         { name: "Quizzes", weight: 20, score: 70 },
         { name: "Final Project", weight: 60 },
       ],
+      requirements: [
+        { name: "Labs", score: 75.5 },
+        { name: "Quizzes", score: 75.6 },
+        { name: "Final Project", score: 75.5 },
+      ],
     },
-  ];
+  ]);
 
   const toggleCourse = (index: number) => {
     setExpandedCourses((prev) =>
       prev.includes(index) ? prev.filter((i) => i !== index) : [...prev, index]
     );
+  };
+
+  const handleAddCourse = (newCourse: Courses) => {
+    const threshold = calculateAverage(
+      newCourse.requirements?.map((req) => req.score) || []
+    );
+
+    setCourseItems((prevCourses) => [
+      ...prevCourses,
+      { ...newCourse, threshold },
+    ]);
+    setShowForm(false);
+  };
+
+  const renderPassingRequirement = (course: Courses) => {
+    if (!course.passingRequirement) return null;
+
+    const details = course.requirements;
+
+    if (!details || !details.length) {
+      return <>{course.passingRequirement}</>;
+    }
+
+    const parts: React.ReactNode[] = [];
+
+    if (details.every((req) => req.score === details[0].score)) {
+      parts.push("To pass this course, you need at least ");
+      parts.push(
+        <span key="overall-score" className="text-indigo-primary">
+          {details[0].score}
+        </span>
+      );
+      parts.push(" overall");
+      return <>{parts}</>;
+    }
+
+    parts.push("To pass this course, you need at least ");
+
+    details.forEach((req, index) => {
+      parts.push(
+        <span key={`score-${index}`} className="text-indigo-primary">
+          {req.score}
+        </span>
+      );
+      parts.push(" on ");
+      parts.push(
+        <span key={`name-${index}`} className="text-black-primary">
+          {req.name}
+        </span>
+      );
+
+      if (index < details.length - 1) {
+        if (details.length === 2) {
+          parts.push(" and ");
+        } else if (index < details.length - 2) {
+          parts.push(", ");
+        } else {
+          parts.push(", and ");
+        }
+      }
+    });
+
+    return <>{parts}</>;
   };
 
   return (
@@ -125,7 +216,10 @@ export default function PassingTarget() {
             </p>
           </div>
 
-          <button className="flex flex-row gap-2 px-3 py-2 rounded-lg bg-indigo-primary text-white items-center">
+          <button
+            onClick={() => setShowForm(true)}
+            className="flex flex-row gap-2 px-3 py-2 rounded-lg bg-indigo-primary text-white items-center cursor-pointer hover:bg-indigo-500 transition-colors"
+          >
             <CirclePlus size={16} />
             Add Course
           </button>
@@ -139,7 +233,7 @@ export default function PassingTarget() {
             >
               {/* Course Header */}
               <div
-                className="flex flex-row justify-between items-center p-4 cursor-pointer hover:bg-gray-50 transition-colors"
+                className="flex flex-row justify-between items-center px-6 py-4 cursor-pointer hover:bg-gray-50 transition-colors"
                 onClick={() => toggleCourse(index)}
               >
                 <div className="flex flex-col gap-1">
@@ -201,28 +295,28 @@ export default function PassingTarget() {
 
               {/* Expanded Content */}
               {expandedCourses.includes(index) && (
-                <div className="px-4 pb-4 pt-2 border-t border-gray-200">
+                <div className="flex flex-col gap-5 px-4 pt-1 pb-4">
                   {item.passingRequirement && (
                     <p
-                      className="text-sm text-gray-700 mb-4 p-3"
+                      className="text-sm text-[#5D5D5D] px-6 py-4 font-semibold"
                       style={{
                         borderRadius: "12px",
                         background: "rgba(61, 66, 229, 0.10)",
                       }}
                     >
-                      {item.passingRequirement}
+                      {renderPassingRequirement(item)}
                     </p>
                   )}
 
-                  <h3 className="font-semibold text-sm mb-3">
+                  <h3 className="font-semibold text-sm">
                     Assessment Breakdown
                   </h3>
 
-                  <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-5">
                     {item.assessments?.map((assessment, assessIdx) => (
                       <div
                         key={assessIdx}
-                        className="flex flex-row justify-between items-center bg-white p-3 rounded"
+                        className="flex flex-row justify-between items-center bg-white rounded"
                       >
                         <div className="flex flex-col gap-2">
                           <div className="flex flex-row gap-2 items-center">
@@ -234,27 +328,73 @@ export default function PassingTarget() {
                             </span>
                           </div>
 
-                          <div>
-                            <div className="flex flex-row gap-2 items-center">
-                              <p className="text-gray-primary">
-                                Score:{" "}
-                                <span className="text-black-primary">
-                                  {assessment.score !== undefined
-                                    ? assessment.score
-                                    : "-"}
-                                </span>
-                              </p>
-
-                              <PencilLine
-                                size={20}
-                                className="text-indigo-primary"
-                              />
-                            </div>
+                          <div className="flex flex-row gap-2 items-center">
+                            {assessment.isEditing ? (
+                              <>
+                                <input
+                                  type="number"
+                                  value={assessment.score || ""}
+                                  onChange={(e) => {
+                                    const updatedScore = parseFloat(
+                                      e.target.value
+                                    );
+                                    setCourseItems((prevCourses) => {
+                                      const updatedCourses = [...prevCourses];
+                                      updatedCourses[index].assessments![
+                                        assessIdx
+                                      ].score = isNaN(updatedScore)
+                                        ? undefined
+                                        : updatedScore;
+                                      return updatedCourses;
+                                    });
+                                  }}
+                                  className="border border-gray-300 rounded px-2 py-1 text-sm w-30"
+                                />
+                                <button
+                                  onClick={() => {
+                                    setCourseItems((prevCourses) => {
+                                      const updatedCourses = [...prevCourses];
+                                      updatedCourses[index].assessments![
+                                        assessIdx
+                                      ].isEditing = false;
+                                      return updatedCourses;
+                                    });
+                                  }}
+                                  className="text-indigo-primary hover:text-indigo-500 transition-colors"
+                                >
+                                  <Check />
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <p className="text-gray-primary">
+                                  Score:{" "}
+                                  <span className="text-black-primary">
+                                    {assessment.score !== undefined
+                                      ? assessment.score
+                                      : "-"}
+                                  </span>
+                                </p>
+                                <PencilLine
+                                  size={20}
+                                  className="text-indigo-primary cursor-pointer hover:text-indigo-500 transition-colors"
+                                  onClick={() => {
+                                    setCourseItems((prevCourses) => {
+                                      const updatedCourses = [...prevCourses];
+                                      updatedCourses[index].assessments![
+                                        assessIdx
+                                      ].isEditing = true;
+                                      return updatedCourses;
+                                    });
+                                  }}
+                                />
+                              </>
+                            )}
                           </div>
                         </div>
 
                         <div className="flex flex-col justify-center gap-2 items-end">
-                          <button className="flex items-center gap-3 text-indigo-primary text-sm font-medium">
+                          <button className="flex items-center gap-3 text-indigo-primary text-sm font-medium cursor-pointer hover:underline">
                             <CirclePlus size={16} />
                             Add Item
                           </button>
@@ -274,6 +414,14 @@ export default function PassingTarget() {
           ))}
         </div>
       </div>
+
+      {/* Modal Form */}
+      {showForm && (
+        <CourseForm
+          onSubmit={handleAddCourse}
+          onCancel={() => setShowForm(false)}
+        />
+      )}
     </div>
   );
 }
