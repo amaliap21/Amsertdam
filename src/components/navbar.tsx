@@ -19,6 +19,7 @@ const Navbar: React.FC<NavbarProps> = (className) => {
           width={187}
           height={64}
           className="w-full"
+          loading="eager"
         />
       </section>
 
@@ -27,6 +28,8 @@ const Navbar: React.FC<NavbarProps> = (className) => {
         <Search size={20} />
         <input
           type="text"
+          id="search-input"
+          name="search"
           placeholder="Search courses, credits, flashcards"
           className="bg-transparent outline-none w-full"
         />
@@ -34,19 +37,17 @@ const Navbar: React.FC<NavbarProps> = (className) => {
 
       <div className="flex items-center gap-4">
         <div className="flex flex-col">
-          <span className="text-black-primary font-medium">
-            Adinda Putri
-          </span>
+          <span className="text-black-primary font-medium">Adinda Putri</span>
           <span className="text-[14px] text-gray-primary">
             Computer Science
           </span>
         </div>
         <Image
-          src="/"
+          src="/profile.jpg"
           alt="Profile Picture"
           width={48}
           height={48}
-          className="rounded-full w-13 h-13 bg-blue-900"
+          className="rounded-full w-13 h-13 bg-indigo-primary border-2 border-gray-500"
         />
       </div>
     </nav>
