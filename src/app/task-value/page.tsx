@@ -3,6 +3,8 @@
 import { CircleAlert, CircleHelp, CircleCheck, Calendar, Clock, CirclePlus } from "lucide-react";
 import { useState } from "react";
 import Image from "next/image";
+import AddTaskModal from "@/components/ui/task-form";
+import toast from "react-hot-toast";
 
 type TaskPriority = "Focus First" | "If You Have Energy" | "Safe to Minimize";
 
@@ -30,6 +32,17 @@ type PriorityCard = {
 
 export default function TaskValue() {
   const [showAddTaskModal, setShowAddTaskModal] = useState(false);
+
+  const handleAddTask = (task: {
+    taskName: string;
+    description: string;
+    deadline: string;
+  }) => {
+    // TODO: Implement task creation logic
+    // * For now, print to console to debug
+    console.log("New task:", task);
+    toast.success("Task added successfully!");
+  };
 
   const priorityCards: PriorityCard[] = [
     {
@@ -373,6 +386,13 @@ export default function TaskValue() {
           ))}
         </div>
       </div>
+
+      {/* Add Task Modal */}
+      <AddTaskModal
+        isOpen={showAddTaskModal}
+        onClose={() => setShowAddTaskModal(false)}
+        onSubmit={handleAddTask}
+      />
     </div>
   );
 }
