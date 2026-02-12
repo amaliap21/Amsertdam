@@ -3,6 +3,8 @@
 import { CirclePlus, Pencil } from "lucide-react";
 import { useState } from "react";
 import Image from "next/image";
+import CreateFlashcardModal from "@/components/ui/flashcard-form";
+import toast from "react-hot-toast";
 
 type FlashcardDeck = {
   id: string;
@@ -14,6 +16,16 @@ type FlashcardDeck = {
 
 export default function Flashcards() {
   const [showCreateModal, setShowCreateModal] = useState(false);
+
+  const handleCreateFlashcard = (data: {
+    deckName: string;
+    file: File | null;
+  }) => {
+    // TODO: Implement flashcard creation logic
+    // * For now just print to console
+    console.log("New flashcard deck:", data);
+    toast.success("Flashcard deck created successfully!");
+  };
 
   const decks: FlashcardDeck[] = [
     {
@@ -111,6 +123,13 @@ export default function Flashcards() {
           ))}
         </div>
       </div>
+
+      {/* Create Flashcard Modal */}
+      <CreateFlashcardModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onSubmit={handleCreateFlashcard}
+      />
     </div>
   );
 }
