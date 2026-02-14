@@ -1,44 +1,44 @@
 "use client";
 
 import { Download } from "lucide-react";
-
 import { useState } from "react";
+import ExportModal from "@/components/ui/export-form";
 
 export default function PriorityPlanner() {
   const events = [
     {
       id: 1,
       title: "Class",
-      color: "bg-green-primary",
+      date: "2026-02-14",
       time: "8 AM - 10 AM",
       subject: "Data Structures and Algorithms",
+      color: "bg-green-primary",
       bgColor: "bg-[#84E0A31A]",
     },
     {
       id: 2,
       title: "Task",
-      color: "bg-blue-primary",
+      date: "2026-02-15",
       time: "10 AM - 12 PM",
       subject: "Operating System Project",
+      color: "bg-blue-primary",
       bgColor: "bg-[#587ECE1A]",
     },
     {
       id: 3,
       title: "Self Study",
-      color: "bg-teal-primary",
+      date: "2026-02-17",
       time: "2 PM - 3 PM",
       subject: "Computer Network",
+      color: "bg-teal-primary",
       bgColor: "bg-[#6EAFBB1A]",
     },
   ];
 
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [selectedDay, setSelectedDay] = useState<number | null>(
-    new Date().getDate()
-  );
-  const [selected, setSelected] = useState<string>(
-    new Date().toLocaleDateString("en-US", { weekday: "long" })
-  );
+  const [selectedDay, setSelectedDay] = useState<number>(new Date().getDate());
+
+  const [selected, setSelected] = useState<"Day" | "Week" | "Month">("Day");
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -61,15 +61,86 @@ export default function PriorityPlanner() {
     calendarDays.push(day);
   }
 
+  const previousDay = () => {
+    const newDate = new Date(year, month, selectedDay - 1);
+    setCurrentDate(newDate);
+    setSelectedDay(newDate.getDate());
+  };
+
+  const nextDay = () => {
+    const newDate = new Date(year, month, selectedDay + 1);
+    setCurrentDate(newDate);
+    setSelectedDay(newDate.getDate());
+  };
+
+  const previousWeek = () => {
+    const newDate = new Date(year, month, selectedDay - 7);
+    setCurrentDate(newDate);
+    setSelectedDay(newDate.getDate());
+  };
+
+  const nextWeek = () => {
+    const newDate = new Date(year, month, selectedDay + 7);
+    setCurrentDate(newDate);
+    setSelectedDay(newDate.getDate());
+  };
+
   const previousMonth = () => {
-    setCurrentDate(new Date(year, month - 1, 1));
-    setSelectedDay(null);
+    const newDate = new Date(year, month - 1, 1);
+    setCurrentDate(newDate);
+    setSelectedDay(1);
   };
 
   const nextMonth = () => {
-    setCurrentDate(new Date(year, month + 1, 1));
-    setSelectedDay(null);
+    const newDate = new Date(year, month + 1, 1);
+    setCurrentDate(newDate);
+    setSelectedDay(1);
   };
+
+  const getFilteredEvents = () => {
+    const selectedDate = new Date(year, month, selectedDay);
+
+    return events.filter((event) => {
+      const eventDate = new Date(event.date);
+
+      // DAY
+      if (selected === "Day") {
+        return eventDate.toDateString() === selectedDate.toDateString();
+      }
+
+      // WEEK
+      if (selected === "Week") {
+        const startOfWeek = new Date(selectedDate);
+        startOfWeek.setDate(selectedDate.getDate() - selectedDate.getDay());
+
+        const endOfWeek = new Date(startOfWeek);
+        endOfWeek.setDate(startOfWeek.getDate() + 6);
+
+        return eventDate >= startOfWeek && eventDate <= endOfWeek;
+      }
+
+      // MONTH
+      if (selected === "Month") {
+        return (
+          eventDate.getMonth() === month && eventDate.getFullYear() === year
+        );
+      }
+
+      return false;
+    });
+  };
+
+  const dayName =
+    selected.toLowerCase() === "day"
+      ? currentDate.toLocaleDateString("en-US", { weekday: "long" })
+      : selected.toLowerCase() === "week"
+        ? currentDate.toLocaleDateString("en-US", { weekday: "long" })
+        : selected.toLowerCase() === "month"
+          ? currentDate.toLocaleDateString("en-US", { weekday: "long" })
+          : "";
+
+  const [isExportOpen, setIsExportOpen] = useState(false);
+
   return (
     <div className="flex flex-col gap-9 px-14.75 py-11.5 w-full">
       {/* Header */}
@@ -83,7 +154,10 @@ export default function PriorityPlanner() {
           </p>
         </div>
 
-        <button className="flex flex-row gap-2 px-3 py-2 rounded-lg bg-indigo-primary text-white items-center cursor-pointer hover:bg-indigo-500 transition-colors">
+        <button
+          onClick={() => setIsExportOpen(true)}
+          className="flex flex-row gap-2 px-3 py-2 rounded-lg bg-indigo-primary text-white items-center cursor-pointer hover:bg-indigo-500 transition-colors"
+        >
           <Download size={16} />
           Export
         </button>
@@ -100,7 +174,7 @@ export default function PriorityPlanner() {
                 className={`px-5 py-1.5 rounded-lg cursor-pointer ${
                   selected === label ? "bg-white" : ""
                 }`}
-                onClick={() => setSelected(label)}
+                onClick={() => setSelected(label as "Day" | "Week" | "Month")}
               >
                 {label}
               </button>
@@ -109,7 +183,7 @@ export default function PriorityPlanner() {
 
           {/* types */}
           <div className="flex flex-row gap-9">
-            {events.map((event) => (
+            {getFilteredEvents().map((event) => (
               <div key={event.id} className="flex flex-row items-center gap-3">
                 <div className={`w-2 h-2 rounded-full ${event.color}`}></div>
                 <div className="flex-1">
@@ -125,9 +199,15 @@ export default function PriorityPlanner() {
           {/* Month Navigation */}
           <div className="flex items-end justify-between">
             <button
-              onClick={previousMonth}
+              onClick={
+                selected === "Day"
+                  ? previousDay
+                  : selected === "Week"
+                    ? previousWeek
+                    : previousMonth
+              }
               className="px-2 py-1 hover:bg-gray-100 rounded-lg transition-colors"
-              aria-label="Previous month"
+              aria-label="Previous"
             >
               <svg
                 className="w-5 h-5"
@@ -145,9 +225,15 @@ export default function PriorityPlanner() {
             </button>
             <h3 className="text-lg font-medium text-gray-900">{monthName}</h3>
             <button
-              onClick={nextMonth}
+              onClick={
+                selected === "Day"
+                  ? nextDay
+                  : selected === "Week"
+                    ? nextWeek
+                    : nextMonth
+              }
               className="px-2 py-1 hover:bg-gray-100 rounded-lg transition-colors"
-              aria-label="Next month"
+              aria-label="Next"
             >
               <svg
                 className="w-5 h-5"
@@ -175,11 +261,11 @@ export default function PriorityPlanner() {
         }}
       >
         <h1>
-          {selected}, {selectedDay} {monthName}
+          {dayName}, {selectedDay} {monthName}
         </h1>
 
         {/* cards iteration of events */}
-        {events.map((event) => (
+        {getFilteredEvents().map((event) => (
           <div
             key={event.id}
             className={`flex flex-col gap-2 px-5 py-3 w-full rounded-lg ${event.bgColor}`}
@@ -196,6 +282,12 @@ export default function PriorityPlanner() {
           </div>
         ))}
       </div>
+
+      <ExportModal
+        isOpen={isExportOpen}
+        onClose={() => setIsExportOpen(false)}
+        events={events}
+      />
     </div>
   );
 }
