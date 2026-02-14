@@ -27,7 +27,7 @@ export default function Dashboard() {
     {
       cardColor:
         "linear-gradient(288deg, rgba(229, 61, 61, 0.20) 34.38%, rgba(245, 150, 56, 0.20) 95.91%)",
-      type: "Dashboard",
+      type: "Focus First",
       icon: <CircleAlert size={20} className="text-[#E53D3D]" />,
       image: "red-task.svg",
       taskCount: 5,
@@ -188,25 +188,25 @@ export default function Dashboard() {
             {taskItems.map((item, index) => (
               <div
                 key={index}
-                className="flex-col gap-2.5 px-4 pt-4 rounded-lg w-1/3"
+                className="flex-col gap-2.5 pt-4 rounded-lg w-1/3"
                 style={{
                   background: item.cardColor,
                 }}
               >
-                <div className="flex flex-row justify-between items-center">
+                <div className="flex flex-row justify-between items-center px-4">
                   <h1 className="text-sm text-black-primary font-medium ">
                     {item.type}
                   </h1>
                   {item.icon}
                 </div>
 
-                <div className="flex flex-row">
+                <div className="flex flex-row gap-1">
                   <Image
                     src={item.image}
                     alt={`${item.type} Tasks Graph`}
-                    width={185}
+                    width={105}
                     height={87}
-                    className="w-46.25 h-21.75"
+                    className="w-auto h-auto"
                   />
                   <div>
                     <h1 className="text-sm">
