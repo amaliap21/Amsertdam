@@ -3,6 +3,7 @@
 import { CirclePlus, Pencil } from "lucide-react";
 import { useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import CreateFlashcardModal from "@/components/ui/flashcard-form";
 import toast from "react-hot-toast";
 
@@ -114,9 +115,12 @@ export default function Flashcards() {
                     </p>
                     <p className="text-xs text-gray-primary">Cards</p>
                   </div>
-                  <button className="px-4 py-1.5 bg-indigo-primary text-white text-sm rounded-lg hover:bg-indigo-600 transition-colors">
+                  <Link
+                    href={`/flashcards/${deck.id}/review`}
+                    className="px-4 py-1.5 bg-indigo-primary text-white text-sm rounded-lg hover:bg-indigo-600 transition-colors"
+                  >
                     Review
-                  </button>
+                  </Link>
                 </div>
               </div>
             </div>
