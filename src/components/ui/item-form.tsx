@@ -3,8 +3,10 @@ import { X, CalendarDays, ChevronUp, ChevronDown, CirclePlus } from "lucide-reac
 import React, { useState } from "react";
 import { formatDate } from "@/lib/utils";
 
-type AssessmentFormProps = {
-  onSubmit: (assessment: {
+type ItemFormProps = {
+  assessmentName: string;
+  assessmentWeight: number;
+  onSubmit: (item: {
     name: string;
     weight: number;
     score?: number;
@@ -13,10 +15,12 @@ type AssessmentFormProps = {
   onCancel: () => void;
 };
 
-export default function AssessmentForm({
+export default function ItemForm({
+  assessmentName,
+  assessmentWeight,
   onSubmit,
   onCancel,
-}: AssessmentFormProps) {
+}: ItemFormProps) {
   const [name, setName] = useState("");
   const [weight, setWeight] = useState<number | "">("");
   const [deadline, setDeadline] = useState("");
@@ -50,23 +54,26 @@ export default function AssessmentForm({
           {/* Header */}
           <div className="mb-5">
             <h2 className="text-base font-medium text-black-primary">
-              Add New Assessment
+              Add New Item
             </h2>
             <p className="text-sm text-gray-primary mt-[7px]">
-              Enter the assessment detail below
+              Enter the item detail below for{" "}
+              <span className="font-medium text-black-primary">
+                {assessmentName}
+              </span>
             </p>
           </div>
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-            {/* Assessment Name */}
+            {/* Item Name */}
             <div className="flex flex-col gap-2">
               <label className="text-sm font-medium text-black-primary">
-                Assessment Name<span className="text-red-500">*</span>
+                Item Name<span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
-                placeholder="e.g., Project"
+                placeholder="e.g., Project 1"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 className="w-full px-4 py-[10px] border border-[#b1b1b1] rounded-xl text-sm text-black-primary placeholder:text-gray-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent"
@@ -83,7 +90,7 @@ export default function AssessmentForm({
                 <input
                   type="number"
                   min={0}
-                  max={100}
+                  max={assessmentWeight}
                   placeholder="0"
                   value={weight}
                   onChange={(e) =>
@@ -95,7 +102,7 @@ export default function AssessmentForm({
                   required
                 />
                 <span className="text-sm font-medium text-black-primary whitespace-nowrap">
-                  / 100%
+                  / {assessmentWeight}%
                 </span>
               </div>
             </div>
@@ -164,7 +171,7 @@ export default function AssessmentForm({
               className="flex items-center justify-center gap-2 w-full py-[10px] bg-indigo-primary text-white text-sm rounded-lg hover:bg-indigo-500 transition-colors"
             >
               <CirclePlus size={20} />
-              Add Assessment
+              Add Item
             </button>
           </form>
         </div>
