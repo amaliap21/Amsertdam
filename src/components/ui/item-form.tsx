@@ -1,5 +1,11 @@
 "use client";
-import { X, CalendarDays, ChevronUp, ChevronDown, CirclePlus } from "lucide-react";
+import {
+  X,
+  CalendarDays,
+  ChevronUp,
+  ChevronDown,
+  CirclePlus,
+} from "lucide-react";
 import React, { useState } from "react";
 import { formatDate } from "@/lib/utils";
 
@@ -41,22 +47,22 @@ export default function ItemForm({
       className="fixed inset-0 flex justify-center items-center z-50"
       style={{ background: "rgba(0, 0, 0, 0.64)" }}
     >
-      <div className="bg-white rounded-2xl shadow-lg w-[511px] relative">
+      <div className="bg-white rounded-2xl shadow-lg w-127.75 relative">
         {/* Close button */}
         <button
           onClick={onCancel}
-          className="absolute top-[27px] right-6 text-gray-400 hover:text-gray-600 transition-colors"
+          className="absolute top-6.75 right-6 text-gray-400 hover:text-gray-600 transition-colors"
         >
           <X size={20} />
         </button>
 
-        <div className="px-6 pt-[35px] pb-[35px]">
+        <div className="px-6 pt-8.75 pb-8.75">
           {/* Header */}
           <div className="mb-5">
             <h2 className="text-base font-medium text-black-primary">
               Add New Item
             </h2>
-            <p className="text-sm text-gray-primary mt-[7px]">
+            <p className="text-sm text-gray-primary mt-1.75">
               Enter the item detail below for{" "}
               <span className="font-medium text-black-primary">
                 {assessmentName}
@@ -76,7 +82,7 @@ export default function ItemForm({
                 placeholder="e.g., Project 1"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full px-4 py-[10px] border border-[#b1b1b1] rounded-xl text-sm text-black-primary placeholder:text-gray-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent"
+                className="w-full px-4 py-2.5 border border-[#b1b1b1] rounded-xl text-sm text-black-primary placeholder:text-gray-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent"
                 required
               />
             </div>
@@ -86,7 +92,7 @@ export default function ItemForm({
               <label className="text-sm font-medium text-black-primary">
                 Weight<span className="text-red-500">*</span>
               </label>
-              <div className="flex items-center justify-between border border-[#b1b1b1] rounded-xl px-4 py-[10px] focus-within:ring-2 focus-within:ring-indigo-primary focus-within:border-transparent">
+              <div className="flex items-center justify-between border border-[#b1b1b1] rounded-xl px-4 py-2.5 focus-within:ring-2 focus-within:ring-indigo-primary focus-within:border-transparent">
                 <input
                   type="number"
                   min={0}
@@ -112,8 +118,11 @@ export default function ItemForm({
               <label className="text-sm font-medium text-black-primary">
                 Deadline
               </label>
-              <div className="flex items-center gap-3 border border-[#b1b1b1] rounded-xl px-4 py-[10px] focus-within:ring-2 focus-within:ring-indigo-primary focus-within:border-transparent">
-                <CalendarDays size={20} className="text-gray-primary shrink-0" />
+              <div className="flex items-center gap-3 border border-[#b1b1b1] rounded-xl px-4 py-2.5 focus-within:ring-2 focus-within:ring-indigo-primary focus-within:border-transparent">
+                <CalendarDays
+                  size={20}
+                  className="text-gray-primary shrink-0"
+                />
                 <input
                   type="date"
                   value={deadline}
@@ -128,7 +137,7 @@ export default function ItemForm({
               <label className="text-sm font-medium text-black-primary">
                 Mark
               </label>
-              <div className="flex items-center justify-between border border-[#b1b1b1] rounded-xl px-4 py-[10px] focus-within:ring-2 focus-within:ring-indigo-primary focus-within:border-transparent">
+              <div className="flex items-center justify-between border border-[#b1b1b1] rounded-xl px-4 py-2.5 focus-within:ring-2 focus-within:ring-indigo-primary focus-within:border-transparent">
                 <input
                   type="number"
                   min={0}
@@ -136,9 +145,7 @@ export default function ItemForm({
                   placeholder="0"
                   value={mark}
                   onChange={(e) =>
-                    setMark(
-                      e.target.value === "" ? "" : Number(e.target.value),
-                    )
+                    setMark(e.target.value === "" ? "" : Number(e.target.value))
                   }
                   className="text-sm text-gray-primary w-full focus:outline-none appearance-none"
                 />
@@ -168,7 +175,7 @@ export default function ItemForm({
             {/* Submit */}
             <button
               type="submit"
-              className="flex items-center justify-center gap-2 w-full py-[10px] bg-indigo-primary text-white text-sm rounded-lg hover:bg-indigo-500 transition-colors"
+              className="flex items-center justify-center gap-2 w-full py-2.5 bg-indigo-primary text-white text-sm rounded-lg hover:bg-indigo-500 transition-colors"
             >
               <CirclePlus size={20} />
               Add Item

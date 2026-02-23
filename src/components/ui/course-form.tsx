@@ -10,6 +10,7 @@ type CourseFormProps = {
     toTime: number;
     typeTracking: string;
     threshold: number;
+    passingGrade: number;
     assessments?: {
       name: string;
       weight: number;
@@ -31,6 +32,7 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
     credits: 0,
     scheduleDay: "",
     time: "",
+    passingGrade: 75,
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -42,7 +44,8 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
       fromTime: parseInt(formData.time.split(":")[0]) || 0,
       toTime: (parseInt(formData.time.split(":")[0]) || 0) + 2,
       typeTracking: "On Track",
-      threshold: 0,
+      threshold: formData.passingGrade,
+      passingGrade: formData.passingGrade,
       passingRequirement: "",
       assessments: [] as {
         name: string;
@@ -163,6 +166,31 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent"
                 required
               />
+            </div>
+          </div>
+
+          {/* Passing Grade */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Passing Grade<span className="text-red-500">*</span>
+            </label>
+            <div className="flex items-center justify-between border border-gray-300 rounded-lg px-4 py-2.5 focus-within:ring-2 focus-within:ring-indigo-primary focus-within:border-transparent">
+              <input
+                type="number"
+                min={0}
+                max={100}
+                placeholder="75"
+                value={formData.passingGrade || ""}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    passingGrade: parseFloat(e.target.value) || 75,
+                  })
+                }
+                className="w-full focus:outline-none appearance-none text-sm"
+                required
+              />
+              <span className="text-sm font-medium text-gray-500 whitespace-nowrap">/ 100</span>
             </div>
           </div>
 

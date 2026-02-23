@@ -22,6 +22,17 @@ type Assessment = {
   items?: SubItem[];
 };
 
+type ThresholdResult = {
+  current_grade: number;
+  passing_grade: number;
+  gap: number;
+  requirements: { name: string; weight: number; min_score: number; is_feasible: boolean }[];
+  status: string;
+  safety_margin: number;
+  is_feasible: boolean;
+  message: string;
+};
+
 type Courses = {
   courseName: string;
   credits: number;
@@ -29,19 +40,55 @@ type Courses = {
   toTime: number;
   typeTracking: string;
   threshold: number;
+  passingGrade?: number;
   assessments?: Assessment[];
   passingRequirement?: string;
   requirements?: {
     name: string;
     score: number;
   }[];
+  thresholdResult?: ThresholdResult;
+  isCalculating?: boolean;
 };
 
-const calculateAverage = (scores: number[]): number => {
-  if (scores.length === 0) return 0;
-  const sum = scores.reduce((acc, score) => acc + score, 0);
-  return parseFloat((sum / scores.length).toFixed(2));
-};
+// Flatten sub-items into a single effective score for an assessment
+function effectiveScore(a: Assessment): number | undefined {
+  if (a.items && a.items.length > 0) {
+    const totalWeight = a.items.reduce((s, i) => s + i.weight, 0);
+    const allGraded = a.items.every((i) => i.score !== undefined);
+    if (!allGraded || totalWeight === 0) return undefined;
+    return a.items.reduce((s, i) => s + i.weight * (i.score ?? 0), 0) / totalWeight;
+  }
+  return a.score;
+}
+
+async function callGraduationAPI(
+  assessments: Assessment[],
+  passingGrade: number,
+): Promise<ThresholdResult | null> {
+  const payload = {
+    passing_grade: passingGrade,
+    assessments: assessments.map((a) => {
+      const score = effectiveScore(a);
+      return score !== undefined
+        ? { name: a.name, weight: a.weight, score }
+        : { name: a.name, weight: a.weight };
+    }),
+  };
+
+  const totalWeight = assessments.reduce((s, a) => s + a.weight, 0);
+  if (Math.abs(totalWeight - 100) > 0.5) return null; // weights must sum to 100
+
+  const res = await fetch("/api/python/graduation_threshold", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  if (data.error) return null;
+  return data as ThresholdResult;
+}
 
 export default function PassingTarget() {
   const [expandedCourses, setExpandedCourses] = useState<number[]>([]);
@@ -170,6 +217,39 @@ export default function PassingTarget() {
     },
   ]);
 
+  // Call the Python API and update a course's threshold result
+  const triggerCompute = async (index: number, courses: Courses[]) => {
+    const course = courses[index];
+    if (!course.assessments?.length) return;
+
+    setCourseItems((prev) =>
+      prev.map((c, i) => (i === index ? { ...c, isCalculating: true } : c)),
+    );
+
+    const result = await callGraduationAPI(
+      course.assessments,
+      course.passingGrade ?? 75,
+    );
+
+    setCourseItems((prev) =>
+      prev.map((c, i) => {
+        if (i !== index) return c;
+        if (!result) return { ...c, isCalculating: false };
+        return {
+          ...c,
+          isCalculating: false,
+          typeTracking: result.status,
+          passingRequirement: result.message,
+          thresholdResult: result,
+          requirements: result.requirements.map((r) => ({
+            name: r.name,
+            score: r.min_score,
+          })),
+        };
+      }),
+    );
+  };
+
   const toggleCourse = (index: number) => {
     setExpandedCourses((prev) =>
       prev.includes(index) ? prev.filter((i) => i !== index) : [...prev, index],
@@ -177,13 +257,8 @@ export default function PassingTarget() {
   };
 
   const handleAddCourse = (newCourse: Courses) => {
-    const threshold = calculateAverage(
-      newCourse.requirements?.map((req) => req.score) || [],
-    );
-    setCourseItems((prevCourses) => [
-      ...prevCourses,
-      { ...newCourse, threshold },
-    ]);
+    const updated = [...courseItems, { ...newCourse }];
+    setCourseItems(updated);
     setShowForm(false);
   };
 
@@ -191,16 +266,18 @@ export default function PassingTarget() {
     courseIndex: number,
     assessment: { name: string; weight: number; score?: number; date?: string },
   ) => {
-    setCourseItems((prev) =>
-      prev.map((course, i) =>
+    setCourseItems((prev) => {
+      const updated = prev.map((course, i) =>
         i !== courseIndex
           ? course
           : {
               ...course,
               assessments: [...(course.assessments || []), assessment],
             },
-      ),
-    );
+      );
+      triggerCompute(courseIndex, updated);
+      return updated;
+    });
     setAddingAssessmentToCourse(null);
   };
 
@@ -209,8 +286,8 @@ export default function PassingTarget() {
     assessIdx: number,
     item: { name: string; weight: number; score?: number; date?: string },
   ) => {
-    setCourseItems((prev) =>
-      prev.map((course, ci) =>
+    setCourseItems((prev) => {
+      const updated = prev.map((course, ci) =>
         ci !== courseIndex
           ? course
           : {
@@ -224,8 +301,10 @@ export default function PassingTarget() {
                     },
               ),
             },
-      ),
-    );
+      );
+      triggerCompute(courseIndex, updated);
+      return updated;
+    });
     setAddingItemTo(null);
   };
 
@@ -291,6 +370,7 @@ export default function PassingTarget() {
     isEditing: boolean | undefined,
     onScoreChange: (val: number | undefined) => void,
     onEditToggle: (editing: boolean) => void,
+    courseIndex: number,
   ) => {
     if (isEditing) {
       return (
@@ -305,7 +385,16 @@ export default function PassingTarget() {
             className="border border-gray-300 rounded px-2 py-1 text-sm w-24"
           />
           <button
-            onClick={() => onEditToggle(false)}
+            onClick={() => {
+              onEditToggle(false);
+              // Recompute after score is saved; use a tiny delay so state settles
+              setTimeout(() => {
+                setCourseItems((prev) => {
+                  triggerCompute(courseIndex, prev);
+                  return prev;
+                });
+              }, 50);
+            }}
             className="text-indigo-primary hover:text-indigo-500 transition-colors"
           >
             <Check size={20} />
@@ -374,10 +463,14 @@ export default function PassingTarget() {
                         border:
                           item.typeTracking === "On Track"
                             ? "1px solid rgba(115, 197, 143, 0.20)"
+                            : item.typeTracking === "At Risk"
+                            ? "1px solid rgba(197, 115, 115, 0.20)"
                             : "1px solid rgba(197, 178, 115, 0.20)",
                         background:
                           item.typeTracking === "On Track"
                             ? "rgba(132, 224, 163, 0.20)"
+                            : item.typeTracking === "At Risk"
+                            ? "rgba(224, 132, 132, 0.20)"
                             : "rgba(224, 216, 132, 0.20)",
                       }}
                     >
@@ -392,16 +485,32 @@ export default function PassingTarget() {
                 </div>
 
                 <div className="flex flex-row gap-4 items-center">
-                  <div>
-                    <p className="text-xs text-gray-primary text-right">
-                      Pass Threshold
-                    </p>
-                    <p className="text-right text-2xl font-medium">
-                      {item.threshold}
-                    </p>
-                  </div>
+                  {item.isCalculating ? (
+                    <div className="flex flex-col items-end gap-1">
+                      <p className="text-xs text-gray-primary">Calculating…</p>
+                      <div className="w-6 h-6 border-2 border-indigo-primary border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  ) : (
+                    <div className="flex flex-row gap-5 items-end">
+                      {item.thresholdResult && (
+                        <div>
+                          <p className="text-xs text-gray-primary text-right">Current Grade</p>
+                          <p className="text-right text-2xl font-medium text-gray-500">
+                            {item.thresholdResult.current_grade}
+                          </p>
+                        </div>
+                      )}
+                      <div>
+                        <p className="text-xs text-gray-primary text-right">
+                          Pass Threshold
+                        </p>
+                        <p className="text-right text-2xl font-medium">
+                          {item.passingGrade ?? item.threshold}
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
-                  {/* arrow - rotates when expanded */}
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
                     width="20"
@@ -428,12 +537,37 @@ export default function PassingTarget() {
                 <div className="flex flex-col gap-5 px-6 pt-1 pb-5">
                   {/* Passing requirement banner */}
                   {item.passingRequirement && (
-                    <p
-                      className="text-sm text-[#5D5D5D] px-6 py-4 rounded-xl"
-                      style={{ background: "rgba(61, 66, 229, 0.10)" }}
+                    <div
+                      className="text-sm text-[#5D5D5D] px-6 py-4 rounded-xl flex flex-col gap-1"
+                      style={{
+                        background: item.thresholdResult?.is_feasible === false
+                          ? "rgba(229, 61, 61, 0.08)"
+                          : "rgba(61, 66, 229, 0.10)",
+                      }}
                     >
-                      {renderPassingRequirement(item)}
-                    </p>
+                      <p>{renderPassingRequirement(item)}</p>
+                      {item.thresholdResult && (
+                        <p className="text-xs text-gray-primary mt-1">
+                          Current grade:{" "}
+                          <span className="font-semibold text-black-primary">
+                            {item.thresholdResult.current_grade}
+                          </span>
+                          {item.thresholdResult.gap > 0 && (
+                            <> — gap of{" "}
+                              <span className="font-semibold text-black-primary">
+                                {item.thresholdResult.gap}
+                              </span>{" "}
+                              points to passing
+                            </>
+                          )}
+                          {!item.thresholdResult.is_feasible && (
+                            <span className="ml-2 text-red-500 font-semibold">
+                              ⚠ Target may not be achievable
+                            </span>
+                          )}
+                        </p>
+                      )}
+                    </div>
                   )}
 
                   {/* Assessment Breakdown header */}
@@ -493,6 +627,7 @@ export default function PassingTarget() {
                                         ].isEditing = editing;
                                         return updated;
                                       }),
+                                    index,
                                   )}
                                 </div>
                               )}
@@ -550,6 +685,7 @@ export default function PassingTarget() {
                                         ].items![subIdx].isEditing = editing;
                                         return updated;
                                       }),
+                                    index,
                                   )}
                                 </div>
                               </div>
