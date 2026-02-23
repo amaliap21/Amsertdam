@@ -2,6 +2,25 @@
 import { CirclePlus, PencilLine, Check } from "lucide-react";
 import { useState } from "react";
 import CourseForm from "@/components/ui/course-form";
+import AssessmentForm from "@/components/ui/assessment-form";
+import ItemForm from "@/components/ui/item-form";
+
+type SubItem = {
+  name: string;
+  weight: number;
+  score?: number;
+  date?: string;
+  isEditing?: boolean;
+};
+
+type Assessment = {
+  name: string;
+  weight: number;
+  score?: number;
+  date?: string;
+  isEditing?: boolean;
+  items?: SubItem[];
+};
 
 type Courses = {
   courseName: string;
@@ -10,13 +29,7 @@ type Courses = {
   toTime: number;
   typeTracking: string;
   threshold: number;
-  assessments?: {
-    name: string;
-    weight: number;
-    score?: number;
-    date?: string;
-    isEditing?: boolean;
-  }[];
+  assessments?: Assessment[];
   passingRequirement?: string;
   requirements?: {
     name: string;
@@ -33,6 +46,8 @@ const calculateAverage = (scores: number[]): number => {
 export default function PassingTarget() {
   const [expandedCourses, setExpandedCourses] = useState<number[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const [addingAssessmentToCourse, setAddingAssessmentToCourse] = useState<number | null>(null);
+  const [addingItemTo, setAddingItemTo] = useState<{ courseIndex: number; assessIdx: number } | null>(null);
   const [courseItems, setCourseItems] = useState<Courses[]>([
     {
       courseName: "Introduction to Computer Science",
@@ -44,9 +59,31 @@ export default function PassingTarget() {
       passingRequirement:
         "To pass this course, you need at least 85.9 on Project, 62.3 on Midterm Exam, and 80.7 on Final Exam",
       assessments: [
-        { name: "Project", weight: 30, score: 80, date: "Feb 15" },
-        { name: "Midterm Exam", weight: 35, score: 75, date: "Mar 10" },
-        { name: "Final Exam", weight: 35, date: "May 25" },
+        {
+          name: "Project",
+          weight: 30,
+          items: [
+            {
+              name: "Tucil 1",
+              weight: 15,
+              score: 80,
+              date: "February, 15th 2025",
+            },
+            {
+              name: "Tucil 2",
+              weight: 15,
+              score: 70,
+              date: "March, 20th 2025",
+            },
+          ],
+        },
+        {
+          name: "Midterm Exam",
+          weight: 35,
+          score: 75,
+          date: "March, 10th 2025",
+        },
+        { name: "Final Exam", weight: 35, date: "May. 25th 2025" },
       ],
       requirements: [
         { name: "Project", score: 85.9 },
@@ -135,20 +172,61 @@ export default function PassingTarget() {
 
   const toggleCourse = (index: number) => {
     setExpandedCourses((prev) =>
-      prev.includes(index) ? prev.filter((i) => i !== index) : [...prev, index]
+      prev.includes(index) ? prev.filter((i) => i !== index) : [...prev, index],
     );
   };
 
   const handleAddCourse = (newCourse: Courses) => {
     const threshold = calculateAverage(
-      newCourse.requirements?.map((req) => req.score) || []
+      newCourse.requirements?.map((req) => req.score) || [],
     );
-
     setCourseItems((prevCourses) => [
       ...prevCourses,
       { ...newCourse, threshold },
     ]);
     setShowForm(false);
+  };
+
+  const handleAddAssessment = (
+    courseIndex: number,
+    assessment: { name: string; weight: number; score?: number; date?: string },
+  ) => {
+    setCourseItems((prev) =>
+      prev.map((course, i) =>
+        i !== courseIndex
+          ? course
+          : {
+              ...course,
+              assessments: [...(course.assessments || []), assessment],
+            },
+      ),
+    );
+    setAddingAssessmentToCourse(null);
+  };
+
+  const handleAddItem = (
+    courseIndex: number,
+    assessIdx: number,
+    item: { name: string; weight: number; score?: number; date?: string },
+  ) => {
+    setCourseItems((prev) =>
+      prev.map((course, ci) =>
+        ci !== courseIndex
+          ? course
+          : {
+              ...course,
+              assessments: course.assessments?.map((assessment, ai) =>
+                ai !== assessIdx
+                  ? assessment
+                  : {
+                      ...assessment,
+                      items: [...(assessment.items || []), item],
+                    },
+              ),
+            },
+      ),
+    );
+    setAddingItemTo(null);
   };
 
   const renderPassingRequirement = (course: Courses) => {
@@ -165,9 +243,9 @@ export default function PassingTarget() {
     if (details.every((req) => req.score === details[0].score)) {
       parts.push("To pass this course, you need at least ");
       parts.push(
-        <span key="overall-score" className="text-indigo-primary">
+        <span key="overall-score" className="font-semibold text-indigo-primary">
           {details[0].score}
-        </span>
+        </span>,
       );
       parts.push(" overall");
       return <>{parts}</>;
@@ -177,15 +255,21 @@ export default function PassingTarget() {
 
     details.forEach((req, index) => {
       parts.push(
-        <span key={`score-${index}`} className="text-indigo-primary">
-          {req.score}
-        </span>
+        <span
+          key={`score-${index}`}
+          className="font-semibold text-indigo-primary"
+        >
+          {req.score}{" "}
+        </span>,
       );
-      parts.push(" on ");
+      parts.push("on ");
       parts.push(
-        <span key={`name-${index}`} className="text-black-primary">
+        <span
+          key={`name-${index}`}
+          className="font-semibold text-black-primary"
+        >
           {req.name}
-        </span>
+        </span>,
       );
 
       if (index < details.length - 1) {
@@ -200,6 +284,50 @@ export default function PassingTarget() {
     });
 
     return <>{parts}</>;
+  };
+
+  const renderScoreField = (
+    value: number | undefined,
+    isEditing: boolean | undefined,
+    onScoreChange: (val: number | undefined) => void,
+    onEditToggle: (editing: boolean) => void,
+  ) => {
+    if (isEditing) {
+      return (
+        <>
+          <input
+            type="number"
+            value={value ?? ""}
+            onChange={(e) => {
+              const parsed = parseFloat(e.target.value);
+              onScoreChange(isNaN(parsed) ? undefined : parsed);
+            }}
+            className="border border-gray-300 rounded px-2 py-1 text-sm w-24"
+          />
+          <button
+            onClick={() => onEditToggle(false)}
+            className="text-indigo-primary hover:text-indigo-500 transition-colors"
+          >
+            <Check size={20} />
+          </button>
+        </>
+      );
+    }
+    return (
+      <>
+        <p className="text-sm text-gray-primary">
+          Score:{" "}
+          <span className="font-semibold text-base text-black-primary">
+            {value !== undefined ? value : "-"}
+          </span>
+        </p>
+        <PencilLine
+          size={20}
+          className="text-indigo-primary cursor-pointer hover:text-indigo-500 transition-colors"
+          onClick={() => onEditToggle(true)}
+        />
+      </>
+    );
   };
 
   return (
@@ -258,14 +386,16 @@ export default function PassingTarget() {
                   </div>
 
                   <p className="text-gray-primary text-sm">
-                    {item.credits} credits • {item.fromTime}-{item.toTime}{" "}
+                    {item.credits} credits • {item.fromTime}–{item.toTime}{" "}
                     hours/week
                   </p>
                 </div>
 
                 <div className="flex flex-row gap-4 items-center">
                   <div>
-                    <p className="text-xs text-gray-primary">Pass Threshold</p>
+                    <p className="text-xs text-gray-primary text-right">
+                      Pass Threshold
+                    </p>
                     <p className="text-right text-2xl font-medium">
                       {item.threshold}
                     </p>
@@ -295,118 +425,145 @@ export default function PassingTarget() {
 
               {/* Expanded Content */}
               {expandedCourses.includes(index) && (
-                <div className="flex flex-col gap-5 px-4 pt-1 pb-4">
+                <div className="flex flex-col gap-5 px-6 pt-1 pb-5">
+                  {/* Passing requirement banner */}
                   {item.passingRequirement && (
                     <p
-                      className="text-sm text-[#5D5D5D] px-6 py-4 font-semibold"
-                      style={{
-                        borderRadius: "12px",
-                        background: "rgba(61, 66, 229, 0.10)",
-                      }}
+                      className="text-sm text-[#5D5D5D] px-6 py-4 rounded-xl"
+                      style={{ background: "rgba(61, 66, 229, 0.10)" }}
                     >
                       {renderPassingRequirement(item)}
                     </p>
                   )}
 
-                  <h3 className="font-semibold text-sm">
-                    Assessment Breakdown
-                  </h3>
+                  {/* Assessment Breakdown header */}
+                  <div className="flex flex-row justify-between items-center">
+                    <h3 className="text-base text-black-primary">
+                      Assessment Breakdown
+                    </h3>
+                    <button
+                      className="flex items-center gap-3 text-indigo-primary text-base font-medium cursor-pointer hover:underline"
+                      onClick={() => setAddingAssessmentToCourse(index)}
+                    >
+                      <CirclePlus size={20} />
+                      Add Assessment
+                    </button>
+                  </div>
 
+                  {/* Assessments list */}
                   <div className="flex flex-col gap-5">
-                    {item.assessments?.map((assessment, assessIdx) => (
-                      <div
-                        key={assessIdx}
-                        className="flex flex-row justify-between items-center bg-white rounded"
-                      >
-                        <div className="flex flex-col gap-2">
-                          <div className="flex flex-row gap-2 items-center">
-                            <p className="font-medium text-sm">
-                              {assessment.name}
-                            </p>
-                            <span className="text-xs text-gray-500">
-                              ({assessment.weight}%)
-                            </span>
-                          </div>
+                    {item.assessments?.map((assessment, assessIdx) => {
+                      const hasSubItems =
+                        assessment.items && assessment.items.length > 0;
 
-                          <div className="flex flex-row gap-2 items-center">
-                            {assessment.isEditing ? (
-                              <>
-                                <input
-                                  type="number"
-                                  value={assessment.score || ""}
-                                  onChange={(e) => {
-                                    const updatedScore = parseFloat(
-                                      e.target.value
-                                    );
-                                    setCourseItems((prevCourses) => {
-                                      const updatedCourses = [...prevCourses];
-                                      updatedCourses[index].assessments![
-                                        assessIdx
-                                      ].score = isNaN(updatedScore)
-                                        ? undefined
-                                        : updatedScore;
-                                      return updatedCourses;
-                                    });
-                                  }}
-                                  className="border border-gray-300 rounded px-2 py-1 text-sm w-30"
-                                />
-                                <button
-                                  onClick={() => {
-                                    setCourseItems((prevCourses) => {
-                                      const updatedCourses = [...prevCourses];
-                                      updatedCourses[index].assessments![
-                                        assessIdx
-                                      ].isEditing = false;
-                                      return updatedCourses;
-                                    });
-                                  }}
-                                  className="text-indigo-primary hover:text-indigo-500 transition-colors"
-                                >
-                                  <Check />
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <p className="text-gray-primary">
-                                  Score:{" "}
-                                  <span className="text-black-primary">
-                                    {assessment.score !== undefined
-                                      ? assessment.score
-                                      : "-"}
-                                  </span>
+                      return (
+                        <div key={assessIdx} className="flex flex-col gap-5">
+                          {/* Assessment row */}
+                          <div className="flex flex-row justify-between items-center">
+                            <div className="flex flex-col gap-2">
+                              {/* Name + weight */}
+                              <div className="flex flex-row gap-1 items-end">
+                                <p className="font-medium text-base text-black-primary">
+                                  {assessment.name}
                                 </p>
-                                <PencilLine
-                                  size={20}
-                                  className="text-indigo-primary cursor-pointer hover:text-indigo-500 transition-colors"
-                                  onClick={() => {
-                                    setCourseItems((prevCourses) => {
-                                      const updatedCourses = [...prevCourses];
-                                      updatedCourses[index].assessments![
-                                        assessIdx
-                                      ].isEditing = true;
-                                      return updatedCourses;
-                                    });
-                                  }}
-                                />
-                              </>
-                            )}
+                                <span className="text-sm text-gray-primary">
+                                  ({assessment.weight}%)
+                                </span>
+                              </div>
+
+                              {/* Score — only when no sub-items */}
+                              {!hasSubItems && (
+                                <div className="flex flex-row gap-1 items-center">
+                                  {renderScoreField(
+                                    assessment.score,
+                                    assessment.isEditing,
+                                    (val) =>
+                                      setCourseItems((prev) => {
+                                        const updated = [...prev];
+                                        updated[index].assessments![
+                                          assessIdx
+                                        ].score = val;
+                                        return updated;
+                                      }),
+                                    (editing) =>
+                                      setCourseItems((prev) => {
+                                        const updated = [...prev];
+                                        updated[index].assessments![
+                                          assessIdx
+                                        ].isEditing = editing;
+                                        return updated;
+                                      }),
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Right: Add Item + date (when no sub-items) */}
+                            <div className="flex flex-col items-end gap-1">
+                              <button
+                                className="flex items-center gap-3 text-indigo-primary text-base font-medium cursor-pointer hover:underline"
+                                onClick={() => setAddingItemTo({ courseIndex: index, assessIdx })}
+                              >
+                                <CirclePlus size={20} />
+                                Add Item
+                              </button>
+                              {!hasSubItems && assessment.date && (
+                                <p className="text-sm text-gray-primary text-right">
+                                  {assessment.date}
+                                </p>
+                              )}
+                            </div>
                           </div>
-                        </div>
 
-                        <div className="flex flex-col justify-center gap-2 items-end">
-                          <button className="flex items-center gap-3 text-indigo-primary text-sm font-medium cursor-pointer hover:underline">
-                            <CirclePlus size={16} />
-                            Add Item
-                          </button>
+                          {/* Sub-items */}
+                          {assessment.items?.map((subItem, subIdx) => (
+                            <div
+                              key={subIdx}
+                              className="flex flex-row justify-between items-center ml-6"
+                            >
+                              <div className="flex flex-col gap-2">
+                                <div className="flex flex-row gap-1 items-end">
+                                  <p className="font-medium text-base text-black-primary">
+                                    {subItem.name}
+                                  </p>
+                                  <span className="text-sm text-gray-primary">
+                                    ({subItem.weight}/{assessment.weight}%)
+                                  </span>
+                                </div>
+                                <div className="flex flex-row gap-1 items-center">
+                                  {renderScoreField(
+                                    subItem.score,
+                                    subItem.isEditing,
+                                    (val) =>
+                                      setCourseItems((prev) => {
+                                        const updated = [...prev];
+                                        updated[index].assessments![
+                                          assessIdx
+                                        ].items![subIdx].score = val;
+                                        return updated;
+                                      }),
+                                    (editing) =>
+                                      setCourseItems((prev) => {
+                                        const updated = [...prev];
+                                        updated[index].assessments![
+                                          assessIdx
+                                        ].items![subIdx].isEditing = editing;
+                                        return updated;
+                                      }),
+                                  )}
+                                </div>
+                              </div>
 
-                          {assessment.date && (
-                            <p className="text-xs text-gray-500">
-                              {assessment.date}
-                            </p>
-                          )}
+                              {subItem.date && (
+                                <p className="text-sm text-gray-primary text-right">
+                                  {subItem.date}
+                                </p>
+                              )}
+                            </div>
+                          ))}
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -415,13 +572,40 @@ export default function PassingTarget() {
         </div>
       </div>
 
-      {/* Modal Form */}
+      {/* Add Course Modal */}
       {showForm && (
         <CourseForm
           onSubmit={handleAddCourse}
           onCancel={() => setShowForm(false)}
         />
       )}
+
+      {/* Add Assessment Modal */}
+      {addingAssessmentToCourse !== null && (
+        <AssessmentForm
+          onSubmit={(assessment) =>
+            handleAddAssessment(addingAssessmentToCourse, assessment)
+          }
+          onCancel={() => setAddingAssessmentToCourse(null)}
+        />
+      )}
+
+      {/* Add Item Modal */}
+      {addingItemTo !== null && (() => {
+        const assessment =
+          courseItems[addingItemTo.courseIndex]?.assessments?.[addingItemTo.assessIdx];
+        if (!assessment) return null;
+        return (
+          <ItemForm
+            assessmentName={assessment.name}
+            assessmentWeight={assessment.weight}
+            onSubmit={(item) =>
+              handleAddItem(addingItemTo.courseIndex, addingItemTo.assessIdx, item)
+            }
+            onCancel={() => setAddingItemTo(null)}
+          />
+        );
+      })()}
     </div>
   );
 }
