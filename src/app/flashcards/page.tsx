@@ -1,49 +1,30 @@
 "use client";
 
-import { CirclePlus, Pencil } from "lucide-react";
-import { useState } from "react";
-import Image from "next/image";
+import { CirclePlus, Sparkles, Trash2 } from "lucide-react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import CreateFlashcardModal from "@/components/ui/flashcard-form";
-import toast from "react-hot-toast";
-
-type FlashcardDeck = {
-  id: string;
-  title: string;
-  description: string;
-  image: string;
-  cardCount: number;
-};
+import CreateFlashcardModal, {
+  type GeneratedFlashcard,
+} from "@/components/ui/flashcard-form";
+import { useStore } from "@/store/use-store";
 
 export default function Flashcards() {
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const decks = useStore((s) => s.decks);
+  const addDeck = useStore((s) => s.addDeck);
+  const fetchInitial = useStore((s) => s.fetchInitial);
+  const removeDeck = useStore((s) => s.removeDeck);
 
-  const handleCreateFlashcard = (data: {
+  useEffect(() => {
+    fetchInitial().catch(() => {});
+  }, [fetchInitial]);
+
+  const handleCreated = (data: {
     deckName: string;
-    file: File | null;
+    cards: GeneratedFlashcard[];
   }) => {
-    // TODO: Implement flashcard creation logic
-    // * For now just print to console
-    console.log("New flashcard deck:", data);
-    toast.success("Flashcard deck created successfully!");
+    addDeck(data);
   };
-
-  const decks: FlashcardDeck[] = [
-    {
-      id: "1",
-      title: "Database Terms",
-      description: "SQL and relational database vocabulary",
-      image: "/database-deck.jpg",
-      cardCount: 20,
-    },
-    {
-      id: "2",
-      title: "Data Structures",
-      description: "Key concepts from data structures",
-      image: "/data-structures-deck.jpg",
-      cardCount: 15,
-    },
-  ];
 
   return (
     <div className="min-h-screen bg-white px-14.75 py-11.5">
@@ -76,63 +57,78 @@ export default function Flashcards() {
         </div>
 
         {/* Deck Cards */}
-        <div className="grid grid-cols-2 gap-6">
-          {decks.map((deck) => (
-            <div
-              key={deck.id}
-              className="bg-white border border-gray-200 rounded-xl p-5 hover:shadow-md transition-shadow"
-            >
-              <div className="flex items-start gap-4">
-                {/* Deck Image */}
-                <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 bg-gray-100">
-                  <Image
-                    src={deck.image}
-                    alt={deck.title}
-                    width={64}
-                    height={64}
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-
-                {/* Deck Info */}
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <h3 className="text-base font-semibold text-black-primary">
-                      {deck.title}
-                    </h3>
-                    <button className="text-gray-400 hover:text-gray-600 transition-colors">
-                      <Pencil size={14} />
-                    </button>
+        {decks.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-gray-300 p-10 text-center">
+            <Sparkles size={28} className="mx-auto text-indigo-primary mb-3" />
+            <p className="text-sm text-black-primary font-medium mb-1">
+              No flashcard decks yet
+            </p>
+            <p className="text-sm text-gray-primary">
+              Click <span className="font-medium text-indigo-primary">Create Flashcard</span> to upload a PDF or image — AI will generate a deck for you.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-6">
+            {decks.map((deck) => (
+              <div
+                key={deck.id}
+                className="bg-white border border-gray-200 rounded-xl p-5 hover:shadow-md transition-shadow"
+              >
+                <div className="flex items-start gap-4">
+                  <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 bg-gradient-to-br from-indigo-primary/20 to-purple-300/30 flex items-center justify-center">
+                    <Sparkles size={24} className="text-indigo-primary" />
                   </div>
-                  <p className="text-sm text-gray-primary">{deck.description}</p>
-                </div>
 
-                {/* Review Button & Card Count */}
-                <div className="flex flex-col items-center gap-3">
-                  <div className="text-center">
-                    <p className="text-2xl font-semibold text-black-primary">
-                      {deck.cardCount}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3 className="text-base font-semibold text-black-primary truncate">
+                        {deck.title}
+                      </h3>
+                      <span className="text-[10px] font-medium text-indigo-primary bg-indigo-primary/10 px-1.5 py-0.5 rounded">
+                        AI
+                      </span>
+                      <button
+                        title="Delete deck"
+                        onClick={async () => {
+                          if (!confirm("Delete this deck?")) return;
+                          await removeDeck(deck.id);
+                        }}
+                        className="ml-auto text-red-400 hover:text-red-600"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                    <p className="text-sm text-gray-primary line-clamp-2">
+                      {deck.description}
                     </p>
-                    <p className="text-xs text-gray-primary">Cards</p>
                   </div>
-                  <Link
-                    href={`/flashcards/${deck.id}/review`}
-                    className="px-4 py-1.5 bg-indigo-primary text-white text-sm rounded-lg hover:bg-indigo-600 transition-colors"
-                  >
-                    Review
-                  </Link>
+
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="text-center">
+                      <p className="text-2xl font-semibold text-black-primary">
+                        {deck.cardCount}
+                      </p>
+                      <p className="text-xs text-gray-primary">Cards</p>
+                    </div>
+                    <Link
+                      href={`/flashcards/${deck.id}/review`}
+                      className="px-4 py-1.5 bg-indigo-primary text-white text-sm rounded-lg hover:bg-indigo-600 transition-colors"
+                    >
+                      Review
+                    </Link>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Create Flashcard Modal */}
       <CreateFlashcardModal
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
-        onSubmit={handleCreateFlashcard}
+        onCreated={handleCreated}
       />
     </div>
   );

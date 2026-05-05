@@ -1,11 +1,32 @@
 "use client";
 
-import { Download } from "lucide-react";
+import { Download, CirclePlus, Sparkles, Loader2 } from "lucide-react";
 import { useState } from "react";
 import ExportModal from "@/components/ui/export-form";
+import AddScheduleModal from "@/components/ui/add-schedule-form";
+import toast from "react-hot-toast";
+import { useStore, type TaskItem } from "@/store/use-store";
+
+type ScheduleType = "Class" | "Task" | "Self Study";
+type ScheduleEvent = {
+  id: number;
+  title: ScheduleType;
+  date: string;
+  time: string;
+  subject: string;
+  color: string;
+  bgColor: string;
+};
+
+const TYPE_STYLES: Record<ScheduleType, { color: string; bgColor: string }> = {
+  Class: { color: "bg-green-primary", bgColor: "bg-[#84E0A31A]" },
+  Task: { color: "bg-blue-primary", bgColor: "bg-[#587ECE1A]" },
+  "Self Study": { color: "bg-teal-primary", bgColor: "bg-[#6EAFBB1A]" },
+};
 
 export default function PriorityPlanner() {
-  const events = [
+  const tasks = useStore((s) => s.tasks);
+  const [events, setEvents] = useState<ScheduleEvent[]>([
     {
       id: 1,
       title: "Class",
@@ -33,7 +54,117 @@ export default function PriorityPlanner() {
       color: "bg-teal-primary",
       bgColor: "bg-[#6EAFBB1A]",
     },
-  ];
+  ]);
+
+  const handleAddSchedule = (data: {
+    title: string;
+    type: ScheduleType;
+    date: string;
+    time: string;
+  }) => {
+    const styles = TYPE_STYLES[data.type];
+    setEvents((prev) => [
+      ...prev,
+      {
+        id: prev.length ? Math.max(...prev.map((e) => e.id)) + 1 : 1,
+        title: data.type,
+        date: data.date,
+        time: data.time,
+        subject: data.title,
+        color: styles.color,
+        bgColor: styles.bgColor,
+      },
+    ]);
+  };
+
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+
+  const handleAiSchedule = async () => {
+    if (aiLoading) return;
+    if (!tasks.length) {
+      toast.error("Add or prioritize tasks first");
+      return;
+    }
+
+    setAiLoading(true);
+    const t = toast.loading("AI is building a schedule…");
+
+    try {
+      const resp = await fetch("/api/ai/priority-planner/schedule", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          tasks: tasks.map((task: TaskItem) => ({
+            id: task.id,
+            name: task.title,
+            course: task.course,
+            bucket: task.priority,
+            estimatedHours: Number.parseFloat(task.timeEstimate) || undefined,
+            deadline: task.date,
+          })),
+          constraints: {
+            startDate: new Date().toISOString().slice(0, 10),
+            workingHoursPerDay: 6,
+          },
+          contextNote: "Plan the most urgent items first and keep the load realistic.",
+        }),
+      });
+
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        throw new Error(body.error || `Failed (${resp.status})`);
+      }
+
+      const json = (await resp.json()) as {
+        summary: string;
+        warnings?: string[];
+        blocks: {
+          taskId?: string;
+          taskName: string;
+          course: string;
+          type: ScheduleType;
+          date: string;
+          startTime: string;
+          endTime: string;
+          rationale: string;
+        }[];
+      };
+
+      setEvents((prev) => [
+        ...prev,
+        ...json.blocks.map((block, index) => ({
+          id: prev.length + index + 1,
+          title: block.type,
+          date: block.date,
+          time: `${block.startTime} - ${block.endTime}`,
+          subject: `${block.taskName} · ${block.rationale}`,
+          color:
+            block.type === "Class"
+              ? "bg-green-primary"
+              : block.type === "Task"
+                ? "bg-blue-primary"
+                : "bg-teal-primary",
+          bgColor:
+            block.type === "Class"
+              ? "bg-[#84E0A31A]"
+              : block.type === "Task"
+                ? "bg-[#587ECE1A]"
+                : "bg-[#6EAFBB1A]",
+        })),
+      ]);
+      setAiSummary(json.summary);
+      if (json.warnings?.length) {
+        toast.success(`${json.summary} ${json.warnings[0] ?? ""}`, { id: t });
+      } else {
+        toast.success("AI schedule generated", { id: t });
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed", { id: t });
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState<number>(new Date().getDate());
@@ -140,28 +271,50 @@ export default function PriorityPlanner() {
           : "";
 
   const [isExportOpen, setIsExportOpen] = useState(false);
+  const [isAddScheduleOpen, setIsAddScheduleOpen] = useState(false);
 
   return (
     <div className="flex flex-col gap-9 px-14.75 py-11.5 w-full">
       {/* Header */}
       <div className="flex flex-row justify-between items-center">
         <div className="flex flex-col">
-          <h1 className="text-[20px] font-semibold text-black-primary">
-            Passing Target
+          <h1 className="text-[28px] font-semibold text-black-primary">
+            Priority Planner
           </h1>
           <p className="text-gray-primary font-medium text-sm">
-            Understanding the minimum you need to pass each course
+            Plan your week with realistic time blocks
           </p>
         </div>
 
-        <button
-          onClick={() => setIsExportOpen(true)}
-          className="flex flex-row gap-2 px-3 py-2 rounded-lg bg-indigo-primary text-white items-center cursor-pointer hover:bg-indigo-500 transition-colors"
-        >
-          <Download size={16} />
-          Export
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleAiSchedule}
+            disabled={aiLoading || !tasks.length}
+            className="flex flex-row gap-2 px-3 py-2 rounded-lg border border-indigo-primary text-indigo-primary items-center cursor-pointer hover:bg-indigo-primary/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {aiLoading ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Sparkles size={16} />
+            )}
+            Plan with AI
+          </button>
+          <button
+            onClick={() => setIsAddScheduleOpen(true)}
+            className="flex flex-row gap-2 px-3 py-2 rounded-lg bg-indigo-primary text-white items-center cursor-pointer hover:bg-indigo-500 transition-colors"
+          >
+            <CirclePlus size={16} />
+            Add Schedule
+          </button>
+        </div>
       </div>
+
+      {aiSummary && (
+        <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-gray-700">
+          <span className="font-medium text-indigo-primary">AI summary:</span>{" "}
+          {aiSummary}
+        </div>
+      )}
 
       {/* Content */}
       <div className="flex flex-col gap-6">
@@ -283,10 +436,26 @@ export default function PriorityPlanner() {
         ))}
       </div>
 
+      <div className="flex justify-center">
+        <button
+          onClick={() => setIsExportOpen(true)}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 text-black-primary hover:bg-gray-50 transition-colors"
+        >
+          <Download size={18} />
+          Export
+        </button>
+      </div>
+
       <ExportModal
         isOpen={isExportOpen}
         onClose={() => setIsExportOpen(false)}
         events={events}
+      />
+
+      <AddScheduleModal
+        isOpen={isAddScheduleOpen}
+        onClose={() => setIsAddScheduleOpen(false)}
+        onAdd={handleAddSchedule}
       />
     </div>
   );

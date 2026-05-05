@@ -1,38 +1,131 @@
 "use client";
 
-import { X, Upload, CirclePlus } from "lucide-react";
+import { X, Upload, CirclePlus, Loader2 } from "lucide-react";
 import { useState } from "react";
+import toast from "react-hot-toast";
+
+export type GeneratedFlashcard = { front: string; back: string };
 
 type CreateFlashcardModalProps = {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (data: {
+  onCreated?: (data: {
     deckName: string;
-    file: File | null;
+    cards: GeneratedFlashcard[];
   }) => void;
 };
 
 export default function CreateFlashcardModal({
   isOpen,
   onClose,
-  onSubmit,
+  onCreated,
 }: CreateFlashcardModalProps) {
   const [formData, setFormData] = useState({
     deckName: "",
     file: null as File | null,
   });
+  const [requestedCards, setRequestedCards] = useState(8);
+  const [recommendedMaxCards, setRecommendedMaxCards] = useState<number | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSubmit(formData);
+  const MAX_SIZE = 50 * 1024 * 1024;
+
+  const reset = () => {
     setFormData({ deckName: "", file: null });
-    onClose();
+    setRequestedCards(8);
+    setRecommendedMaxCards(null);
+    setAnalyzing(false);
+    setLoading(false);
+  };
+
+  const analyzeFile = async (file: File, deckName: string) => {
+    setAnalyzing(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("deckName", deckName || "Untitled Deck");
+      fd.append("mode", "analyze");
+
+      const resp = await fetch("/api/ai/flashcards/generate", {
+        method: "POST",
+        body: fd,
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (resp.ok && Number.isFinite(Number(json.maxCards))) {
+        const maxCards = Math.max(1, Math.round(Number(json.maxCards)));
+        setRecommendedMaxCards(maxCards);
+        setRequestedCards((current) => Math.min(current, maxCards));
+        return;
+      }
+      setRecommendedMaxCards(null);
+    } catch {
+      setRecommendedMaxCards(null);
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.file) {
+      toast.error("Please upload a PDF or image");
+      return;
+    }
+    if (formData.file.size > MAX_SIZE) {
+      toast.error("File exceeds the 50 MB limit.");
+      return;
+    }
+    if (!formData.deckName.trim()) {
+      toast.error("Please enter a deck name");
+      return;
+    }
+    if (recommendedMaxCards && requestedCards > recommendedMaxCards) {
+      toast.error(`This source supports up to ${recommendedMaxCards} flashcards.`);
+      return;
+    }
+    setLoading(true);
+    const t = toast.loading("AI is generating flashcards…");
+    try {
+      const fd = new FormData();
+      fd.append("file", formData.file);
+      fd.append("deckName", formData.deckName);
+      fd.append("requestedCards", String(requestedCards));
+      const resp = await fetch("/api/ai/flashcards/generate", {
+        method: "POST",
+        body: fd,
+      });
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        throw new Error(body.error || `Failed (${resp.status})`);
+      }
+      const json = (await resp.json()) as {
+        deckName: string;
+        cards: GeneratedFlashcard[];
+      };
+      toast.success(`Generated ${json.cards.length} flashcards`, { id: t });
+      onCreated?.({ deckName: json.deckName, cards: json.cards });
+      reset();
+      onClose();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Generation failed", {
+        id: t,
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setFormData({ ...formData, file: e.target.files[0] });
+      const f = e.target.files[0];
+      if (f.size > MAX_SIZE) {
+        toast.error("File exceeds the 50 MB limit.");
+        return;
+      }
+      setFormData({ ...formData, file: f });
+      analyzeFile(f, formData.deckName);
     }
   };
 
@@ -40,7 +133,13 @@ export default function CreateFlashcardModal({
     e.preventDefault();
     setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      setFormData({ ...formData, file: e.dataTransfer.files[0] });
+      const f = e.dataTransfer.files[0];
+      if (f.size > MAX_SIZE) {
+        toast.error("File exceeds the 50 MB limit.");
+        return;
+      }
+      setFormData({ ...formData, file: f });
+      analyzeFile(f, formData.deckName);
     }
   };
 
@@ -59,33 +158,52 @@ export default function CreateFlashcardModal({
     <div
       className="fixed inset-0 flex justify-center items-center z-50"
       style={{ background: "rgba(0, 0, 0, 0.5)" }}
-      onClick={onClose}
+      onClick={loading ? undefined : onClose}
     >
       <div
         className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-8 relative"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Close button */}
         <button
           onClick={onClose}
-          className="absolute top-6 right-6 text-gray-400 hover:text-gray-600 transition-colors"
+          disabled={loading}
+          className="absolute top-6 right-6 text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50"
         >
           <X size={24} />
         </button>
 
-        {/* Header */}
         <div className="mb-8">
           <h2 className="text-2xl font-semibold text-black-primary mb-2">
             Create Flashcard
           </h2>
           <p className="text-sm text-gray-primary">
-            Upload an image or PDF, AI will turn it into flashcards
+            Upload an image or PDF — AI will turn it into flashcards
           </p>
         </div>
 
-        {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Deck Name */}
+          <div>
+            <label className="block text-sm font-medium text-black-primary mb-3">
+              Cards to generate
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={recommendedMaxCards ?? undefined}
+              value={requestedCards}
+              onChange={(e) => setRequestedCards(Number(e.target.value || 1))}
+              disabled={loading || analyzing}
+              className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-black-primary"
+            />
+            <p className="mt-2 text-sm text-gray-primary">
+              {recommendedMaxCards
+                ? `This file supports up to ${recommendedMaxCards} cards. You can choose any value up to that limit.`
+                : analyzing
+                  ? "AI is estimating the maximum card count…"
+                  : "Upload a file to estimate the maximum card count."}
+            </p>
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-black-primary mb-3">
               Deck Name<span className="text-red-500">*</span>
@@ -99,13 +217,13 @@ export default function CreateFlashcardModal({
               }
               className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-black-primary placeholder:text-gray-400"
               required
+              disabled={loading}
             />
           </div>
 
-          {/* PDF/Image Upload */}
           <div>
             <label className="block text-sm font-medium text-black-primary mb-3">
-              PDF/Image
+              PDF / Image<span className="text-red-500">*</span>
             </label>
             <label
               htmlFor="file-upload"
@@ -113,7 +231,7 @@ export default function CreateFlashcardModal({
                 isDragging
                   ? "border-indigo-primary bg-indigo-50"
                   : "border-gray-300 bg-white hover:bg-gray-50"
-              }`}
+              } ${loading ? "pointer-events-none opacity-70" : ""}`}
               onDrop={handleDrop}
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
@@ -126,9 +244,14 @@ export default function CreateFlashcardModal({
                       {formData.file.name}
                     </span>
                   ) : (
-                    "Upload an image or PDF (max. 5 MB)"
+                    "Upload a PDF or text file (max. 50 MB)"
                   )}
                 </p>
+                {recommendedMaxCards ? (
+                  <p className="mt-2 text-xs text-indigo-primary">
+                    AI limit: {recommendedMaxCards} cards
+                  </p>
+                ) : null}
               </div>
               <input
                 id="file-upload"
@@ -136,17 +259,27 @@ export default function CreateFlashcardModal({
                 className="hidden"
                 accept="image/*,.pdf"
                 onChange={handleFileChange}
+                disabled={loading}
               />
             </label>
           </div>
 
-          {/* Submit Button */}
           <button
             type="submit"
-            className="w-full flex items-center justify-center gap-2 px-4 py-4 bg-indigo-primary text-white rounded-xl hover:bg-indigo-600 transition-colors font-medium"
+            disabled={loading}
+            className="w-full flex items-center justify-center gap-2 px-4 py-4 bg-indigo-primary text-white rounded-xl hover:bg-indigo-600 transition-colors font-medium disabled:opacity-70 disabled:cursor-not-allowed"
           >
-            <CirclePlus size={20} />
-            Create Flashcard
+            {loading ? (
+              <>
+                <Loader2 size={20} className="animate-spin" />
+                Generating with AI…
+              </>
+            ) : (
+              <>
+                <CirclePlus size={20} />
+                Generate Flashcards
+              </>
+            )}
           </button>
         </form>
       </div>

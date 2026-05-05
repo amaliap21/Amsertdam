@@ -1,7 +1,9 @@
 "use client";
 import { CircleAlert, CircleQuestionMark, CircleCheck } from "lucide-react";
 import Image from "next/image";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useStore } from "@/store/use-store";
+import { useCurrentUser } from "@/lib/use-current-user";
 
 type Tasks = {
   cardColor: string;
@@ -23,105 +25,92 @@ type Courses = {
 };
 
 export default function Dashboard() {
-  const taskItems: Tasks[] = [
+  const { user } = useCurrentUser();
+  const [taskItems, setTaskItems] = useState<Tasks[]>([
     {
       cardColor:
         "linear-gradient(288deg, rgba(229, 61, 61, 0.20) 34.38%, rgba(245, 150, 56, 0.20) 95.91%)",
       type: "Focus First",
       icon: <CircleAlert size={20} className="text-[#E53D3D]" />,
       image: "red-task.svg",
-      taskCount: 5,
+      taskCount: 0,
       taskCountColor: "#E53D3D",
       text: "High impact, worth your effort.",
     },
     {
       cardColor:
         "linear-gradient(288deg, rgba(223, 229, 61, 0.20) 34.38%, rgba(223, 245, 56, 0.20) 95.91%)",
-      type: "Transactions",
+      type: "If You Have Energy",
       icon: <CircleQuestionMark size={20} className="text-[#E5B03D]" />,
       image: "yellow-task.svg",
-      taskCount: 5,
+      taskCount: 0,
       taskCountColor: "#E5B03D",
       text: "Helpful but this task is not critical.",
     },
     {
       cardColor:
         "linear-gradient(288deg, var(--Green, rgba(132, 224, 163, 0.20)) 34.38%, var(--Teal, rgba(110, 175, 187, 0.20)) 95.91%)",
-      type: "Analytics",
+      type: "Safe to Minimize",
       icon: <CircleCheck size={20} className="text-[#73C58F]" />,
       image: "green-task.svg",
-      taskCount: 5,
+      taskCount: 0,
       taskCountColor: "#73C58F",
       text: "Low impact, safe to do less.",
     },
-  ];
+  ])
 
-  const courseItems: Courses[] = [
-    {
-      courseName: "Introduction to Computer Science",
-      credits: 4,
-      fromTime: 10,
-      toTime: 11,
-      typeTracking: "On Track",
-      threshold: "80.7",
-    },
-    {
-      courseName: "Data Structures and Algorithms",
-      credits: 3,
-      fromTime: 8,
-      toTime: 10,
-      typeTracking: "On Track",
-      threshold: "75.5",
-    },
-    {
-      courseName: "Database Management Systems",
-      credits: 3,
-      fromTime: 9,
-      toTime: 11,
-      typeTracking: "Worth Reviewing",
-      threshold: "78.0",
-    },
-    {
-      courseName: "Operating Systems",
-      credits: 4,
-      fromTime: 11,
-      toTime: 13,
-      typeTracking: "On Track",
-      threshold: "82.3",
-    },
-    {
-      courseName: "Computer Networks",
-      credits: 3,
-      fromTime: 14,
-      toTime: 16,
-      typeTracking: "Worth Reviewing",
-      threshold: "77.8",
-    },
-  ];
+  const [courseItems, setCourseItems] = useState<Courses[]>([])
+  const [flashcardCount, setFlashcardCount] = useState<number>(0)
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const t = await fetch('/api/tasks')
+        if (t.ok) {
+          const tasks = await t.json()
+          const counts: Record<string, number> = {
+            'Focus First': 0,
+            'If You Have Energy': 0,
+            'Safe to Minimize': 0,
+          }
+          tasks.forEach((task: any) => { counts[task.priority ?? 'If You Have Energy'] = (counts[task.priority ?? 'If You Have Energy'] || 0) + 1 })
+          setTaskItems((prev) => prev.map((p) => ({ ...p, taskCount: counts[p.type as keyof typeof counts] || 0 })))
+        }
+      } catch {}
+
+      try {
+        const c = await fetch('/api/courses')
+        if (c.ok) {
+          const courses = await c.json()
+          setCourseItems(courses.map((co: any) => ({ courseName: co.title, credits: 3, fromTime: 8, toTime: 10, typeTracking: 'On Track', threshold: '—' })))
+        }
+      } catch {}
+
+      try {
+        const f = await fetch('/api/flashcards')
+        if (f.ok) {
+          const decks = await f.json()
+          setFlashcardCount(Array.isArray(decks) ? decks.length : 0)
+        }
+      } catch {}
+    })()
+  }, [])
 
   const [currentDate, setCurrentDate] = useState(new Date(2026, 0, 8));
   const [selectedDay, setSelectedDay] = useState<number | null>(8);
 
-  const events = [
-    {
-      id: 1,
-      time: "8 AM - 10 AM",
-      title: "[Class] Data Structures and Algorithms",
-      color: "bg-green-primary",
-    },
-    {
-      id: 2,
-      time: "10 AM - 12 PM",
-      title: "[Task] Operating System Project",
-      color: "bg-blue-primary",
-    },
-    {
-      id: 3,
-      time: "2 PM - 3 PM",
-      title: "[Self Study] Computer Network",
-      color: "bg-teal-primary",
-    },
-  ];
+  const storeTasks = useStore((s) => s.tasks);
+  const events = storeTasks.slice(0, 5).map((t, i) => ({
+    id: i + 1,
+    time: t.timeEstimate ? `${t.timeEstimate} • ${t.date}` : t.date,
+    title: `[Task] ${t.title}`,
+    color:
+      t.priority === "Focus First"
+        ? "bg-red-500"
+        : t.priority === "If You Have Energy"
+          ? "bg-yellow-500"
+          : "bg-green-primary",
+  }));
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -163,7 +152,7 @@ export default function Dashboard() {
         {/* Greetings */}
         <div className="flex flex-col gap-3">
           <h1 className="text-[28px] font-semibold text-black-primary">
-            Hello, Adin!
+            Hello, {user?.user_metadata?.full_name?.split(" ")[0] ?? user?.email?.split("@")[0] ?? "there"}!
           </h1>
           <p className="text-gray-primary">
             You&apos;re on track to pass your courses, without needing to
@@ -398,17 +387,23 @@ export default function Dashboard() {
 
         {/* Events List */}
         <div className="space-y-4">
-          {events.map((event) => (
-            <div key={event.id} className="flex items-start gap-3">
-              <div className={`w-2 h-2 rounded-full mt-1 ${event.color}`}></div>
-              <div className="flex-1">
-                <p className="text-xs text-gray-600 mb-1">{event.time}</p>
-                <p className="text-sm font-medium text-gray-900">
-                  {event.title}
-                </p>
+          {events.length === 0 ? (
+            <p className="text-sm text-gray-primary">
+              No tasks yet. Add tasks in Task Value to see them here.
+            </p>
+          ) : (
+            events.map((event) => (
+              <div key={event.id} className="flex items-start gap-3">
+                <div className={`w-2 h-2 rounded-full mt-1 ${event.color}`}></div>
+                <div className="flex-1">
+                  <p className="text-xs text-gray-600 mb-1">{event.time}</p>
+                  <p className="text-sm font-medium text-gray-900">
+                    {event.title}
+                  </p>
+                </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
     </div>

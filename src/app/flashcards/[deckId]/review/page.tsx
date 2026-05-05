@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Lightbulb } from "lucide-react";
 import Link from "next/link";
 import { use, useState } from "react";
 import Image from "next/image";
+import { useStore } from "@/store/use-store";
 
 type Flashcard = {
   id: string;
@@ -19,6 +20,46 @@ type Deck = {
   cards: Flashcard[];
 };
 
+const STATIC_DECK: Omit<Deck, "id"> = {
+  title: "Database Terms",
+  description: "SQL and relational database vocabulary",
+  cards: [
+    {
+      id: "1",
+      question:
+        "A table column that uniquely identifies each record is called a...",
+      answer: "primary key",
+      hint: "It's a two-word term that starts with 'p'",
+    },
+    {
+      id: "2",
+      question: "What does SQL stand for?",
+      answer: "Structured Query Language",
+      hint: "It's related to structured data querying",
+    },
+    {
+      id: "3",
+      question:
+        "A relationship between tables where one record in table A can relate to many records in table B is called...",
+      answer: "one-to-many relationship",
+      hint: "Think about the cardinality between tables",
+    },
+    {
+      id: "4",
+      question: "What does CRUD stand for in database operations?",
+      answer: "Create, Read, Update, Delete",
+      hint: "Four basic operations on data",
+    },
+    {
+      id: "5",
+      question:
+        "A constraint that ensures values in a column match values in another table is called...",
+      answer: "foreign key",
+      hint: "It references another table's primary key",
+    },
+  ],
+};
+
 export default function FlashcardReview({
   params,
 }: {
@@ -29,47 +70,22 @@ export default function FlashcardReview({
   const [showAnswer, setShowAnswer] = useState(false);
   const [showHint, setShowHint] = useState(false);
 
-  // Dummy data
-  const deck: Deck = {
-    id: deckId,
-    title: "Database Terms",
-    description: "SQL and relational database vocabulary",
-    cards: [
-      {
-        id: "1",
-        question:
-          "A table column that uniquely identifies each record is called a...",
-        answer: "primary key",
-        hint: "It's a two-word term that starts with 'p'",
-      },
-      {
-        id: "2",
-        question: "What does SQL stand for?",
-        answer: "Structured Query Language",
-        hint: "It's related to structured data querying",
-      },
-      {
-        id: "3",
-        question:
-          "A relationship between tables where one record in table A can relate to many records in table B is called...",
-        answer: "one-to-many relationship",
-        hint: "Think about the cardinality between tables",
-      },
-      {
-        id: "4",
-        question: "What does CRUD stand for in database operations?",
-        answer: "Create, Read, Update, Delete",
-        hint: "Four basic operations on data",
-      },
-      {
-        id: "5",
-        question:
-          "A constraint that ensures values in a column match values in another table is called...",
-        answer: "foreign key",
-        hint: "It references another table's primary key",
-      },
-    ],
-  };
+  const generatedDeck = useStore((s) =>
+    s.decks.find((d) => d.id === deckId),
+  );
+
+  const deck: Deck = generatedDeck
+    ? {
+        id: generatedDeck.id,
+        title: generatedDeck.title,
+        description: generatedDeck.description,
+        cards: generatedDeck.cards.map((c) => ({
+          id: c.id,
+          question: c.question,
+          answer: c.answer,
+        })),
+      }
+    : { id: deckId, ...STATIC_DECK };
 
   const currentCard = deck.cards[currentCardIndex];
   const totalCards = deck.cards.length;
@@ -90,7 +106,8 @@ export default function FlashcardReview({
     }
   };
 
-  const formatAnswerBlanks = (answer: string) => {
+  const formatAnswerBlanks = (answer: string | undefined | null) => {
+    if (typeof answer !== "string" || !answer.trim()) return "";
     return answer
       .split(" ")
       .map((word) => "_".repeat(word.length))

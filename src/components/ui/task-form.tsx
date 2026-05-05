@@ -10,6 +10,7 @@ type AddTaskModalProps = {
     taskName: string;
     description: string;
     deadline: string;
+    estimatedHours?: number | null;
   }) => void;
 };
 
@@ -22,12 +23,18 @@ export default function AddTaskModal({
     taskName: "",
     description: "",
     deadline: "",
+    estimatedHours: "",
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit(formData);
-    setFormData({ taskName: "", description: "", deadline: "" });
+    onSubmit({
+      taskName: formData.taskName,
+      description: formData.description,
+      deadline: formData.deadline,
+      estimatedHours: formData.estimatedHours ? Number(formData.estimatedHours) : undefined,
+    });
+    setFormData({ taskName: "", description: "", deadline: "", estimatedHours: "" });
     onClose();
   };
 
@@ -118,6 +125,20 @@ export default function AddTaskModal({
                 required
               />
             </div>
+          </div>
+
+          {/* Estimated Hours */}
+          <div>
+            <label className="block text-sm font-medium text-black-primary mb-3">Estimated hours</label>
+            <input
+              type="number"
+              min="0"
+              step="0.25"
+              placeholder="e.g., 2.5"
+              value={formData.estimatedHours}
+              onChange={(e) => setFormData({ ...formData, estimatedHours: e.target.value })}
+              className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-black-primary placeholder:text-gray-400"
+            />
           </div>
 
           {/* Submit Button */}

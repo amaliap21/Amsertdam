@@ -6,11 +6,8 @@ type CourseFormProps = {
   onSubmit: (course: {
     courseName: string;
     credits: number;
-    fromTime: number;
-    toTime: number;
+    scheduleEntries: { day: string; startTime: string; endTime: string }[];
     typeTracking: string;
-    threshold: number;
-    passingGrade: number;
     assessments?: {
       name: string;
       weight: number;
@@ -30,22 +27,59 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
   const [formData, setFormData] = useState({
     courseName: "",
     credits: 0,
-    scheduleDay: "",
-    time: "",
-    passingGrade: 75,
+    scheduleEntries: [{ day: "", startTime: "", endTime: "" }],
   });
+
+  const updateScheduleEntry = (
+    index: number,
+    field: "day" | "startTime" | "endTime",
+    value: string,
+  ) => {
+    setFormData((prev) => ({
+      ...prev,
+      scheduleEntries: prev.scheduleEntries.map((entry, entryIndex) =>
+        entryIndex === index ? { ...entry, [field]: value } : entry,
+      ),
+    }));
+  };
+
+  const addScheduleEntry = () => {
+    setFormData((prev) => ({
+      ...prev,
+      scheduleEntries: [
+        ...prev.scheduleEntries,
+        { day: "", startTime: "", endTime: "" },
+      ],
+    }));
+  };
+
+  const removeScheduleEntry = (index: number) => {
+    setFormData((prev) => ({
+      ...prev,
+      scheduleEntries:
+        prev.scheduleEntries.length === 1
+          ? prev.scheduleEntries
+          : prev.scheduleEntries.filter((_, entryIndex) => entryIndex !== index),
+    }));
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
+    const scheduleEntries = formData.scheduleEntries.filter(
+      (entry) => entry.day && entry.startTime && entry.endTime,
+    );
+
+    if (!scheduleEntries.length) {
+      alert("Please add at least one valid schedule day and time.");
+      return;
+    }
+
     const newCourse = {
       courseName: formData.courseName,
       credits: formData.credits,
-      fromTime: parseInt(formData.time.split(":")[0]) || 0,
-      toTime: (parseInt(formData.time.split(":")[0]) || 0) + 2,
       typeTracking: "On Track",
-      threshold: formData.passingGrade,
-      passingGrade: formData.passingGrade,
+      scheduleEntries,
       passingRequirement: "",
       assessments: [] as {
         name: string;
@@ -125,73 +159,79 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
             />
           </div>
 
-          {/* Schedule Day and Time */}
-          <div className="grid grid-cols-2 gap-4">
-            {/* Schedule Day */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Schedule Day<span className="text-red-500">*</span>
+          {/* Schedule Entries */}
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-medium text-gray-700">
+                Schedule<span className="text-red-500">*</span>
               </label>
-              <select
-                value={formData.scheduleDay}
-                onChange={(e) =>
-                  setFormData({ ...formData, scheduleDay: e.target.value })
-                }
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent appearance-none bg-white"
-                required
+              <button
+                type="button"
+                onClick={addScheduleEntry}
+                className="text-sm text-indigo-primary hover:text-indigo-500"
               >
-                <option value="">Select day</option>
-                <option value="Monday">Monday</option>
-                <option value="Tuesday">Tuesday</option>
-                <option value="Wednesday">Wednesday</option>
-                <option value="Thursday">Thursday</option>
-                <option value="Friday">Friday</option>
-                <option value="Saturday">Saturday</option>
-                <option value="Sunday">Sunday</option>
-              </select>
+                + Add another time
+              </button>
             </div>
 
-            {/* Time */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Time<span className="text-red-500">*</span>
-              </label>
-              <input
-                type="time"
-                placeholder="e.g., 12:30"
-                value={formData.time}
-                onChange={(e) =>
-                  setFormData({ ...formData, time: e.target.value })
-                }
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent"
-                required
-              />
-            </div>
-          </div>
+            {formData.scheduleEntries.map((entry, index) => (
+              <div key={index} className="grid grid-cols-3 gap-3 items-end">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-2">
+                    Day
+                  </label>
+                  <select
+                    value={entry.day}
+                    onChange={(e) => updateScheduleEntry(index, "day", e.target.value)}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent appearance-none bg-white"
+                  >
+                    <option value="">Select day</option>
+                    <option value="Monday">Monday</option>
+                    <option value="Tuesday">Tuesday</option>
+                    <option value="Wednesday">Wednesday</option>
+                    <option value="Thursday">Thursday</option>
+                    <option value="Friday">Friday</option>
+                    <option value="Saturday">Saturday</option>
+                    <option value="Sunday">Sunday</option>
+                  </select>
+                </div>
 
-          {/* Passing Grade */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Passing Grade<span className="text-red-500">*</span>
-            </label>
-            <div className="flex items-center justify-between border border-gray-300 rounded-lg px-4 py-2.5 focus-within:ring-2 focus-within:ring-indigo-primary focus-within:border-transparent">
-              <input
-                type="number"
-                min={0}
-                max={100}
-                placeholder="75"
-                value={formData.passingGrade || ""}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    passingGrade: parseFloat(e.target.value) || 75,
-                  })
-                }
-                className="w-full focus:outline-none appearance-none text-sm"
-                required
-              />
-              <span className="text-sm font-medium text-gray-500 whitespace-nowrap">/ 100</span>
-            </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-2">
+                    Start Time
+                  </label>
+                  <input
+                    type="time"
+                    value={entry.startTime}
+                    onChange={(e) => updateScheduleEntry(index, "startTime", e.target.value)}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent"
+                  />
+                </div>
+
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium text-gray-700 mb-2">
+                      End Time
+                    </label>
+                    <input
+                      type="time"
+                      value={entry.endTime}
+                      onChange={(e) => updateScheduleEntry(index, "endTime", e.target.value)}
+                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent"
+                    />
+                  </div>
+                  {formData.scheduleEntries.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeScheduleEntry(index)}
+                      className="h-11 px-3 rounded-lg border border-gray-300 text-gray-500 hover:text-red-500 hover:border-red-300"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
 
           {/* Submit Button */}

@@ -34,9 +34,16 @@ export default function ItemForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const w = Number(weight) || 0;
+    if (w > assessmentWeight) {
+      alert(
+        `Weight ${w}% exceeds the remaining capacity of ${assessmentWeight}% for this assessment.`,
+      );
+      return;
+    }
     onSubmit({
       name,
-      weight: Number(weight) || 0,
+      weight: w,
       score: mark !== "" ? Number(mark) : undefined,
       date: deadline ? formatDate(deadline) : undefined,
     });

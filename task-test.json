@@ -1,0 +1,9 @@
+{
+  "title": "Smoke Task",
+  "course": "Test",
+  "date": "2026-05-04",
+  "estimatedHours": 2,
+  "priority": "If You Have Energy",
+  "description": "smoke test",
+  "effort": "low"
+}

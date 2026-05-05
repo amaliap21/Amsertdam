@@ -15,6 +15,20 @@
 - **Supabase** - BaaS (Backend as a Service)
 - **pgvector** - Vector similarity search for embeddings
 - **Vercel Python Functions** - Serverless Python for AI processing
+- **Ollama + Llama 3.1 8B** - Local LLM inference (free, no API keys required)
+
+## AI Features
+
+The app includes AI-powered features for studying:
+
+- **Generate Flashcards** - Extract study cards from uploaded documents
+- **Generate Quizzes** - Create multiple-choice quizzes from source materials
+- **Study Companion** - Chat-based tutoring with streaming responses
+- **Task Prioritization** - AI-powered task ranking based on impact vs. effort
+- **Weekly Planning** - Automatic schedule generation respecting deadlines
+- **Passing Target** - Calculate minimum scores needed for target grades
+
+All AI features use **Ollama** (local LLM) running on `localhost:11434`. See [OLLAMA_SETUP.md](./OLLAMA_SETUP.md) for setup instructions.
 
 ## Getting Started
 
@@ -36,6 +50,23 @@ Required variables:
 - `NEXT_PUBLIC_SUPABASE_URL` - Your Supabase project URL
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` - Supabase anonymous key
 - `SUPABASE_SERVICE_ROLE_KEY` - Supabase service role key
+- `OLLAMA_API_URL` - Ollama endpoint (default: `http://localhost:11434`)
+- `OLLAMA_MODEL` - LLM model name (default: `llama2:70b`)
+
+### 2a. Set Up Ollama (for AI Features)
+
+Before running the app, install and start Ollama:
+
+```bash
+# Download from https://ollama.ai and install
+# Then pull the model:
+ollama pull llama2:70b
+
+# Start the Ollama service (if not already running)
+ollama serve
+```
+
+See [OLLAMA_SETUP.md](./OLLAMA_SETUP.md) for detailed instructions.
 
 ### 3. Backend Configuration
 

@@ -3,9 +3,10 @@
 import { useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { LogOut, House, Crosshair, BookOpen, Calendar } from "lucide-react";
+import { LogOut, House, Crosshair, BookOpen, Calendar, BookOpenCheck, MessagesSquare } from "lucide-react";
 import HamburgerIcon from "@/components/icons/hamburger-icon";
 import FlashcardsIcon from "@/components/icons/flashcards-icon";
+import { createClient } from "@/lib/supabase/client";
 
 type MenuItem = {
   label: string;
@@ -42,6 +43,16 @@ export default function Sidebar({ className }: { className?: string }) {
       label: "Flashcards",
       href: "/flashcards",
       icon: <FlashcardsIcon size={18} />,
+    },
+    {
+      label: "Quiz Lab",
+      href: "/quiz-lab",
+      icon: <BookOpenCheck size={18} />,
+    },
+    {
+      label: "Study Companion",
+      href: "/study-companion",
+      icon: <MessagesSquare size={18} />,
     },
   ];
 
@@ -98,9 +109,15 @@ export default function Sidebar({ className }: { className?: string }) {
         {/* LOGOUT */}
         <button
           className="flex items-center gap-3 w-full px-2 text-black-primary hover:text-indigo-primary rounded-md transition cursor-pointer"
-          onClick={() => {
-            localStorage.clear();
-            window.location.href = "/login";
+          onClick={async () => {
+            try {
+              const supabase = createClient();
+              await supabase.auth.signOut();
+            } catch {}
+            try {
+              localStorage.removeItem("realtrack-storage");
+            } catch {}
+            window.location.href = "/sign-in";
           }}
         >
           <LogOut size={18} />

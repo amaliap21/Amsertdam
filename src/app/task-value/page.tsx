@@ -1,23 +1,21 @@
 "use client";
 
-import { CircleAlert, CircleHelp, CircleCheck, Calendar, Clock, CirclePlus } from "lucide-react";
-import { useState } from "react";
+import {
+  CircleAlert,
+  CircleHelp,
+  CircleCheck,
+  Calendar,
+  Clock,
+  CirclePlus,
+  Sparkles,
+  Loader2,
+} from "lucide-react";
+import { useState, useEffect } from "react";
+import { Trash2 } from "lucide-react";
 import Image from "next/image";
 import AddTaskModal from "@/components/ui/task-form";
 import toast from "react-hot-toast";
-
-type TaskPriority = "Focus First" | "If You Have Energy" | "Safe to Minimize";
-
-type Task = {
-  id: string;
-  title: string;
-  course: string;
-  date: string;
-  timeEstimate: string;
-  priority: TaskPriority;
-  description: string;
-  effort: string;
-};
+import { useStore, type TaskPriority } from "@/store/use-store";
 
 type PriorityCard = {
   priority: TaskPriority;
@@ -32,16 +30,92 @@ type PriorityCard = {
 
 export default function TaskValue() {
   const [showAddTaskModal, setShowAddTaskModal] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const tasks = useStore((s) => s.tasks);
+  const setTasks = useStore((s) => s.setTasks);
+  const addTask = useStore((s) => s.addTask);
+  const removeTask = useStore((s) => s.removeTask);
 
-  const handleAddTask = (task: {
+  const handleAddTask = async (task: {
     taskName: string;
     description: string;
     deadline: string;
+    estimatedHours?: number | null;
   }) => {
-    // TODO: Implement task creation logic
-    // * For now, print to console to debug
-    console.log("New task:", task);
-    toast.success("Task added successfully!");
+    await addTask({
+      title: task.taskName,
+      course: "General",
+      date: task.deadline
+        ? new Date(task.deadline).toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+          })
+        : "—",
+      timeEstimate: task.estimatedHours ? `${task.estimatedHours}h` : "—",
+      priority: "If You Have Energy",
+      description: task.description,
+      effort: "medium effort",
+    });
+    toast.success("Task added");
+  };
+
+  const handleAiPrioritize = async () => {
+    if (aiLoading) return;
+    setAiLoading(true);
+    const t = toast.loading("AI is prioritizing your tasks…");
+    try {
+      const resp = await fetch("/api/ai/task-value/prioritize", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          tasks: tasks.map((task) => ({
+            id: task.id,
+            name: task.title,
+            course: task.course,
+            description: task.description,
+            deadline: task.date,
+            estimatedHours: parseFloat(task.timeEstimate) || undefined,
+          })),
+        }),
+      });
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        throw new Error(body.error || `Failed (${resp.status})`);
+      }
+      const json = (await resp.json()) as {
+        summary: string;
+        prioritized: {
+          id?: string;
+          name: string;
+          bucket: TaskPriority;
+          reason: string;
+          estimatedHours: number;
+          effortLabel: string;
+        }[];
+      };
+      setTasks(
+        tasks.map((task) => {
+          const ai = json.prioritized.find(
+            (p) => p.id === task.id || p.name === task.title,
+          );
+          if (!ai) return task;
+          return {
+            ...task,
+            priority: ai.bucket,
+            description: ai.reason,
+            effort: ai.effortLabel,
+            timeEstimate: `${ai.estimatedHours}h`,
+          };
+        }),
+      );
+      setAiSummary(json.summary);
+      toast.success("Tasks reprioritized", { id: t });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed", { id: t });
+    } finally {
+      setAiLoading(false);
+    }
   };
 
   const priorityCards: PriorityCard[] = [
@@ -77,39 +151,6 @@ export default function TaskValue() {
     },
   ];
 
-  const tasks: Task[] = [
-    {
-      id: "1",
-      title: "Operating System Project",
-      course: "Operating System",
-      date: "Feb 5",
-      timeEstimate: "8h",
-      priority: "Focus First",
-      description: "This task carries meaningful weight toward your grade. Putting effort here is a good investment for your peace of mind.",
-      effort: "high effort",
-    },
-    {
-      id: "2",
-      title: "Probability and Statistics Problem Set",
-      course: "Probability and Statistics",
-      date: "Feb 10",
-      timeEstimate: "2h",
-      priority: "If You Have Energy",
-      description: "This task carries meaningful weight toward your grade. Putting effort here is a good investment for your peace of mind.",
-      effort: "medium effort",
-    },
-    {
-      id: "3",
-      title: "Database Task",
-      course: "Database",
-      date: "Feb 10",
-      timeEstimate: "12h",
-      priority: "Safe to Minimize",
-      description: "This task carries meaningful weight toward your grade. Putting effort here is a good investment for your peace of mind.",
-      effort: "high effort",
-    },
-  ];
-
   const getTasksByPriority = (priority: TaskPriority) => {
     return tasks.filter((task) => task.priority === priority);
   };
@@ -124,19 +165,6 @@ export default function TaskValue() {
         return "bg-green-50 text-[#73C58F] border-green-200";
       default:
         return "";
-    }
-  };
-
-  const getPriorityIcon = (priority: TaskPriority) => {
-    switch (priority) {
-      case "Focus First":
-        return <CircleAlert size={16} className="text-[#E53D3D]" />;
-      case "If You Have Energy":
-        return <CircleHelp size={16} className="text-[#E5B03D]" />;
-      case "Safe to Minimize":
-        return <CircleCheck size={16} className="text-[#73C58F]" />;
-      default:
-        return null;
     }
   };
 
@@ -165,14 +193,37 @@ export default function TaskValue() {
             Helping you allocate effort sustainably while protecting your wellbeing
           </p>
         </div>
-        <button
-          onClick={() => setShowAddTaskModal(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-indigo-primary text-white rounded-lg hover:bg-indigo-600 transition-colors"
-        >
-          <CirclePlus size={18} />
-          Add Task
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleAiPrioritize}
+            disabled={aiLoading || tasks.length === 0}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-indigo-primary text-indigo-primary hover:bg-indigo-primary/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {aiLoading ? (
+              <Loader2 size={18} className="animate-spin" />
+            ) : (
+              <Sparkles size={18} />
+            )}
+            Ask AI to Prioritize
+          </button>
+          <button
+            onClick={() => setShowAddTaskModal(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-primary text-white rounded-lg hover:bg-indigo-600 transition-colors"
+          >
+            <CirclePlus size={18} />
+            Add Task
+          </button>
+        </div>
       </div>
+
+      {aiSummary && (
+        <div className="mb-8 rounded-xl border border-indigo-100 bg-indigo-50 p-4">
+          <p className="mb-1 text-sm font-medium text-indigo-primary">
+            AI summary
+          </p>
+          <p className="text-sm text-gray-700">{aiSummary}</p>
+        </div>
+      )}
 
       {/* What to Work on First Section */}
       <div className="mb-8 bg-white border border-gray-200 rounded-xl p-5">
@@ -209,7 +260,7 @@ export default function TaskValue() {
                       className="text-xl"
                       style={{ color: card.textColor }}
                     >
-                      {card.taskCount}
+                      {getTasksByPriority(card.priority).length}
                     </span>{" "}
                     task
                   </h1>
@@ -224,7 +275,7 @@ export default function TaskValue() {
       {/* Info Message */}
       <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-4 mb-8">
         <p className="text-sm text-gray-700">
-          <span className="font-medium">It's okay to let go.</span> One task can be minimized or skipped without affecting your ability to pass. Protecting your energy is a valid choice.
+          <span className="font-medium">It&apos;s okay to let go.</span> One task can be minimized or skipped without affecting your ability to pass. Protecting your energy is a valid choice.
         </p>
       </div>
 
@@ -269,6 +320,16 @@ export default function TaskValue() {
                     <span className="text-base font-semibold text-black-primary">{task.timeEstimate}</span>
                   </div>
                   <span className="text-sm text-gray-500">{task.effort}</span>
+                  <button
+                    title="Delete task"
+                    onClick={async () => {
+                      if (!confirm('Delete this task?')) return;
+                      await removeTask(task.id)
+                    }}
+                    className="mt-2 text-red-500 hover:text-red-600"
+                  >
+                    <Trash2 size={16} />
+                  </button>
                 </div>
               </div>
               <div className="mt-3">
@@ -290,7 +351,7 @@ export default function TaskValue() {
           </h2>
         </div>
         <p className="text-sm text-gray-primary mb-4">
-          These tasks matter, but you have flexibility. It's okay to scale back if you're tired.
+          These tasks matter, but you have flexibility. It&apos;s okay to scale back if you&apos;re tired.
         </p>
         <div className="space-y-3">
           {getTasksByPriority("If You Have Energy").map((task) => (
@@ -322,6 +383,16 @@ export default function TaskValue() {
                     <span className="text-base font-semibold text-black-primary">{task.timeEstimate}</span>
                   </div>
                   <span className="text-sm text-gray-500">{task.effort}</span>
+                  <button
+                    title="Delete task"
+                    onClick={async () => {
+                      if (!confirm('Delete this task?')) return;
+                      await removeTask(task.id);
+                    }}
+                    className="mt-2 text-red-500 hover:text-red-600"
+                  >
+                    <Trash2 size={16} />
+                  </button>
                 </div>
               </div>
               <div className="mt-3">
@@ -375,6 +446,16 @@ export default function TaskValue() {
                     <span className="text-base font-semibold text-black-primary">{task.timeEstimate}</span>
                   </div>
                   <span className="text-sm text-gray-500">{task.effort}</span>
+                  <button
+                    title="Delete task"
+                    onClick={async () => {
+                      if (!confirm('Delete this task?')) return;
+                      await removeTask(task.id);
+                    }}
+                    className="mt-2 text-red-500 hover:text-red-600"
+                  >
+                    <Trash2 size={16} />
+                  </button>
                 </div>
               </div>
               <div className="mt-3">
@@ -393,6 +474,15 @@ export default function TaskValue() {
         onClose={() => setShowAddTaskModal(false)}
         onSubmit={handleAddTask}
       />
+      <InitWrapper />
     </div>
   );
+}
+
+function InitWrapper() {
+  const fetchInitial = useStore((s) => s.fetchInitial);
+  useEffect(() => {
+    fetchInitial().catch(() => {});
+  }, [fetchInitial]);
+  return null;
 }

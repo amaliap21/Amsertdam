@@ -1,6 +1,7 @@
 "use client";
 import "./globals.css";
 import React from "react";
+import { usePathname } from "next/navigation";
 import { QueryProvider } from "@/providers/query-provider";
 import Navbar from "@/components/navbar";
 import Sidebar from "@/components/sidebar";
@@ -13,23 +14,32 @@ const inter = Inter({
   display: "swap",
 });
 
+const PUBLIC_PATHS = new Set(["/", "/sign-in", "/sign-up"]);
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const pathname = usePathname();
+  const isPublicRoute = PUBLIC_PATHS.has(pathname);
+
   return (
     <html lang="en">
       <body className={`${inter.className} antialiased relative`}>
         <Toaster />
         <QueryProvider>
-          <div className="flex">
-            <Sidebar className="w-1/4" />
-            <div className="flex-1 flex flex-col">
-              <Navbar className="w-full" />
-              <main className="flex-1">{children}</main>
+          {isPublicRoute ? (
+            children
+          ) : (
+            <div className="flex">
+              <Sidebar className="w-1/4" />
+              <div className="flex-1 flex flex-col">
+                <Navbar className="w-full" />
+                <main className="flex-1">{children}</main>
+              </div>
             </div>
-          </div>
+          )}
         </QueryProvider>
       </body>
     </html>

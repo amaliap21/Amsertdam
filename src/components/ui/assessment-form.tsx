@@ -17,11 +17,13 @@ type AssessmentFormProps = {
     date?: string;
   }) => void;
   onCancel: () => void;
+  maxWeight?: number;
 };
 
 export default function AssessmentForm({
   onSubmit,
   onCancel,
+  maxWeight = 100,
 }: AssessmentFormProps) {
   const [name, setName] = useState("");
   const [weight, setWeight] = useState<number | "">("");
@@ -30,9 +32,16 @@ export default function AssessmentForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const w = Number(weight) || 0;
+    if (w > maxWeight) {
+      alert(
+        `Weight ${w}% exceeds the remaining capacity of ${maxWeight}% for this course.`,
+      );
+      return;
+    }
     onSubmit({
       name,
-      weight: Number(weight) || 0,
+      weight: w,
       score: mark !== "" ? Number(mark) : undefined,
       date: deadline ? formatDate(deadline) : undefined,
     });
@@ -89,7 +98,7 @@ export default function AssessmentForm({
                 <input
                   type="number"
                   min={0}
-                  max={100}
+                  max={maxWeight}
                   placeholder="0"
                   value={weight}
                   onChange={(e) =>
@@ -101,7 +110,7 @@ export default function AssessmentForm({
                   required
                 />
                 <span className="text-sm font-medium text-black-primary whitespace-nowrap">
-                  / 100%
+                  / {maxWeight}%
                 </span>
               </div>
             </div>

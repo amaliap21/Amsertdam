@@ -1,0 +1,13 @@
+Chapter 1: Introduction to Biology
+
+Biology is the study of life and living organisms. It encompasses the structure, function, growth, origin, evolution, and distribution of all living things. Key concepts include:
+
+1. **Cell Theory**: All living organisms are composed of one or more cells. The cell is the basic unit of life.
+
+2. **Photosynthesis**: Plants convert light energy into chemical energy through the process of photosynthesis, using water and carbon dioxide.
+
+3. **Cellular Respiration**: Organisms break down glucose to release energy in the form of ATP, which powers cellular functions.
+
+4. **DNA and Genetics**: DNA carries the genetic instructions for life. Genes determine traits and are passed from parents to offspring.
+
+5. **Evolution**: Species change over time through natural selection, adaptation, and mutation.

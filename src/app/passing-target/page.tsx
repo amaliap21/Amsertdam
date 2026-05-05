@@ -1,6 +1,6 @@
 "use client";
-import { CirclePlus, PencilLine, Check } from "lucide-react";
-import { useState } from "react";
+import { CirclePlus, PencilLine, Check, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import CourseForm from "@/components/ui/course-form";
 import AssessmentForm from "@/components/ui/assessment-form";
 import ItemForm from "@/components/ui/item-form";
@@ -34,12 +34,12 @@ type ThresholdResult = {
 };
 
 type Courses = {
+  id?: string;
   courseName: string;
   credits: number;
-  fromTime: number;
-  toTime: number;
+  scheduleEntries?: { day: string; startTime: string; endTime: string }[];
   typeTracking: string;
-  threshold: number;
+  threshold?: number | null;
   passingGrade?: number;
   assessments?: Assessment[];
   passingRequirement?: string;
@@ -50,6 +50,47 @@ type Courses = {
   thresholdResult?: ThresholdResult;
   isCalculating?: boolean;
 };
+
+function normalizeCourse(course: any): Courses {
+  let packedMeta: any = course.course_payload ?? {};
+  if (!Object.keys(packedMeta).length && typeof course.description === "string" && course.description.trim()) {
+    try {
+      const parsed = JSON.parse(course.description);
+      if (parsed && typeof parsed === "object") packedMeta = parsed;
+    } catch {
+      packedMeta = {};
+    }
+  }
+
+  return {
+    id: course.id,
+    courseName: course.title ?? course.courseName ?? "Untitled Course",
+    credits: packedMeta.credits ?? course.credits ?? 0,
+    scheduleEntries: Array.isArray(course.schedule_entries)
+      ? course.schedule_entries
+      : Array.isArray(course.scheduleEntries)
+      ? course.scheduleEntries
+      : Array.isArray(packedMeta.scheduleEntries)
+      ? packedMeta.scheduleEntries
+      : [],
+    typeTracking: packedMeta.typeTracking ?? course.typeTracking ?? "On Track",
+    threshold: packedMeta.threshold ?? course.threshold ?? null,
+    passingGrade: packedMeta.threshold ?? course.passingGrade ?? course.threshold ?? undefined,
+    assessments: Array.isArray(course.assessments)
+      ? course.assessments
+      : Array.isArray(packedMeta.assessments)
+      ? packedMeta.assessments
+      : [],
+    passingRequirement: packedMeta.passingRequirement ?? course.passingRequirement ?? "",
+    requirements: Array.isArray(course.requirements)
+      ? course.requirements
+      : Array.isArray(packedMeta.requirements)
+      ? packedMeta.requirements
+      : [],
+    thresholdResult: course.thresholdResult,
+    isCalculating: course.isCalculating,
+  };
+}
 
 // Flatten sub-items into a single effective score for an assessment
 function effectiveScore(a: Assessment): number | undefined {
@@ -65,29 +106,78 @@ function effectiveScore(a: Assessment): number | undefined {
 async function callGraduationAPI(
   assessments: Assessment[],
   passingGrade: number,
+  courseName: string,
 ): Promise<ThresholdResult | null> {
-  const payload = {
-    passing_grade: passingGrade,
+  const totalWeight = assessments.reduce((s, a) => s + a.weight, 0);
+  if (Math.abs(totalWeight - 100) > 0.5) return null;
+
+  const aiPayload = {
+    course: courseName,
+    passingThreshold: passingGrade,
+    targetGrade: Math.max(passingGrade, 75),
     assessments: assessments.map((a) => {
       const score = effectiveScore(a);
-      return score !== undefined
-        ? { name: a.name, weight: a.weight, score }
-        : { name: a.name, weight: a.weight };
+      return {
+        name: a.name,
+        weight: a.weight,
+        current: score ?? null,
+        done: score !== undefined,
+      };
     }),
   };
 
-  const totalWeight = assessments.reduce((s, a) => s + a.weight, 0);
-  if (Math.abs(totalWeight - 100) > 0.5) return null; // weights must sum to 100
-
-  const res = await fetch("/api/python/graduation_threshold", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
-  if (data.error) return null;
-  return data as ThresholdResult;
+  try {
+    const res = await fetch("/api/ai/passing-target/recommend", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(aiPayload),
+    });
+    if (!res.ok) {
+      const fb = await fetch("/api/python/graduation_threshold", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          passing_grade: passingGrade,
+          assessments: assessments.map((a) => {
+            const score = effectiveScore(a);
+            return score !== undefined
+              ? { name: a.name, weight: a.weight, score }
+              : { name: a.name, weight: a.weight };
+          }),
+        }),
+      });
+      if (!fb.ok) return null;
+      const data = await fb.json();
+      if (data.error) return null;
+      return data as ThresholdResult;
+    }
+    const ai = await res.json();
+    const earned = assessments.reduce((acc, a) => {
+      const s = effectiveScore(a);
+      return s !== undefined ? acc + (a.weight * s) / 100 : acc;
+    }, 0);
+    const requirements = (ai.recommendations ?? []).map(
+      (r: { name: string; weight: number; targetScore: number; status: string }) => ({
+        name: r.name,
+        weight: r.weight,
+        min_score: r.targetScore,
+        is_feasible: r.targetScore <= 100 && r.targetScore >= 0,
+      }),
+    );
+    const result: ThresholdResult = {
+      current_grade: Math.round(earned * 10) / 10,
+      passing_grade: ai.passingThreshold ?? passingGrade,
+      gap: Math.max(0, (ai.passingThreshold ?? passingGrade) - earned),
+      requirements,
+      status: ai.risk === "low" ? "On Track" : ai.risk === "high" ? "At Risk" : "Worth Reviewing",
+      safety_margin: Math.max(0, (ai.projectedFinal ?? earned) - (ai.passingThreshold ?? passingGrade)),
+      is_feasible: requirements.every((r: { is_feasible: boolean }) => r.is_feasible),
+      message: ai.summary ?? "",
+    };
+    return result;
+  } catch {
+    return null;
+  }
 }
 
 export default function PassingTarget() {
@@ -95,7 +185,44 @@ export default function PassingTarget() {
   const [showForm, setShowForm] = useState(false);
   const [addingAssessmentToCourse, setAddingAssessmentToCourse] = useState<number | null>(null);
   const [addingItemTo, setAddingItemTo] = useState<{ courseIndex: number; assessIdx: number } | null>(null);
-  const [courseItems, setCourseItems] = useState<Courses[]>([
+  const [courseItems, setCourseItems] = useState<Courses[]>([]);
+
+  const persistCourse = async (course: Courses) => {
+    if (!course.id) return;
+    try {
+      await fetch('/api/courses', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: course.id,
+          title: course.courseName,
+          credits: course.credits,
+          threshold: course.threshold ?? null,
+          scheduleEntries: course.scheduleEntries ?? [],
+          assessments: course.assessments ?? [],
+          typeTracking: course.typeTracking,
+          passingRequirement: course.passingRequirement ?? '',
+          requirements: course.requirements ?? [],
+        }),
+      });
+    } catch {}
+  };
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const c = await fetch('/api/courses');
+        if (!c.ok) return;
+        const courses = await c.json();
+        if (!Array.isArray(courses)) return;
+        setCourseItems(courses.map(normalizeCourse));
+      } catch {}
+    })();
+  }, []);
+
+  const _seedRemoved: Courses[] = [];
+  void _seedRemoved;
+  const _legacy = [
     {
       courseName: "Introduction to Computer Science",
       credits: 4,
@@ -215,7 +342,8 @@ export default function PassingTarget() {
         { name: "Final Project", score: 75.5 },
       ],
     },
-  ]);
+  ];
+  void _legacy;
 
   // Call the Python API and update a course's threshold result
   const triggerCompute = async (index: number, courses: Courses[]) => {
@@ -228,14 +356,15 @@ export default function PassingTarget() {
 
     const result = await callGraduationAPI(
       course.assessments,
-      course.passingGrade ?? 75,
+      course.threshold ?? course.passingGrade ?? 75,
+      course.courseName,
     );
 
     setCourseItems((prev) =>
       prev.map((c, i) => {
         if (i !== index) return c;
         if (!result) return { ...c, isCalculating: false };
-        return {
+        const nextCourse = {
           ...c,
           isCalculating: false,
           typeTracking: result.status,
@@ -246,6 +375,8 @@ export default function PassingTarget() {
             score: r.min_score,
           })),
         };
+        void persistCourse(nextCourse);
+        return nextCourse;
       }),
     );
   };
@@ -257,15 +388,62 @@ export default function PassingTarget() {
   };
 
   const handleAddCourse = (newCourse: Courses) => {
-    const updated = [...courseItems, { ...newCourse }];
-    setCourseItems(updated);
-    setShowForm(false);
+    const currentCredits = courseItems.reduce((s, c) => s + (c.credits || 0), 0);
+    const newCredits = newCourse.credits || 0;
+    if (currentCredits + newCredits > 24) {
+      const remaining = Math.max(0, 24 - currentCredits);
+      alert(
+        `Cannot add course: total credits would be ${
+          currentCredits + newCredits
+        }, exceeding the 24-credit maximum.\n\nRemaining capacity: ${remaining} credits.`,
+      );
+      return;
+    }
+    (async () => {
+      try {
+        const resp = await fetch('/api/courses', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            title: newCourse.courseName,
+            credits: newCourse.credits,
+            threshold: newCourse.threshold ?? null,
+            scheduleEntries: newCourse.scheduleEntries ?? [],
+            assessments: newCourse.assessments ?? [],
+          }),
+        })
+        if (resp.ok) {
+          const body = await resp.json()
+          const updated = [...courseItems, normalizeCourse(body)];
+          setCourseItems(updated);
+          setShowForm(false);
+          return
+        }
+      } catch {}
+      const updated = [...courseItems, normalizeCourse({ ...newCourse })];
+      setCourseItems(updated);
+      setShowForm(false);
+    })()
   };
 
   const handleAddAssessment = (
     courseIndex: number,
     assessment: { name: string; weight: number; score?: number; date?: string },
   ) => {
+    const course = courseItems[courseIndex];
+    const currentTotal = (course?.assessments ?? []).reduce(
+      (s, a) => s + (a.weight || 0),
+      0,
+    );
+    if (currentTotal + assessment.weight > 100) {
+      const remaining = Math.max(0, 100 - currentTotal);
+      alert(
+        `Cannot add assessment: total weight would be ${
+          currentTotal + assessment.weight
+        }%, exceeding the 100% maximum.\n\nRemaining capacity: ${remaining}%.`,
+      );
+      return;
+    }
     setCourseItems((prev) => {
       const updated = prev.map((course, i) =>
         i !== courseIndex
@@ -275,6 +453,7 @@ export default function PassingTarget() {
               assessments: [...(course.assessments || []), assessment],
             },
       );
+      void persistCourse(updated[courseIndex]);
       triggerCompute(courseIndex, updated);
       return updated;
     });
@@ -286,6 +465,21 @@ export default function PassingTarget() {
     assessIdx: number,
     item: { name: string; weight: number; score?: number; date?: string },
   ) => {
+    const assessment = courseItems[courseIndex]?.assessments?.[assessIdx];
+    if (!assessment) return;
+    const currentItemTotal = (assessment.items ?? []).reduce(
+      (s, it) => s + (it.weight || 0),
+      0,
+    );
+    if (currentItemTotal + item.weight > assessment.weight) {
+      const remaining = Math.max(0, assessment.weight - currentItemTotal);
+      alert(
+        `Cannot add item: total item weight would be ${
+          currentItemTotal + item.weight
+        }%, exceeding the assessment maximum of ${assessment.weight}%.\n\nRemaining capacity: ${remaining}%.`,
+      );
+      return;
+    }
     setCourseItems((prev) => {
       const updated = prev.map((course, ci) =>
         ci !== courseIndex
@@ -302,6 +496,7 @@ export default function PassingTarget() {
               ),
             },
       );
+      void persistCourse(updated[courseIndex]);
       triggerCompute(courseIndex, updated);
       return updated;
     });
@@ -311,9 +506,11 @@ export default function PassingTarget() {
   const renderPassingRequirement = (course: Courses) => {
     if (!course.passingRequirement) return null;
 
-    const details = course.requirements;
+    const details = (course.requirements ?? []).filter(
+      (r) => typeof r.score === "number" && !isNaN(r.score),
+    );
 
-    if (!details || !details.length) {
+    if (!details.length) {
       return <>{course.passingRequirement}</>;
     }
 
@@ -390,6 +587,7 @@ export default function PassingTarget() {
               // Recompute after score is saved; use a tiny delay so state settles
               setTimeout(() => {
                 setCourseItems((prev) => {
+                  void persistCourse(prev[courseIndex]);
                   triggerCompute(courseIndex, prev);
                   return prev;
                 });
@@ -478,10 +676,21 @@ export default function PassingTarget() {
                     </div>
                   </div>
 
-                  <p className="text-gray-primary text-sm">
-                    {item.credits} credits • {item.fromTime}–{item.toTime}{" "}
-                    hours/week
-                  </p>
+                  <div className="flex flex-wrap gap-2 text-sm text-gray-primary">
+                    <span>{item.credits} credits</span>
+                    {(item.scheduleEntries ?? []).length > 0 ? (
+                      item.scheduleEntries!.map((entry, scheduleIndex) => (
+                        <span
+                          key={`${entry.day}-${entry.startTime}-${scheduleIndex}`}
+                          className="rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-700"
+                        >
+                          {entry.day} {entry.startTime}–{entry.endTime}
+                        </span>
+                      ))
+                    ) : (
+                      <span>Schedule not set</span>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex flex-row gap-4 items-center">
@@ -505,12 +714,32 @@ export default function PassingTarget() {
                           Pass Threshold
                         </p>
                         <p className="text-right text-2xl font-medium">
-                          {item.passingGrade ?? item.threshold}
+                          {item.threshold ?? item.passingGrade ?? "AI pending"}
                         </p>
                       </div>
                     </div>
                   )}
 
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!confirm('Delete this course?')) return;
+                        // perform server delete when possible
+                        (async () => {
+                          const maybeId = (item as any).id;
+                          if (maybeId) {
+                            try { await fetch(`/api/courses?id=${maybeId}`, { method: 'DELETE' }) } catch {}
+                          }
+                          setCourseItems((prev) => prev.filter((_, i) => i !== index));
+                        })();
+                      }}
+                      className="text-red-500 hover:text-red-600"
+                      title="Delete course"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
                     width="20"
@@ -571,18 +800,36 @@ export default function PassingTarget() {
                   )}
 
                   {/* Assessment Breakdown header */}
-                  <div className="flex flex-row justify-between items-center">
-                    <h3 className="text-base text-black-primary">
-                      Assessment Breakdown
-                    </h3>
-                    <button
-                      className="flex items-center gap-3 text-indigo-primary text-base font-medium cursor-pointer hover:underline"
-                      onClick={() => setAddingAssessmentToCourse(index)}
-                    >
-                      <CirclePlus size={20} />
-                      Add Assessment
-                    </button>
-                  </div>
+                  {(() => {
+                    const courseAssessTotal = (item.assessments ?? []).reduce(
+                      (s, a) => s + (a.weight || 0),
+                      0,
+                    );
+                    const courseFull = courseAssessTotal >= 100;
+                    return (
+                      <div className="flex flex-row justify-between items-center">
+                        <h3 className="text-base text-black-primary">
+                          Assessment Breakdown
+                          <span className="ml-2 text-xs text-gray-primary">
+                            ({courseAssessTotal}% / 100%)
+                          </span>
+                        </h3>
+                        <button
+                          disabled={courseFull}
+                          title={
+                            courseFull
+                              ? "Total weight already at 100%"
+                              : "Add assessment"
+                          }
+                          className="flex items-center gap-3 text-indigo-primary text-base font-medium cursor-pointer hover:underline disabled:opacity-40 disabled:cursor-not-allowed disabled:no-underline"
+                          onClick={() => setAddingAssessmentToCourse(index)}
+                        >
+                          <CirclePlus size={20} />
+                          Add Assessment
+                        </button>
+                      </div>
+                    );
+                  })()}
 
                   {/* Assessments list */}
                   <div className="flex flex-col gap-5">
@@ -635,13 +882,51 @@ export default function PassingTarget() {
 
                             {/* Right: Add Item + date (when no sub-items) */}
                             <div className="flex flex-col items-end gap-1">
-                              <button
-                                className="flex items-center gap-3 text-indigo-primary text-base font-medium cursor-pointer hover:underline"
-                                onClick={() => setAddingItemTo({ courseIndex: index, assessIdx })}
-                              >
-                                <CirclePlus size={20} />
-                                Add Item
-                              </button>
+                              <div className="flex items-center gap-3">
+                                {(() => {
+                                  const itemTotal = (assessment.items ?? []).reduce(
+                                    (s, it) => s + (it.weight || 0),
+                                    0,
+                                  );
+                                  const itemFull = itemTotal >= assessment.weight;
+                                  return (
+                                    <button
+                                      disabled={itemFull}
+                                      title={
+                                        itemFull
+                                          ? `Items already total ${assessment.weight}%`
+                                          : "Add item"
+                                      }
+                                      className="flex items-center gap-3 text-indigo-primary text-base font-medium cursor-pointer hover:underline disabled:opacity-40 disabled:cursor-not-allowed disabled:no-underline"
+                                      onClick={() => setAddingItemTo({ courseIndex: index, assessIdx })}
+                                    >
+                                      <CirclePlus size={20} />
+                                      Add Item
+                                    </button>
+                                  );
+                                })()}
+                                <button
+                                  title="Delete assessment"
+                                  onClick={() => {
+                                    if (!confirm('Delete this assessment?')) return;
+                                    setCourseItems((prev) => {
+                                      const updated = prev.map((c, ci) =>
+                                        ci !== index
+                                          ? c
+                                          : {
+                                              ...c,
+                                              assessments: c.assessments?.filter((_, ai) => ai !== assessIdx),
+                                            },
+                                      );
+                                      triggerCompute(index, updated);
+                                      return updated;
+                                    });
+                                  }}
+                                  className="text-red-500 hover:text-red-600"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
                               {!hasSubItems && assessment.date && (
                                 <p className="text-sm text-gray-primary text-right">
                                   {assessment.date}
@@ -690,11 +975,41 @@ export default function PassingTarget() {
                                 </div>
                               </div>
 
-                              {subItem.date && (
-                                <p className="text-sm text-gray-primary text-right">
-                                  {subItem.date}
-                                </p>
-                              )}
+                              <div className="flex items-center gap-3">
+                                {subItem.date && (
+                                  <p className="text-sm text-gray-primary text-right">
+                                    {subItem.date}
+                                  </p>
+                                )}
+                                <button
+                                  title="Delete item"
+                                  onClick={() => {
+                                    if (!confirm('Delete this item?')) return;
+                                    setCourseItems((prev) => {
+                                      const updated = prev.map((c, ci) =>
+                                        ci !== index
+                                          ? c
+                                          : {
+                                              ...c,
+                                              assessments: c.assessments?.map((a, ai) =>
+                                                ai !== assessIdx
+                                                  ? a
+                                                  : {
+                                                      ...a,
+                                                      items: a.items?.filter((_, si) => si !== subIdx),
+                                                    },
+                                              ),
+                                            },
+                                      );
+                                      triggerCompute(index, updated);
+                                      return updated;
+                                    });
+                                  }}
+                                  className="text-red-500 hover:text-red-600"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -717,24 +1032,38 @@ export default function PassingTarget() {
       )}
 
       {/* Add Assessment Modal */}
-      {addingAssessmentToCourse !== null && (
-        <AssessmentForm
-          onSubmit={(assessment) =>
-            handleAddAssessment(addingAssessmentToCourse, assessment)
-          }
-          onCancel={() => setAddingAssessmentToCourse(null)}
-        />
-      )}
+      {addingAssessmentToCourse !== null && (() => {
+        const course = courseItems[addingAssessmentToCourse];
+        const used = (course?.assessments ?? []).reduce(
+          (s, a) => s + (a.weight || 0),
+          0,
+        );
+        const remaining = Math.max(0, 100 - used);
+        return (
+          <AssessmentForm
+            maxWeight={remaining}
+            onSubmit={(assessment) =>
+              handleAddAssessment(addingAssessmentToCourse, assessment)
+            }
+            onCancel={() => setAddingAssessmentToCourse(null)}
+          />
+        );
+      })()}
 
       {/* Add Item Modal */}
       {addingItemTo !== null && (() => {
         const assessment =
           courseItems[addingItemTo.courseIndex]?.assessments?.[addingItemTo.assessIdx];
         if (!assessment) return null;
+        const usedItems = (assessment.items ?? []).reduce(
+          (s, it) => s + (it.weight || 0),
+          0,
+        );
+        const remaining = Math.max(0, assessment.weight - usedItems);
         return (
           <ItemForm
             assessmentName={assessment.name}
-            assessmentWeight={assessment.weight}
+            assessmentWeight={remaining}
             onSubmit={(item) =>
               handleAddItem(addingItemTo.courseIndex, addingItemTo.assessIdx, item)
             }
