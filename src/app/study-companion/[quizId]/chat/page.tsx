@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { ArrowLeft, Paperclip, Send, Sparkles } from "lucide-react";
-import { use, useEffect, useRef, useState } from "react";
+import { use, useEffect, useMemo, useRef, useState } from "react";
 import { useQuizById } from "@/lib/quiz-data";
+import { useStore } from "@/store/use-store";
 
 type Message = {
   id: string;
@@ -121,17 +122,63 @@ export default function StudyCompanionChat({
 }) {
   const { quizId } = use(params);
   const quiz = useQuizById(quizId);
+  const attempts = useStore((s) => s.attempts);
+
+  // Latest attempt for this quiz (so the AI sees what the user actually answered).
+  const attempt = useMemo(() => {
+    const matching = attempts.filter((a) => a.quizId === quizId);
+    if (matching.length === 0) return null;
+    return matching.reduce((latest, a) =>
+      new Date(a.completedAt) > new Date(latest.completedAt) ? a : latest,
+    );
+  }, [attempts, quizId]);
+
+  const wrongQuestions = useMemo(() => {
+    if (!quiz || !attempt) return [] as { number: number; prompt: string }[];
+    return quiz.questions
+      .map((q, i) => ({
+        number: i + 1,
+        prompt: q.prompt,
+        correct: attempt.answers?.[q.id] === q.correctAnswer,
+        answered: Boolean(attempt.answers?.[q.id]),
+      }))
+      .filter((q) => !q.correct)
+      .map((q) => ({ number: q.number, prompt: q.prompt }));
+  }, [quiz, attempt]);
+
+  const welcomeContent = useMemo(() => {
+    if (!quiz) return WELCOME_FALLBACK;
+    if (!attempt) {
+      return `Hi! Let's review **${quiz.title}** for ${quiz.course}. Once you've taken the quiz I'll be able to walk through each answer with you. For now, ask me anything about the material.`;
+    }
+    if (wrongQuestions.length === 0) {
+      return `Nice work on **${quiz.title}** — you got every question right (${attempt.correct}/${attempt.total}). Want me to push deeper on any concept or quiz you on related material?`;
+    }
+    const list = wrongQuestions
+      .slice(0, 5)
+      .map((q) => `- Q${q.number}: ${q.prompt}`)
+      .join("\n");
+    const more =
+      wrongQuestions.length > 5
+        ? `\n…and ${wrongQuestions.length - 5} more.`
+        : "";
+    return `You scored **${attempt.correct}/${attempt.total}** on **${quiz.title}**. Here are the ones you missed:\n\n${list}${more}\n\nWant me to start with **Q${wrongQuestions[0].number}**, or pick a different one?`;
+  }, [quiz, attempt, wrongQuestions]);
 
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "welcome",
-      role: "assistant",
-      content: quiz
-        ? `Hi! Let's review **${quiz.title}** for ${quiz.course}. I can walk you through any question, explain why an answer is right or wrong, or quiz you on related concepts. What would you like to dig into first?`
-        : WELCOME_FALLBACK,
-    },
+    { id: "welcome", role: "assistant", content: welcomeContent },
   ]);
+
+  // If the attempt loads after first render (e.g. from persisted store), refresh
+  // the welcome message so the AI's opener reflects the real score.
+  useEffect(() => {
+    setMessages((prev) => {
+      if (prev.length === 0 || prev[0].id !== "welcome") return prev;
+      if (prev[0].content === welcomeContent) return prev;
+      return [{ ...prev[0], content: welcomeContent }, ...prev.slice(1)];
+    });
+  }, [welcomeContent]);
   const [streaming, setStreaming] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -167,10 +214,26 @@ export default function StudyCompanionChat({
       ? {
           quizTitle: quiz.title,
           course: quiz.course,
-          questions: quiz.questions.map((q) => ({
-            prompt: q.prompt,
-            correctAnswer: `${q.correctAnswer}. ${q.options.find((o) => o.letter === q.correctAnswer)?.text ?? ""}`,
-          })),
+          score: attempt ? `${attempt.correct}/${attempt.total}` : undefined,
+          questions: quiz.questions.map((q) => {
+            const userLetter = attempt?.answers?.[q.id];
+            const userOption = q.options.find((o) => o.letter === userLetter);
+            const correctOption = q.options.find(
+              (o) => o.letter === q.correctAnswer,
+            );
+            return {
+              prompt: q.prompt,
+              userAnswer: userOption
+                ? `${userOption.letter}. ${userOption.text}`
+                : userLetter
+                  ? userLetter
+                  : "(not answered)",
+              correctAnswer: correctOption
+                ? `${correctOption.letter}. ${correctOption.text}`
+                : q.correctAnswer,
+              isCorrect: Boolean(userLetter) && userLetter === q.correctAnswer,
+            };
+          }),
         }
       : undefined;
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callOllama, extractFirstJson } from "@/lib/ollama";
+import { callClaude, extractFirstJson } from "@/lib/anthropic";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -105,9 +105,10 @@ Return ONLY this JSON — no prose:
 }`;
 
   try {
-    const response = await callOllama([
-      { role: "user", content: prompt },
-    ]);
+    const response = await callClaude(
+      [{ role: "user", content: prompt }],
+      { jsonMode: true },
+    );
 
     const result = extractFirstJson<ModelResponse>(response);
     return NextResponse.json(result);

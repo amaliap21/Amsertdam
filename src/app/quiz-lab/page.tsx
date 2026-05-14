@@ -7,7 +7,84 @@ import toast from "react-hot-toast";
 import CreateQuizModal, {
   type GeneratedQuestion,
 } from "@/components/ui/quiz-form";
-import { useStore } from "@/store/use-store";
+import { useStore, type GeneratedQuiz } from "@/store/use-store";
+
+async function downloadQuizPdf(quiz: GeneratedQuiz) {
+  const { jsPDF } = await import("jspdf");
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+
+  const marginX = 48;
+  const marginTop = 56;
+  const marginBottom = 56;
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const contentWidth = pageWidth - marginX * 2;
+  let y = marginTop;
+
+  const ensureSpace = (needed: number) => {
+    if (y + needed > pageHeight - marginBottom) {
+      doc.addPage();
+      y = marginTop;
+    }
+  };
+
+  const writeWrapped = (
+    text: string,
+    fontSize: number,
+    style: "normal" | "bold" = "normal",
+    leftPad = 0,
+  ) => {
+    doc.setFont("helvetica", style);
+    doc.setFontSize(fontSize);
+    const lineHeight = fontSize * 1.35;
+    const lines = doc.splitTextToSize(text, contentWidth - leftPad) as string[];
+    for (const line of lines) {
+      ensureSpace(lineHeight);
+      doc.text(line, marginX + leftPad, y);
+      y += lineHeight;
+    }
+  };
+
+  // Header
+  writeWrapped(quiz.title || "Quiz", 18, "bold");
+  writeWrapped(
+    `${quiz.course || "—"} • ${quiz.questions.length} questions`,
+    11,
+    "normal",
+  );
+  if (quiz.source) {
+    writeWrapped(`Source: ${quiz.source}`, 10, "normal");
+  }
+  y += 12;
+
+  // Questions
+  quiz.questions.forEach((q, idx) => {
+    ensureSpace(40);
+    writeWrapped(`${idx + 1}. ${q.prompt}`, 12, "bold");
+    y += 2;
+    q.options.forEach((opt) => {
+      writeWrapped(`${opt.letter}. ${opt.text}`, 11, "normal", 16);
+    });
+    y += 10;
+  });
+
+  // Answer key on a new page
+  doc.addPage();
+  y = marginTop;
+  writeWrapped("Answer Key", 16, "bold");
+  y += 6;
+  quiz.questions.forEach((q, idx) => {
+    const opt = q.options.find((o) => o.letter === q.correctAnswer);
+    const line = opt
+      ? `${idx + 1}. ${q.correctAnswer}. ${opt.text}`
+      : `${idx + 1}. ${q.correctAnswer}`;
+    writeWrapped(line, 11, "normal");
+  });
+
+  const safeName =
+    (quiz.title || "quiz").replace(/[^a-z0-9-_\s]/gi, "").trim() || "quiz";
+  doc.save(`${safeName}.pdf`);
+}
 
 export default function QuizLab() {
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -125,7 +202,18 @@ export default function QuizLab() {
                 </Link>
                 <button
                   type="button"
-                  onClick={() => toast.success("Download started")}
+                  onClick={async () => {
+                    try {
+                      await downloadQuizPdf(quiz);
+                      toast.success("PDF downloaded");
+                    } catch (err) {
+                      toast.error(
+                        err instanceof Error
+                          ? err.message
+                          : "Failed to generate PDF",
+                      );
+                    }
+                  }}
                   className="flex items-center gap-1.5 text-sm text-gray-primary hover:text-indigo-primary transition-colors"
                 >
                   <Download size={14} />

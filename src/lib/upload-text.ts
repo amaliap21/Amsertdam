@@ -42,12 +42,36 @@ export async function extractTextFromUpload(file: File): Promise<ExtractedUpload
         "pdf-parse: PDFParse class not found on module export.",
       );
     }
+    // Resolve the pdfjs worker path WITHOUT going through import.meta.url —
+    // Turbopack rewrites it to a virtual id like "[project]/.../[app-route]
+    // (ecmascript)" which makes createRequire / require.resolve fail.
     try {
-      const { createRequire } = await import("module");
+      const path = await import("path");
+      const fs = await import("fs");
       const { pathToFileURL } = await import("url");
-      const req = createRequire(import.meta.url);
-      const workerPath = req.resolve("pdfjs-dist/legacy/build/pdf.worker.mjs");
-      PDFParseCtor.setWorker?.(pathToFileURL(workerPath).href);
+
+      const candidates = [
+        path.join(
+          process.cwd(),
+          "node_modules",
+          "pdfjs-dist",
+          "legacy",
+          "build",
+          "pdf.worker.mjs",
+        ),
+        path.join(
+          process.cwd(),
+          "node_modules",
+          "pdfjs-dist",
+          "build",
+          "pdf.worker.mjs",
+        ),
+      ];
+
+      const workerPath = candidates.find((p) => fs.existsSync(p));
+      if (workerPath) {
+        PDFParseCtor.setWorker?.(pathToFileURL(workerPath).href);
+      }
     } catch {}
     const buffer = Buffer.from(await file.arrayBuffer());
     const parser = new PDFParseCtor({ data: new Uint8Array(buffer), disableWorker: true });
