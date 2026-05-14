@@ -1,0 +1,290 @@
+================================================================================
+AMSERTDAM — PYTHON API JSON SAMPLES (request + response for every feature)
+All endpoints are POST and routed via vercel.json -> api/python/*.py
+================================================================================
+
+
+================================================================================
+1) GRADUATION THRESHOLD ENGINE
+   POST /api/python/graduation_threshold
+   Algorithm: Weighted Grade Optimization + linear regression buffer + safety margin
+================================================================================
+
+------- REQUEST -------
+{
+  "passing_grade": 75,
+  "historical_scores": [78, 82, 74, 80, 76],
+  "assessments": [
+    { "name": "Project",       "weight": 30, "score": 85 },
+    { "name": "Midterm Exam",  "weight": 35, "score": 72 },
+    { "name": "Final Exam",    "weight": 35 }
+  ]
+}
+
+------- RESPONSE -------
+{
+  "current_grade": 51.2,
+  "passing_grade": 75,
+  "gap": 23.8,
+  "requirements": [
+    { "name": "Final Exam", "weight": 35, "min_score": 73.0, "is_feasible": true }
+  ],
+  "status": "Worth Reviewing",
+  "safety_margin": 4.5,
+  "min_score_raw": 68.0,
+  "predicted_achievable": 78.3,
+  "is_feasible": true,
+  "message": "To pass this course, you need at least 73.0 on Final Exam"
+}
+
+
+================================================================================
+2) EFFORT IMPACT ANALYZER
+   POST /api/python/effort_impact
+   Algorithm: Multi-Criteria Decision Analysis (MCDA)
+   Supports SINGLE task or BATCH ({ "tasks": [...] })
+================================================================================
+
+------- REQUEST (single task) -------
+{
+  "task_name": "Final Project Report",
+  "grade_weight": 30,
+  "estimated_hours": 8,
+  "deadline_days": 5,
+  "current_grade": 65,
+  "passing_grade": 75,
+  "stress_level": 4,
+  "weekly_capacity_hours": 30
+}
+
+------- RESPONSE (single task) -------
+{
+  "task_name": "Final Project Report",
+  "priority": "HIGH",
+  "action": "Do it fully and on time",
+  "color": "green",
+  "composite_score": 0.712,
+  "efficiency_ratio": 3.75,
+  "breakdown": {
+    "grade_impact": 0.3,
+    "urgency": 0.472,
+    "gap_factor": 0.5,
+    "effort_penalty": 0.267,
+    "stress_penalty": 0.75
+  },
+  "rationale": "Final Project Report carries 30% of your final grade; you are 10.0 points below passing; high stress risk."
+}
+
+------- REQUEST (batch) -------
+{
+  "tasks": [
+    {
+      "task_name": "Lab 5",
+      "grade_weight": 5,
+      "estimated_hours": 2,
+      "deadline_days": 1,
+      "current_grade": 72,
+      "passing_grade": 75,
+      "stress_level": 3,
+      "weekly_capacity_hours": 30
+    },
+    {
+      "task_name": "Final Project Report",
+      "grade_weight": 30,
+      "estimated_hours": 8,
+      "deadline_days": 5,
+      "current_grade": 72,
+      "passing_grade": 75,
+      "stress_level": 4,
+      "weekly_capacity_hours": 30
+    }
+  ]
+}
+
+------- RESPONSE (batch) -------
+{
+  "tasks": [
+    { "task_name": "Final Project Report", "priority": "HIGH",   "composite_score": 0.71, "...": "..." },
+    { "task_name": "Lab 5",                "priority": "MEDIUM", "composite_score": 0.48, "...": "..." }
+  ],
+  "summary": { "high": 1, "medium": 1, "low": 0 }
+}
+
+
+================================================================================
+3) SACRIFICE INTELLIGENCE
+   POST /api/python/sacrifice_intel
+   Algorithm: Greedy efficiency-ratio ranking
+================================================================================
+
+------- REQUEST -------
+{
+  "available_hours_per_week": 25,
+  "current_grade": 70,
+  "passing_grade": 75,
+  "tasks": [
+    {
+      "name": "Final Project",
+      "grade_weight": 30,
+      "estimated_hours": 10,
+      "deadline_days": 7,
+      "stress_level": 3,
+      "completion_pct": 20
+    },
+    {
+      "name": "Reading Quiz",
+      "grade_weight": 3,
+      "estimated_hours": 4,
+      "deadline_days": 3,
+      "stress_level": 2,
+      "completion_pct": 0
+    },
+    {
+      "name": "Discussion Post",
+      "grade_weight": 2,
+      "estimated_hours": 1,
+      "deadline_days": 2,
+      "stress_level": 1,
+      "completion_pct": 0
+    }
+  ]
+}
+
+------- RESPONSE -------
+{
+  "tasks": [
+    {
+      "name": "Final Project",
+      "grade_weight": 30,
+      "estimated_hours": 10,
+      "deadline_days": 7,
+      "tier": "FOCUS",
+      "efficiency": 0.0438,
+      "advice": "Worth 30% of grade — invest time here."
+    },
+    {
+      "name": "Discussion Post",
+      "grade_weight": 2,
+      "estimated_hours": 1,
+      "deadline_days": 2,
+      "tier": "MINIMAL",
+      "efficiency": 0.039,
+      "advice": "Moderate impact (2%). Do it, but cap your time to avoid over-investing."
+    },
+    {
+      "name": "Reading Quiz",
+      "grade_weight": 3,
+      "estimated_hours": 4,
+      "deadline_days": 3,
+      "tier": "SACRIFICE",
+      "efficiency": 0.0098,
+      "advice": "Very small grade contribution — safe to skip entirely."
+    }
+  ],
+  "hours_allocated": 9.0,
+  "available_hours": 25,
+  "summary": "Focus on: Final Project | Do minimally: Discussion Post | Sacrifice: Reading Quiz. You'll use 9.0/25h of your weekly budget."
+}
+
+
+================================================================================
+4) PRIORITY RECOMMENDATION SYSTEM
+   POST /api/python/priority_system
+   Algorithm: Weighted priority scoring + greedy day-by-day scheduler
+================================================================================
+
+------- REQUEST -------
+{
+  "current_grade": 68,
+  "passing_grade": 75,
+  "daily_study_hours": 5,
+  "start_date": "2026-05-14",
+  "tasks": [
+    {
+      "name": "Operating Systems Midterm",
+      "grade_weight": 35,
+      "deadline_days": 4,
+      "difficulty": "hard",
+      "estimated_hours": 8,
+      "completion_pct": 0
+    },
+    {
+      "name": "Data Structures Assignment",
+      "grade_weight": 10,
+      "deadline_days": 2,
+      "difficulty": "medium",
+      "estimated_hours": 3,
+      "completion_pct": 40
+    },
+    {
+      "name": "Calculus Practice Set",
+      "grade_weight": 5,
+      "deadline_days": 9,
+      "difficulty": "easy",
+      "estimated_hours": 2,
+      "completion_pct": 0
+    }
+  ]
+}
+
+------- RESPONSE -------
+{
+  "ranked_tasks": [
+    {
+      "rank": 1,
+      "name": "Operating Systems Midterm",
+      "grade_weight": 35,
+      "deadline_days": 4,
+      "difficulty": "hard",
+      "estimated_hours": 8,
+      "completion_pct": 0,
+      "priority_score": 0.564,
+      "tier": "HIGH",
+      "action": "Tackle Operating Systems Midterm first thing — high impact."
+    },
+    {
+      "rank": 2,
+      "name": "Data Structures Assignment",
+      "grade_weight": 10,
+      "deadline_days": 2,
+      "difficulty": "medium",
+      "estimated_hours": 3,
+      "completion_pct": 40,
+      "priority_score": 0.421,
+      "tier": "MEDIUM",
+      "action": "Schedule Data Structures Assignment after HIGH priority tasks."
+    },
+    {
+      "rank": 3,
+      "name": "Calculus Practice Set",
+      "grade_weight": 5,
+      "deadline_days": 9,
+      "difficulty": "easy",
+      "estimated_hours": 2,
+      "completion_pct": 0,
+      "priority_score": 0.215,
+      "tier": "LOW",
+      "action": "Do Calculus Practice Set only if time permits."
+    }
+  ],
+  "schedule": [
+    { "day": 1, "date": "2026-05-14", "task_name": "Operating Systems Midterm",  "hours_allocated": 5.0, "priority_score": 0.564, "tier": "HIGH" },
+    { "day": 2, "date": "2026-05-15", "task_name": "Operating Systems Midterm",  "hours_allocated": 3.0, "priority_score": 0.564, "tier": "HIGH" },
+    { "day": 2, "date": "2026-05-15", "task_name": "Data Structures Assignment", "hours_allocated": 1.8, "priority_score": 0.421, "tier": "MEDIUM" },
+    { "day": 3, "date": "2026-05-16", "task_name": "Calculus Practice Set",      "hours_allocated": 2.0, "priority_score": 0.215, "tier": "LOW" }
+  ],
+  "summary": {
+    "total_tasks": 3,
+    "total_hours_needed": 11.8,
+    "days_needed": 3,
+    "daily_study_hours": 5,
+    "high_priority": 1,
+    "medium_priority": 1,
+    "low_priority": 1
+  }
+}
+
+
+================================================================================
+END OF FILE
+================================================================================

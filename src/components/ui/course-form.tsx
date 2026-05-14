@@ -1,11 +1,12 @@
 "use client";
-import { X } from "lucide-react";
+import { X, Trash2 } from "lucide-react";
 import React, { useState } from "react";
 
 type CourseFormProps = {
   onSubmit: (course: {
     courseName: string;
     credits: number;
+    threshold: number | null;
     scheduleEntries: { day: string; startTime: string; endTime: string }[];
     typeTracking: string;
     assessments?: {
@@ -23,10 +24,19 @@ type CourseFormProps = {
   onCancel: () => void;
 };
 
+function diffHours(start: string, end: string): number {
+  if (!start || !end) return 0;
+  const [sh, sm] = start.split(":").map(Number);
+  const [eh, em] = end.split(":").map(Number);
+  if ([sh, sm, eh, em].some((n) => Number.isNaN(n))) return 0;
+  return (eh * 60 + em - (sh * 60 + sm)) / 60;
+}
+
 export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
   const [formData, setFormData] = useState({
     courseName: "",
     credits: 0,
+    threshold: "" as number | "",
     scheduleEntries: [{ day: "", startTime: "", endTime: "" }],
   });
 
@@ -66,6 +76,11 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (formData.credits < 0) {
+      alert("Credits cannot be negative.");
+      return;
+    }
+
     const scheduleEntries = formData.scheduleEntries.filter(
       (entry) => entry.day && entry.startTime && entry.endTime,
     );
@@ -75,9 +90,37 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
       return;
     }
 
+    for (const entry of scheduleEntries) {
+      if (entry.startTime >= entry.endTime) {
+        alert(
+          `Schedule on ${entry.day}: start time (${entry.startTime}) must be earlier than end time (${entry.endTime}).`,
+        );
+        return;
+      }
+    }
+
+    const totalHours = scheduleEntries.reduce(
+      (sum, e) => sum + diffHours(e.startTime, e.endTime),
+      0,
+    );
+    if (Math.abs(totalHours - formData.credits) > 0.01) {
+      alert(
+        `Schedule hours (${totalHours}h) must equal Credits (${formData.credits}). Adjust your schedule or credits so they match.`,
+      );
+      return;
+    }
+
+    const threshold =
+      formData.threshold === "" ? null : Number(formData.threshold);
+    if (threshold !== null && (threshold < 0 || threshold > 100)) {
+      alert("Pass Threshold must be between 0 and 100.");
+      return;
+    }
+
     const newCourse = {
       courseName: formData.courseName,
       credits: formData.credits,
+      threshold,
       typeTracking: "On Track",
       scheduleEntries,
       passingRequirement: "",
@@ -146,17 +189,46 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
             </label>
             <input
               type="number"
+              min={0}
               placeholder="0"
               value={formData.credits || ""}
+              onChange={(e) => {
+                const parsed = parseInt(e.target.value);
+                const safe = Number.isNaN(parsed) ? 0 : Math.max(0, parsed);
+                setFormData({ ...formData, credits: safe });
+              }}
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent appearance-none"
+              required
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              1 credit = 1 hour. Total schedule hours must match this value.
+            </p>
+          </div>
+
+          {/* Pass Threshold */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Pass Threshold<span className="text-red-500">*</span>
+            </label>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              placeholder="e.g., 75"
+              value={formData.threshold}
               onChange={(e) =>
                 setFormData({
                   ...formData,
-                  credits: parseInt(e.target.value) || 0,
+                  threshold:
+                    e.target.value === "" ? "" : Number(e.target.value),
                 })
               }
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent appearance-none"
               required
             />
+            <p className="text-xs text-gray-500 mt-1">
+              Minimum grade (0–100) needed to pass this course.
+            </p>
           </div>
 
           {/* Schedule Entries */}
@@ -175,41 +247,41 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
             </div>
 
             {formData.scheduleEntries.map((entry, index) => (
-              <div key={index} className="grid grid-cols-3 gap-3 items-end">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-2">
-                    Day
-                  </label>
-                  <select
-                    value={entry.day}
-                    onChange={(e) => updateScheduleEntry(index, "day", e.target.value)}
-                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent appearance-none bg-white"
-                  >
-                    <option value="">Select day</option>
-                    <option value="Monday">Monday</option>
-                    <option value="Tuesday">Tuesday</option>
-                    <option value="Wednesday">Wednesday</option>
-                    <option value="Thursday">Thursday</option>
-                    <option value="Friday">Friday</option>
-                    <option value="Saturday">Saturday</option>
-                    <option value="Sunday">Sunday</option>
-                  </select>
-                </div>
+              <div key={index} className="flex items-end gap-2">
+                <div className="grid grid-cols-3 gap-3 flex-1 min-w-0">
+                  <div className="min-w-0">
+                    <label className="block text-xs font-medium text-gray-700 mb-2">
+                      Day
+                    </label>
+                    <select
+                      value={entry.day}
+                      onChange={(e) => updateScheduleEntry(index, "day", e.target.value)}
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent appearance-none bg-white text-sm"
+                    >
+                      <option value="">Select day</option>
+                      <option value="Monday">Monday</option>
+                      <option value="Tuesday">Tuesday</option>
+                      <option value="Wednesday">Wednesday</option>
+                      <option value="Thursday">Thursday</option>
+                      <option value="Friday">Friday</option>
+                      <option value="Saturday">Saturday</option>
+                      <option value="Sunday">Sunday</option>
+                    </select>
+                  </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-2">
-                    Start Time
-                  </label>
-                  <input
-                    type="time"
-                    value={entry.startTime}
-                    onChange={(e) => updateScheduleEntry(index, "startTime", e.target.value)}
-                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent"
-                  />
-                </div>
+                  <div className="min-w-0">
+                    <label className="block text-xs font-medium text-gray-700 mb-2">
+                      Start Time
+                    </label>
+                    <input
+                      type="time"
+                      value={entry.startTime}
+                      onChange={(e) => updateScheduleEntry(index, "startTime", e.target.value)}
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-sm"
+                    />
+                  </div>
 
-                <div className="flex items-end gap-2">
-                  <div className="flex-1">
+                  <div className="min-w-0">
                     <label className="block text-xs font-medium text-gray-700 mb-2">
                       End Time
                     </label>
@@ -217,19 +289,22 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
                       type="time"
                       value={entry.endTime}
                       onChange={(e) => updateScheduleEntry(index, "endTime", e.target.value)}
-                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent"
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-sm"
                     />
                   </div>
-                  {formData.scheduleEntries.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeScheduleEntry(index)}
-                      className="h-11 px-3 rounded-lg border border-gray-300 text-gray-500 hover:text-red-500 hover:border-red-300"
-                    >
-                      Remove
-                    </button>
-                  )}
                 </div>
+
+                {formData.scheduleEntries.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeScheduleEntry(index)}
+                    title="Remove this time"
+                    aria-label="Remove this time"
+                    className="shrink-0 h-11 w-11 flex items-center justify-center rounded-lg border border-gray-300 text-gray-500 hover:text-red-500 hover:border-red-300"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                )}
               </div>
             ))}
           </div>

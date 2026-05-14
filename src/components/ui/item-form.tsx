@@ -1,13 +1,11 @@
 "use client";
 import {
   X,
-  CalendarDays,
   ChevronUp,
   ChevronDown,
   CirclePlus,
 } from "lucide-react";
 import React, { useState } from "react";
-import { formatDate } from "@/lib/utils";
 
 type ItemFormProps = {
   assessmentName: string;
@@ -16,7 +14,6 @@ type ItemFormProps = {
     name: string;
     weight: number;
     score?: number;
-    date?: string;
   }) => void;
   onCancel: () => void;
 };
@@ -29,7 +26,6 @@ export default function ItemForm({
 }: ItemFormProps) {
   const [name, setName] = useState("");
   const [weight, setWeight] = useState<number | "">("");
-  const [deadline, setDeadline] = useState("");
   const [mark, setMark] = useState<number | "">(0);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -45,7 +41,6 @@ export default function ItemForm({
       name,
       weight: w,
       score: mark !== "" ? Number(mark) : undefined,
-      date: deadline ? formatDate(deadline) : undefined,
     });
   };
 
@@ -117,25 +112,6 @@ export default function ItemForm({
                 <span className="text-sm font-medium text-black-primary whitespace-nowrap">
                   / {assessmentWeight}%
                 </span>
-              </div>
-            </div>
-
-            {/* Deadline */}
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium text-black-primary">
-                Deadline
-              </label>
-              <div className="flex items-center gap-3 border border-[#b1b1b1] rounded-xl px-4 py-2.5 focus-within:ring-2 focus-within:ring-indigo-primary focus-within:border-transparent">
-                <CalendarDays
-                  size={20}
-                  className="text-gray-primary shrink-0"
-                />
-                <input
-                  type="date"
-                  value={deadline}
-                  onChange={(e) => setDeadline(e.target.value)}
-                  className="text-sm text-gray-primary w-full focus:outline-none bg-transparent"
-                />
               </div>
             </div>
 

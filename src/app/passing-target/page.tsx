@@ -414,7 +414,11 @@ export default function PassingTarget() {
         })
         if (resp.ok) {
           const body = await resp.json()
-          const updated = [...courseItems, normalizeCourse(body)];
+          // Server may not echo threshold back through course_payload — preserve user input
+          const merged = normalizeCourse(body);
+          merged.threshold = newCourse.threshold ?? merged.threshold ?? null;
+          merged.passingGrade = newCourse.threshold ?? merged.passingGrade;
+          const updated = [...courseItems, merged];
           setCourseItems(updated);
           setShowForm(false);
           return

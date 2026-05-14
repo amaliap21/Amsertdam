@@ -1,7 +1,16 @@
 "use client";
 
-import { X, Calendar, CirclePlus } from "lucide-react";
-import { useState } from "react";
+import { X, CirclePlus } from "lucide-react";
+import { useEffect, useState } from "react";
+
+type CourseLite = {
+  id?: string;
+  courseName: string;
+  assessments?: {
+    name: string;
+    items?: { name: string }[];
+  }[];
+};
 
 type AddTaskModalProps = {
   isOpen: boolean;
@@ -11,30 +20,74 @@ type AddTaskModalProps = {
     description: string;
     deadline: string;
     estimatedHours?: number | null;
+    course: string;
   }) => void;
 };
+
+const HOUR_OPTIONS = [0.5, 1, 1.5, 2, 3, 4, 5, 6, 8];
 
 export default function AddTaskModal({
   isOpen,
   onClose,
   onSubmit,
 }: AddTaskModalProps) {
-  const [formData, setFormData] = useState({
-    taskName: "",
-    description: "",
-    deadline: "",
-    estimatedHours: "",
-  });
+  const [taskName, setTaskName] = useState("");
+  const [courseName, setCourseName] = useState("");
+  const [assessmentName, setAssessmentName] = useState("");
+  const [itemName, setItemName] = useState("");
+  const [deadline, setDeadline] = useState("");
+  const [estimatedHours, setEstimatedHours] = useState<string>("");
+
+  const [courses, setCourses] = useState<CourseLite[]>([]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    (async () => {
+      try {
+        const r = await fetch("/api/courses");
+        if (!r.ok) return;
+        const data = await r.json();
+        if (!Array.isArray(data)) return;
+        const mapped: CourseLite[] = data.map((c: any) => {
+          const payload = c.course_payload ?? {};
+          return {
+            id: c.id,
+            courseName: c.title ?? payload.title ?? "Untitled",
+            assessments: Array.isArray(payload.assessments)
+              ? payload.assessments
+              : Array.isArray(c.assessments)
+                ? c.assessments
+                : [],
+          };
+        });
+        setCourses(mapped);
+      } catch {}
+    })();
+  }, [isOpen]);
+
+  const currentCourse = courses.find((c) => c.courseName === courseName);
+  const assessments = currentCourse?.assessments ?? [];
+  const currentAssessment = assessments.find((a) => a.name === assessmentName);
+  const items = currentAssessment?.items ?? [];
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!taskName || !courseName || !assessmentName || !deadline) return;
+    const descParts: string[] = [`Assessment: ${assessmentName}`];
+    if (itemName) descParts.push(`Item: ${itemName}`);
     onSubmit({
-      taskName: formData.taskName,
-      description: formData.description,
-      deadline: formData.deadline,
-      estimatedHours: formData.estimatedHours ? Number(formData.estimatedHours) : undefined,
+      taskName,
+      course: courseName,
+      description: descParts.join(" • "),
+      deadline,
+      estimatedHours: estimatedHours ? Number(estimatedHours) : undefined,
     });
-    setFormData({ taskName: "", description: "", deadline: "", estimatedHours: "" });
+    setTaskName("");
+    setCourseName("");
+    setAssessmentName("");
+    setItemName("");
+    setDeadline("");
+    setEstimatedHours("");
     onClose();
   };
 
@@ -50,7 +103,6 @@ export default function AddTaskModal({
         className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-8 relative"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Close button */}
         <button
           onClick={onClose}
           className="absolute top-6 right-6 text-gray-400 hover:text-gray-600 transition-colors"
@@ -58,90 +110,145 @@ export default function AddTaskModal({
           <X size={24} />
         </button>
 
-        {/* Header */}
-        <div className="mb-8">
-          <h2 className="text-2xl font-semibold text-black-primary mb-2">
+        <div className="mb-6">
+          <h2 className="text-2xl font-semibold text-black-primary mb-1">
             Add New Task
           </h2>
           <p className="text-sm text-gray-primary">
-            AI will estimate effort based on your description
+            Link this task to a course, assessment, and item.
           </p>
         </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Task Name */}
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {/* Task Name (only manual input) */}
           <div>
-            <label className="block text-sm font-medium text-black-primary mb-3">
-              Task Name
+            <label className="block text-sm font-medium text-black-primary mb-2">
+              Task Name<span className="text-red-500">*</span>
             </label>
             <input
               type="text"
-              placeholder="e.g., Complete assignment 3"
-              value={formData.taskName}
-              onChange={(e) =>
-                setFormData({ ...formData, taskName: e.target.value })
-              }
-              className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-black-primary placeholder:text-gray-400"
+              placeholder="e.g., Draft section 3"
+              value={taskName}
+              onChange={(e) => setTaskName(e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-black-primary placeholder:text-gray-400"
               required
             />
           </div>
 
-          {/* Description */}
+          {/* Course */}
           <div>
-            <label className="block text-sm font-medium text-black-primary mb-3">
-              Description
+            <label className="block text-sm font-medium text-black-primary mb-2">
+              Course Name<span className="text-red-500">*</span>
             </label>
-            <textarea
-              placeholder="Describe the task. AI will estimate time and effort from this."
-              value={formData.description}
-              onChange={(e) =>
-                setFormData({ ...formData, description: e.target.value })
-              }
-              className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-black-primary placeholder:text-gray-400 resize-none"
-              rows={4}
+            <select
+              value={courseName}
+              onChange={(e) => {
+                setCourseName(e.target.value);
+                setAssessmentName("");
+                setItemName("");
+              }}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-black-primary bg-white"
               required
-            />
+            >
+              <option value="">Select course</option>
+              {courses.map((c) => (
+                <option key={c.id ?? c.courseName} value={c.courseName}>
+                  {c.courseName}
+                </option>
+              ))}
+            </select>
+            {courses.length === 0 && (
+              <p className="text-xs text-gray-500 mt-1">
+                No courses yet — add one in Passing Target first.
+              </p>
+            )}
           </div>
 
-          {/* Deadline */}
+          {/* Assessment */}
           <div>
-            <label className="block text-sm font-medium text-black-primary mb-3">
-              Deadline
+            <label className="block text-sm font-medium text-black-primary mb-2">
+              Assessment Name<span className="text-red-500">*</span>
             </label>
-            <div className="relative">
-              <Calendar
-                size={20}
-                className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400"
-              />
-              <input
-                type="date"
-                value={formData.deadline}
-                onChange={(e) =>
-                  setFormData({ ...formData, deadline: e.target.value })
-                }
-                className="w-full pl-12 pr-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-black-primary placeholder:text-gray-400"
-                placeholder="Pick a date"
-                required
-              />
-            </div>
+            <select
+              value={assessmentName}
+              onChange={(e) => {
+                setAssessmentName(e.target.value);
+                setItemName("");
+              }}
+              disabled={!courseName}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-black-primary bg-white disabled:bg-gray-50 disabled:text-gray-400"
+              required
+            >
+              <option value="">
+                {courseName ? "Select assessment" : "Select a course first"}
+              </option>
+              {assessments.map((a) => (
+                <option key={a.name} value={a.name}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
           </div>
 
-          {/* Estimated Hours */}
+          {/* Item */}
           <div>
-            <label className="block text-sm font-medium text-black-primary mb-3">Estimated hours</label>
+            <label className="block text-sm font-medium text-black-primary mb-2">
+              Item Name
+            </label>
+            <select
+              value={itemName}
+              onChange={(e) => setItemName(e.target.value)}
+              disabled={!assessmentName || items.length === 0}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-black-primary bg-white disabled:bg-gray-50 disabled:text-gray-400"
+            >
+              <option value="">
+                {!assessmentName
+                  ? "Select an assessment first"
+                  : items.length === 0
+                    ? "No items for this assessment"
+                    : "Select item (optional)"}
+              </option>
+              {items.map((it) => (
+                <option key={it.name} value={it.name}>
+                  {it.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Deadline (datetime picker) */}
+          <div>
+            <label className="block text-sm font-medium text-black-primary mb-2">
+              Deadline<span className="text-red-500">*</span>
+            </label>
             <input
-              type="number"
-              min="0"
-              step="0.25"
-              placeholder="e.g., 2.5"
-              value={formData.estimatedHours}
-              onChange={(e) => setFormData({ ...formData, estimatedHours: e.target.value })}
-              className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-black-primary placeholder:text-gray-400"
+              type="datetime-local"
+              value={deadline}
+              onChange={(e) => setDeadline(e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-black-primary"
+              required
             />
           </div>
 
-          {/* Submit Button */}
+          {/* Estimated hours (dropdown) */}
+          <div>
+            <label className="block text-sm font-medium text-black-primary mb-2">
+              Estimated Hours
+            </label>
+            <select
+              value={estimatedHours}
+              onChange={(e) => setEstimatedHours(e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-black-primary bg-white"
+            >
+              <option value="">Not sure</option>
+              {HOUR_OPTIONS.map((h) => (
+                <option key={h} value={h}>
+                  {h} hour{h === 1 ? "" : "s"}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <button
             type="submit"
             className="w-full flex items-center justify-center gap-2 px-4 py-4 bg-indigo-primary text-white rounded-xl hover:bg-indigo-600 transition-colors font-medium"

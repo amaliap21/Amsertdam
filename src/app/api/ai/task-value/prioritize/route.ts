@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callOllama, extractFirstJson } from "@/lib/ollama";
+import { callClaude, extractFirstJson } from "@/lib/anthropic";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -97,7 +97,7 @@ Return ONLY a single JSON object, no prose, no code fences. Use this exact shape
 }`;
 
   try {
-    const response = await callOllama(
+    const response = await callClaude(
       [
         {
           role: "system",

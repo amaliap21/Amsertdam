@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callOllama, extractFirstJson } from "@/lib/ollama";
+import { callClaude, extractFirstJson } from "@/lib/anthropic";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { extractTextFromUpload } from "@/lib/upload-text";
 
@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            "Image OCR is not supported by the local model. Please upload a PDF or text file containing readable text.",
+            "Image OCR is not enabled on this endpoint. Please upload a PDF or text file containing readable text.",
         },
         { status: 415 },
       );
@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const limitResponse = await callOllama(
+    const limitResponse = await callClaude(
       [
         {
           role: "system",
@@ -117,7 +117,7 @@ export async function POST(req: NextRequest) {
       ? Math.max(1, Math.min(maxQuestions, Math.round(requestedQuestionsRaw)))
       : maxQuestions;
 
-    const response = await callOllama(
+    const response = await callClaude(
       [
         {
           role: "system",

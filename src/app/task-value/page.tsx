@@ -42,14 +42,17 @@ export default function TaskValue() {
     description: string;
     deadline: string;
     estimatedHours?: number | null;
+    course: string;
   }) => {
     await addTask({
       title: task.taskName,
-      course: "General",
+      course: task.course || "General",
       date: task.deadline
-        ? new Date(task.deadline).toLocaleDateString("en-US", {
+        ? new Date(task.deadline).toLocaleString("en-US", {
             month: "short",
             day: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
           })
         : "—",
       timeEstimate: task.estimatedHours ? `${task.estimatedHours}h` : "—",

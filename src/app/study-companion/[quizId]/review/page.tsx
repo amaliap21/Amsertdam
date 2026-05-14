@@ -2,15 +2,9 @@
 
 import Link from "next/link";
 import { ArrowLeft, CheckCircle2, MessagesSquare, XCircle } from "lucide-react";
-import { use } from "react";
-
-type Question = {
-  id: string;
-  question: string;
-  yourAnswer: string;
-  correctAnswer: string;
-  isCorrect: boolean;
-};
+import { use, useMemo } from "react";
+import { useQuizById } from "@/lib/quiz-data";
+import { useStore } from "@/store/use-store";
 
 export default function StudyCompanionReview({
   params,
@@ -18,31 +12,53 @@ export default function StudyCompanionReview({
   params: Promise<{ quizId: string }>;
 }) {
   const { quizId } = use(params);
+  const quiz = useQuizById(quizId);
+  const attempts = useStore((s) => s.attempts);
 
-  const questions: Question[] = [
-    {
-      id: "1",
-      question:
-        "Which data structure uses Last-In-First-Out (LIFO) ordering?",
-      yourAnswer: "B. Stack",
-      correctAnswer: "B. Stack",
-      isCorrect: true,
-    },
-    {
-      id: "2",
-      question: "Which traversal visits the root node first?",
-      yourAnswer: "A. Pre-order",
-      correctAnswer: "A. Pre-order",
-      isCorrect: true,
-    },
-    {
-      id: "3",
-      question: "What is the time complexity of binary search?",
-      yourAnswer: "A. O(n)",
-      correctAnswer: "A. O(log n)",
-      isCorrect: false,
-    },
-  ];
+  // Most recent attempt for this quiz.
+  const attempt = useMemo(() => {
+    const matching = attempts.filter((a) => a.quizId === quizId);
+    if (matching.length === 0) return null;
+    return matching.reduce((latest, a) =>
+      new Date(a.completedAt) > new Date(latest.completedAt) ? a : latest,
+    );
+  }, [attempts, quizId]);
+
+  if (!quiz) {
+    return (
+      <div className="min-h-screen bg-white px-14.75 py-11.5">
+        <Link
+          href="/study-companion"
+          className="flex items-center gap-2 text-gray-primary hover:text-black-primary transition-colors mb-8"
+        >
+          <ArrowLeft size={18} />
+          <span className="text-sm">Back to Study Companion</span>
+        </Link>
+        <p className="text-gray-primary">Quiz not found.</p>
+      </div>
+    );
+  }
+
+  const questions = quiz.questions.map((q) => {
+    const userLetter = attempt?.answers?.[q.id];
+    const userOption = q.options.find((o) => o.letter === userLetter);
+    const correctOption = q.options.find((o) => o.letter === q.correctAnswer);
+    return {
+      id: q.id,
+      prompt: q.prompt,
+      yourAnswer: userOption
+        ? `${userOption.letter}. ${userOption.text}`
+        : "—",
+      correctAnswer: correctOption
+        ? `${correctOption.letter}. ${correctOption.text}`
+        : q.correctAnswer,
+      isCorrect: Boolean(userLetter) && userLetter === q.correctAnswer,
+      answered: Boolean(userLetter),
+    };
+  });
+
+  const correctCount = questions.filter((q) => q.isCorrect).length;
+  const total = questions.length;
 
   return (
     <div className="min-h-screen bg-white px-14.75 py-11.5">
@@ -67,12 +83,22 @@ export default function StudyCompanionReview({
       {/* Title */}
       <div className="mb-10">
         <h1 className="text-[28px] font-semibold text-black-primary mb-2">
-          Algorithms Midterm Practice
+          {quiz.title}
         </h1>
         <p className="text-gray-primary">
-          2/3 correct &bull; Algorithms & Data Structures
+          {attempt
+            ? `${correctCount}/${total} correct`
+            : "No attempt recorded yet"}{" "}
+          &bull; {quiz.course}
         </p>
       </div>
+
+      {!attempt && (
+        <div className="mb-8 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          You haven&apos;t taken this quiz yet — answers are shown below but
+          there&apos;s nothing to review. Take the quiz in Quiz Lab first.
+        </div>
+      )}
 
       {/* Question list */}
       <div className="space-y-4">
@@ -91,10 +117,10 @@ export default function StudyCompanionReview({
               </div>
               <div className="flex-1">
                 <h3 className="text-base font-semibold text-black-primary mb-2">
-                  Question {idx + 1}: {q.question}
+                  Question {idx + 1}: {q.prompt}
                 </h3>
                 <p className="text-sm text-gray-primary mb-1">
-                  Your answer: {q.yourAnswer}
+                  Your answer: {q.answered ? q.yourAnswer : "Not answered"}
                 </p>
                 {!q.isCorrect && (
                   <p className="text-sm text-green-600 font-medium">

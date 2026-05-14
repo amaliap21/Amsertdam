@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callOllama, extractFirstJson } from "@/lib/ollama";
+import { callClaude, extractFirstJson } from "@/lib/anthropic";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { extractTextFromUpload } from "@/lib/upload-text";
 
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            "Image OCR is not supported by the local model. Please upload a PDF or text file containing readable text.",
+            "Image OCR is not enabled on this endpoint. Please upload a PDF or text file containing readable text.",
         },
         { status: 415 },
       );
@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const limitResponse = await callOllama(
+    const limitResponse = await callClaude(
       [
         {
           role: "system",
@@ -148,7 +148,7 @@ export async function POST(req: NextRequest) {
       `Produce ${n} flashcards from the material below for a deck titled "${deckName}". Cover the most important concepts. Return ONLY {"cards": [{"front": "...", "back": "..."}, ...]} — never an empty list.\n\nMATERIAL:\n${filePreview}`;
 
     const askModel = async (n: number): Promise<LooseCard[]> => {
-      const r = await callOllama(
+      const r = await callClaude(
         [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt(n) },
