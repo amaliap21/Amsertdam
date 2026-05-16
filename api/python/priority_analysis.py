@@ -5,11 +5,11 @@ Deterministic Multi-Criteria Decision Analysis (MCDA) for evaluating
 whether a task is worth prioritizing.
 
 Scoring dimensions:
-  1. Grade Impact     - how much does this task affect the final grade?
-  2. Effort Cost      - how expensive is it in time/energy?
-  3. Urgency          - how close is the deadline?
-  4. Grade Gap        - how critical is it relative to passing threshold?
-  5. Stress Risk      - estimated psychological cost
+    1. Grade Impact     - how much does this task affect the final grade?
+    2. SKS Load         - how large the course credit weight is
+    3. Effort Cost      - how expensive is it in time/energy?
+    4. Urgency          - how close is the deadline?
+    5. Grade Gap        - how critical it is relative to passing threshold
 
 Decision:  HIGH / MEDIUM / LOW priority
 """
@@ -26,29 +26,18 @@ from datetime import datetime
 # ---------------------------------------------------------------------------
 
 WEIGHT_IMPACT = 0.25
+WEIGHT_SKS = 0.08
 WEIGHT_URGENCY = 0.35
 WEIGHT_GAP = 0.20
 WEIGHT_EFFORT = 0.12  # inverted (high effort → lower score)
-# WEIGHT_STRESS = 0.08  # inverted
-
-"""
-input:
-sks
-bobot asesmen
-nilai saat ini
-passing target
-estimasi jam
-
-
-"""
 
 HIGH_THRESHOLD = 0.5
 MEDIUM_THRESHOLD = 0.3
 
 # Criteria order used in TOPSIS and matrix construction
-CRITERIA_KEYS = ["grade_impact", "urgency", "gap_factor", "effort_penalty", "stress_penalty"]
-CRITERIA_WEIGHTS = [WEIGHT_IMPACT, WEIGHT_URGENCY, WEIGHT_GAP, WEIGHT_EFFORT, WEIGHT_STRESS]
-CRITERIA_BENEFIT = [True, True, True, False, False]
+CRITERIA_KEYS = ["grade_impact", "sks_score", "urgency", "gap_factor", "effort_penalty"]
+CRITERIA_WEIGHTS = [WEIGHT_IMPACT, WEIGHT_SKS, WEIGHT_URGENCY, WEIGHT_GAP, WEIGHT_EFFORT]
+CRITERIA_BENEFIT = [True, True, True, True, False]
 
 TYPE_MULTIPLIER = { "exam": 1.30, "project": 1.15, "quiz": 1.15, "homework": 0.95, "generic": 1.00 }
 
@@ -80,16 +69,13 @@ def _clamp01(x: float) -> float:
 
 
 def compute_breakdown(data: dict) -> dict:
-    """Compute per-criterion scores (all normalized 0..1) and composite score.
-
-    Returns dict with breakdown keys, composite score and auxiliary values.
-    """
+    """Compute normalized criteria values and the composite score for one task."""
     grade_weight = float(data.get("grade_weight", 0))
+    sks = float(data.get("sks", data.get("credits", 0)))
     estimated_hours = float(data.get("estimated_hours", 1))
     deadline_days = float(data.get("deadline_days", 7))
     current_grade = float(data.get("current_grade", 0))
     passing_grade = float(data.get("passing_grade", 75))
-    stress_level = float(data.get("stress_level", 3))
     weekly_capacity = float(data.get("weekly_capacity_hours", 40))
     task_type = str(data.get("task_type", "generic")).lower()
 
@@ -99,36 +85,36 @@ def compute_breakdown(data: dict) -> dict:
 
     urgency = _urgency_score(deadline_days)
 
+    sks_score = _normalize(sks, 0, 6)
+
     gap = passing_grade - current_grade
     gap_factor = _normalize(gap, -20, 40)
 
     effort_raw = _effort_score(estimated_hours, weekly_capacity)
     effort_penalty = effort_raw
 
-    stress_penalty = _normalize(stress_level, 1, 5)
-
     raw_score = (
         WEIGHT_IMPACT * impact
+        + WEIGHT_SKS * sks_score
         + WEIGHT_URGENCY * urgency
         + WEIGHT_GAP * gap_factor
         - WEIGHT_EFFORT * effort_penalty
-        - WEIGHT_STRESS * stress_penalty
     )
     composite = _normalize(raw_score, -0.20, 0.80)
 
     return {
         "impact": impact,
+        "sks_score": sks_score,
         "urgency": urgency,
         "gap": gap,
         "gap_factor": gap_factor,
         "effort_raw": effort_raw,
         "effort_penalty": effort_penalty,
-        "stress_penalty": stress_penalty,
         "composite": composite,
     }
 
 
-def _priority_from_score(score: float) -> tuple[str, str, str]:
+def _priority_from_composite_score(score: float) -> tuple[str, str, str]:
     """Map a 0..1 score to priority, action, and color."""
     if score >= HIGH_THRESHOLD:
         return "HIGH", "Do it fully and on time", "green"
@@ -137,29 +123,43 @@ def _priority_from_score(score: float) -> tuple[str, str, str]:
     return "LOW", "Consider skipping or doing minimally", "red"
 
 
-def _build_topsis_matrix(results: list[dict]) -> list[list[float]]:
-    """Extract TOPSIS input matrix from analyzed task results."""
-    matrix = []
-    for result in results:
-        breakdown = result.get("breakdown", {})
-        row = [float(breakdown.get(key, 0.0)) for key in CRITERIA_KEYS]
-        matrix.append(row)
-    return matrix
+def _calculate_confidence(data: dict) -> float:
+    """Derive confidence from optional user input and task difficulty."""
+    reported_confidence = data.get("confidence", None)
+    if reported_confidence is not None:
+        try:
+            return _clamp01(float(reported_confidence))
+        except Exception:
+            return 0.5
+
+    estimated_hours = float(data.get("estimated_hours", 1))
+    weekly_capacity = float(data.get("weekly_capacity_hours", 40))
+    deadline_days = float(data.get("deadline_days", 7))
+    effort_ratio = min(1.0, estimated_hours / max(1.0, weekly_capacity))
+    deadline_factor = 1.0 if deadline_days <= 3 else 0.95 if deadline_days <= 14 else 0.9
+    return _clamp01(max(0.2, 1.0 - 0.5 * effort_ratio) * deadline_factor)
+
+
+def _build_batch_summary(results: list[dict]) -> dict:
+    """Count HIGH, MEDIUM, and LOW results for batch responses."""
+    return {
+        "high": sum(1 for result in results if result["priority"] == "HIGH"),
+        "medium": sum(1 for result in results if result["priority"] == "MEDIUM"),
+        "low": sum(1 for result in results if result["priority"] == "LOW"),
+    }
 
 
 def rank_tasks_with_topsis(results: list[dict], tasks: list[dict]) -> list[dict]:
-    """Attach TOPSIS scores, derive priority from them, and sort descending.
-    
-    Args:
-        results: analyzed task results from analyze_effort_impact
-        tasks: original task data to check current_grade >= passing_grade
-    """
+    """Attach TOPSIS scores, derive priority from them, and sort descending."""
     cols = len(CRITERIA_KEYS)
     rows = len(results)
     if rows == 0:
         return results
 
-    matrix = _build_topsis_matrix(results)
+    matrix = []
+    for result in results:
+        breakdown = result.get("breakdown", {})
+        matrix.append([float(breakdown.get(key, 0.0)) for key in CRITERIA_KEYS])
 
     denom = [0.0] * cols
     for j in range(cols):
@@ -200,8 +200,8 @@ def rank_tasks_with_topsis(results: list[dict], tasks: list[dict]) -> list[dict]
         topsis_score = round(closeness_scores[i], 4)
         result["topsis_score"] = topsis_score
         result["priority_basis"] = "topsis"
-        result["priority"], result["action"], result["color"] = _priority_from_score(topsis_score)
-        
+        result["priority"], result["action"], result["color"] = _priority_from_composite_score(topsis_score)
+
         # Override: if grade already meets or exceeds passing threshold
         if i < len(tasks):
             current_grade = float(tasks[i].get("current_grade", 0))
@@ -218,36 +218,20 @@ def rank_tasks_with_topsis(results: list[dict], tasks: list[dict]) -> list[dict]
 
 
 def analyze_effort_impact(data: dict) -> dict:
+    """Analyze a single task and return deterministic priority metadata."""
     task_name = data.get("task_name", "Task")
-    reported_conf = data.get("confidence", None)
+    breakdown = compute_breakdown(data)
+    confidence = _calculate_confidence(data)
 
-    # compute breakdown + composite
-    subs = compute_breakdown(data)
-    impact = subs["impact"]
-    urgency = subs["urgency"]
-    gap = subs["gap"]
-    gap_factor = subs["gap_factor"]
-    effort_raw = subs["effort_raw"]
-    effort_penalty = subs["effort_penalty"]
-    stress_penalty = subs["stress_penalty"]
-    composite = subs["composite"]
-
-    # Confidence: prefer user-reported, otherwise heuristic
-    if reported_conf is not None:
-        try:
-            confidence = _clamp01(float(reported_conf))
-        except Exception:
-            confidence = 0.5
-    else:
-        estimated_hours = float(data.get("estimated_hours", 1))
-        weekly_capacity = float(data.get("weekly_capacity_hours", 40))
-        deadline_days = float(data.get("deadline_days", 7))
-        effort_ratio = min(1.0, estimated_hours / max(1.0, weekly_capacity))
-        deadline_factor = 1.0 if deadline_days <= 3 else 0.95 if deadline_days <= 14 else 0.9
-        confidence = _clamp01(max(0.2, 1.0 - 0.5 * effort_ratio) * deadline_factor)
+    impact = breakdown["impact"]
+    sks_score = breakdown["sks_score"]
+    urgency = breakdown["urgency"]
+    gap_factor = breakdown["gap_factor"]
+    effort_penalty = breakdown["effort_penalty"]
+    composite = breakdown["composite"]
 
     # Decision mapping still uses composite score for the single-item path
-    priority, action, color = _priority_from_score(composite)
+    priority, action, color = _priority_from_composite_score(composite)
 
     # Override: if grade already meets or exceeds passing threshold, deprioritize
     current_grade = float(data.get("current_grade", 0))
@@ -262,24 +246,10 @@ def analyze_effort_impact(data: dict) -> dict:
     estimated_hours = float(data.get("estimated_hours", 1))
     efficiency = round(grade_weight / max(1, estimated_hours), 2)
 
-    # rationale - use new comprehensive builder
-    # rationale_parts = _build_rationale_parts(data, {
-    #     "grade_impact": impact,
-    #     "urgency": urgency,
-    #     "gap_factor": gap_factor,
-    #     "effort_penalty": effort_penalty,
-    #     "stress_penalty": stress_penalty,
-    # })
-
-    # if rationale_parts:
-    #     rationale = f"{task_name}: " + "; ".join(rationale_parts) + "."
-    # else:
-    #     rationale = f"{task_name} has moderate impact and manageable effort."
-
     return {
         "task_id": data.get("task_id"),
         "task_name": task_name,
-        "task_type": str(data.get("task_type", "generic") ).lower(),
+        "task_type": str(data.get("task_type", "generic")).lower(),
         "priority": priority,
         "action": action,
         "color": color,
@@ -288,12 +258,11 @@ def analyze_effort_impact(data: dict) -> dict:
         "efficiency_ratio": efficiency,
         "breakdown": {
             "grade_impact": round(impact, 3),
+            "sks_score": round(sks_score, 3),
             "urgency": round(urgency, 3),
             "gap_factor": round(gap_factor, 3),
             "effort_penalty": round(effort_penalty, 3),
-            "stress_penalty": round(stress_penalty, 3),
         },
-        # "rationale": rationale,
         "details": data,
     }
 
@@ -303,6 +272,7 @@ def analyze_effort_impact(data: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 def analyze_batch(data: dict) -> dict:
+    """Analyze a batch of tasks and optionally rank them with TOPSIS."""
     tasks = data.get("tasks", [])
     if not tasks:
         return {"error": "No tasks provided"}
@@ -312,29 +282,17 @@ def analyze_batch(data: dict) -> dict:
 
     results = [analyze_effort_impact(t) for t in tasks]
 
-    def _summary(res):
-        return {
-            "high": sum(1 for r in res if r["priority"] == "HIGH"),
-            "medium": sum(1 for r in res if r["priority"] == "MEDIUM"),
-            "low": sum(1 for r in res if r["priority"] == "LOW"),
-        }
-
     if method == "topsis":
         rank_tasks_with_topsis(results, tasks)
-        return {"method": "topsis", "tasks": results, "summary": _summary(results)}
+        return {"method": "topsis", "tasks": results, "summary": _build_batch_summary(results)}
 
-    else:
-        # default: sort by composite_score descending
-        results.sort(key=lambda r: r["composite_score"], reverse=True)
-        return {"method": "weighted", "tasks": results, "summary": _summary(results)}
+    # default: sort by composite_score descending
+    results.sort(key=lambda r: r["composite_score"], reverse=True)
+    return {"method": "weighted", "tasks": results, "summary": _build_batch_summary(results)}
 
 
 def record_feedback(feedback: dict) -> dict:
-    """Append feedback (accept/reject) as JSONL with timestamp for later calibration.
-
-    Expected feedback fields: task_name, accepted (bool), composite_score (optional),
-    user_id (optional), note (optional), confidence (optional)
-    """
+    """Append feedback as JSONL for future calibration."""
     try:
         base = os.path.dirname(__file__)
         logfile = os.path.join(base, "effort_feedback.jsonl")
@@ -359,6 +317,7 @@ def record_feedback(feedback: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 class handler(BaseHTTPRequestHandler):
+    """HTTP entry point used by the Vercel function runtime."""
 
     def log_message(self, format, *args):
         pass
@@ -403,214 +362,241 @@ class handler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json(500, {"error": str(e)})
 
+
+def _print_batch_report(result: dict) -> None:
+    """Print a compact, readable batch-analysis report for local demos."""
+    tasks = result.get("tasks", [])
+    summary = result.get("summary", {})
+
+    print()
+    print("=" * 92)
+    print("PRIORITY ANALYSIS DEMO")
+    print("=" * 92)
+    print(
+        f"Summary: high={summary.get('high', 0)} | medium={summary.get('medium', 0)} | low={summary.get('low', 0)}"
+    )
+    print("-" * 92)
+    print(f"{'Rank':<5} {'Task':<32} {'Priority':<8} {'Composite':<10} {'TOPSIS':<8} {'SKS':<6} {'Action'}")
+    print("-" * 92)
+
+    for index, task in enumerate(tasks, start=1):
+        task_name = task.get("task_name", "Task")[:31]
+        priority = task.get("priority", "-")
+        composite = f"{task.get('composite_score', 0):.3f}"
+        topsis = task.get("topsis_score")
+        topsis_text = f"{topsis:.3f}" if isinstance(topsis, (int, float)) else "-"
+        sks_text = f"{task.get('details', {}).get('sks', 0):.0f}" if isinstance(task.get('details', {}), dict) else "-"
+        action = task.get("action", "")
+        print(f"{index:<5} {task_name:<32} {priority:<8} {composite:<10} {topsis_text:<8} {sks_text:<6} {action}")
+
+    print("-" * 92)
+
+
 if __name__ == "__main__":
-    data = {
+    demo_data = {
         "method": "topsis",
         "tasks": [
             {
                 "task_name": "Mathematics Midterm Exam",
                 "task_type": "exam",
+                "sks": 3,
                 "grade_weight": 25,
                 "estimated_hours": 10,
                 "deadline_days": 2,
                 "current_grade": 58,
                 "passing_grade": 70,
-                "stress_level": 5,
-                "weekly_capacity_hours": 20
+                "weekly_capacity_hours": 20,
             },
             {
                 "task_name": "Physics Lab Report",
                 "task_type": "project",
+                "sks": 2,
                 "grade_weight": 15,
                 "estimated_hours": 6,
                 "deadline_days": 4,
                 "current_grade": 62,
                 "passing_grade": 70,
-                "stress_level": 4,
-                "weekly_capacity_hours": 18
+                "weekly_capacity_hours": 18,
             },
             {
                 "task_name": "Programming Quiz 3",
                 "task_type": "quiz",
+                "sks": 1,
                 "grade_weight": 10,
                 "estimated_hours": 2,
                 "deadline_days": 1,
                 "current_grade": 66,
                 "passing_grade": 70,
-                "stress_level": 3,
-                "weekly_capacity_hours": 16
+                "weekly_capacity_hours": 16,
             },
             {
                 "task_name": "History Essay Draft",
                 "task_type": "assignment",
+                "sks": 2,
                 "grade_weight": 12,
                 "estimated_hours": 5,
                 "deadline_days": 7,
                 "current_grade": 74,
                 "passing_grade": 70,
-                "stress_level": 3,
-                "weekly_capacity_hours": 15
+                "weekly_capacity_hours": 15,
             },
             {
                 "task_name": "Chemistry Problem Set",
                 "task_type": "homework",
+                "sks": 2,
                 "grade_weight": 8,
                 "estimated_hours": 4,
                 "deadline_days": 3,
                 "current_grade": 49,
                 "passing_grade": 70,
-                "stress_level": 4,
-                "weekly_capacity_hours": 14
+                "weekly_capacity_hours": 14,
             },
             {
                 "task_name": "Data Structures Project",
                 "task_type": "project",
+                "sks": 4,
                 "grade_weight": 20,
                 "estimated_hours": 12,
                 "deadline_days": 10,
                 "current_grade": 55,
                 "passing_grade": 70,
-                "stress_level": 5,
-                "weekly_capacity_hours": 18
+                "weekly_capacity_hours": 18,
             },
             {
                 "task_name": "English Vocabulary Quiz",
                 "task_type": "quiz",
+                "sks": 1,
                 "grade_weight": 5,
                 "estimated_hours": 1,
                 "deadline_days": 2,
                 "current_grade": 78,
                 "passing_grade": 70,
-                "stress_level": 1,
-                "weekly_capacity_hours": 10
+                "weekly_capacity_hours": 10,
             },
             {
                 "task_name": "Statistics Assignment 2",
                 "task_type": "assignment",
+                "sks": 3,
                 "grade_weight": 14,
                 "estimated_hours": 7,
                 "deadline_days": 5,
                 "current_grade": 60,
                 "passing_grade": 70,
-                "stress_level": 4,
-                "weekly_capacity_hours": 16
+                "weekly_capacity_hours": 16,
             },
             {
                 "task_name": "Biology Practical Exam",
                 "task_type": "exam",
+                "sks": 3,
                 "grade_weight": 18,
                 "estimated_hours": 8,
                 "deadline_days": 6,
                 "current_grade": 68,
                 "passing_grade": 70,
-                "stress_level": 5,
-                "weekly_capacity_hours": 20
+                "weekly_capacity_hours": 20,
             },
             {
                 "task_name": "Marketing Case Study",
                 "task_type": "project",
+                "sks": 2,
                 "grade_weight": 12,
                 "estimated_hours": 4,
                 "deadline_days": 14,
                 "current_grade": 72,
                 "passing_grade": 70,
-                "stress_level": 2,
-                "weekly_capacity_hours": 12
+                "weekly_capacity_hours": 12,
             },
             {
                 "task_name": "Economics Weekly Homework",
                 "task_type": "homework",
+                "sks": 1,
                 "grade_weight": 6,
                 "estimated_hours": 2,
                 "deadline_days": 1,
                 "current_grade": 40,
                 "passing_grade": 70,
-                "stress_level": 3,
-                "weekly_capacity_hours": 10
+                "weekly_capacity_hours": 10,
             },
             {
                 "task_name": "Computer Networks Quiz",
                 "task_type": "quiz",
+                "sks": 2,
                 "grade_weight": 9,
                 "estimated_hours": 3,
                 "deadline_days": 3,
                 "current_grade": 71,
                 "passing_grade": 70,
-                "stress_level": 3,
-                "weekly_capacity_hours": 14
+                "weekly_capacity_hours": 14,
             },
             {
                 "task_name": "Sociology Term Paper",
                 "task_type": "project",
+                "sks": 3,
                 "grade_weight": 22,
                 "estimated_hours": 15,
                 "deadline_days": 20,
                 "current_grade": 53,
                 "passing_grade": 70,
-                "stress_level": 4,
-                "weekly_capacity_hours": 20
+                "weekly_capacity_hours": 20,
             },
             {
                 "task_name": "Accounting Worksheet",
                 "task_type": "assignment",
+                "sks": 1,
                 "grade_weight": 7,
                 "estimated_hours": 3,
                 "deadline_days": 2,
                 "current_grade": 69,
                 "passing_grade": 70,
-                "stress_level": 2,
-                "weekly_capacity_hours": 12
+                "weekly_capacity_hours": 12,
             },
             {
                 "task_name": "Design Portfolio Review",
                 "task_type": "project",
+                "sks": 2,
                 "grade_weight": 16,
                 "estimated_hours": 9,
                 "deadline_days": 8,
                 "current_grade": 76,
                 "passing_grade": 70,
-                "stress_level": 4,
-                "weekly_capacity_hours": 18
+                "weekly_capacity_hours": 18,
             },
             {
                 "task_name": "Philosophy Reflection Essay",
                 "task_type": "assignment",
+                "sks": 2,
                 "grade_weight": 10,
                 "estimated_hours": 5,
                 "deadline_days": 9,
                 "current_grade": 61,
                 "passing_grade": 70,
-                "stress_level": 2,
-                "weekly_capacity_hours": 15
+                "weekly_capacity_hours": 15,
             },
             {
                 "task_name": "Information Systems Final Exam",
                 "task_type": "exam",
+                "sks": 4,
                 "grade_weight": 30,
                 "estimated_hours": 14,
                 "deadline_days": 40,
                 "current_grade": 64,
                 "passing_grade": 70,
-                "stress_level": 5,
-                "weekly_capacity_hours": 25
+                "weekly_capacity_hours": 25,
             },
             {
                 "task_name": "Literature Reading Response",
                 "task_type": "homework",
+                "sks": 1,
                 "grade_weight": 4,
                 "estimated_hours": 2,
                 "deadline_days": 5,
                 "current_grade": 80,
                 "passing_grade": 70,
-                "stress_level": 1,
-                "weekly_capacity_hours": 8
+                "weekly_capacity_hours": 8,
             }
-        ]
+        ],
     }
+
+    _print_batch_report(analyze_batch(demo_data))
     
-    result = analyze_batch(data)
-    for task in result.get("tasks", []):
-        print(f"{task['task_name']}: Priority={task['priority']}, task weight={task['details']['grade_weight']}, Estimated Hours={task['details']['estimated_hours']}, Score={task['composite_score']}, Score Topsis={task['topsis_score']}, 'Deadline in {task['details']['deadline_days']} days', 'Gap in {task['details']['passing_grade'] - task['details']['current_grade']}'")
-    print("Summary:", result.get("summary", {}))
-    # print(json.dumps(analyze_batch(data), indent=2))
-    
+    # print(json.dumps(analyze_batch(demo_data), indent=2))
