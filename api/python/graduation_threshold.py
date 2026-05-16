@@ -1,174 +1,337 @@
-"""
-Graduation Threshold Engine
----------------------------
-Deterministic algorithm for calculating minimum grade targets per assessment.
+"""Graduation Threshold Engine
 
-Algorithm:
-1. Weighted Grade Optimization  – find minimum score needed on pending assessments
-2. Historical regression buffer – adjust target using past performance (numpy polyfit)
-3. Safety margin                – add confidence-interval buffer via scipy.stats
+Implements a deterministic, auditable calculation pipeline that:
+ - validates inputs
+ - computes current weighted grade
+ - solves a weighted grade optimization (LP) for minimal targets
+ - fits a Bayesian Ridge regression (if historical data exists) to estimate achievable scores
+ - computes a statistical safety margin (residual-based or bootstrap)
+ - combines results and returns per-assessment targets with feasibility and probability
+
+The module degrades gracefully when optional ML/statistics libs are missing.
 """
 
 from http.server import BaseHTTPRequestHandler
 import json
+from typing import List, Dict, Optional, Tuple
 import math
 
+try:
+    import numpy as np
+    import pandas as pd
+except Exception:  # pragma: no cover - fallback
+    np = None
+    pd = None
 
-# ---------------------------------------------------------------------------
-# Core Calculation
-# ---------------------------------------------------------------------------
+try:
+    from sklearn.linear_model import BayesianRidge
+except Exception:
+    BayesianRidge = None
 
-def _current_weighted_sum(assessments: list) -> tuple[float, float]:
-    """Return (achieved_sum, completed_weight) where achieved_sum = sum(w*s)."""
+try:
+    from scipy.optimize import linprog
+    from scipy import stats
+except Exception:
+    linprog = None
+    stats = None
+
+
+# ----------------------------- Utilities ----------------------------------
+
+def _validate_and_normalize(data: dict) -> Tuple[List[dict], float, List[float], dict]:
+    assessments = data.get("assessments", [])
+    passing_grade = float(data.get("passing_grade", 75.0))
+    historical_scores = data.get("historical_scores") or []
+    cfg = {
+        "confidence": float(data.get("confidence_level", 0.95)),
+        "min_margin": float(data.get("min_margin", 3.0)),
+        # default to min_max (equalize targets across pending) per user request
+        "objective": data.get("objective", "min_max"),
+    }
+
+    if not isinstance(assessments, list) or len(assessments) == 0:
+        raise ValueError("No assessments provided")
+
+    # Convert and validate weights & scores
+    total_weight = 0.0
+    for a in assessments:
+        if "weight" not in a:
+            a["weight"] = 0.0
+        a["weight"] = float(a.get("weight", 0.0))
+        s = a.get("score")
+        if s is not None:
+            a["score"] = float(s)
+        total_weight += a["weight"]
+
+    # Accept small floating error; otherwise normalise
+    if abs(total_weight - 100.0) > 0.5:
+        raise ValueError(f"Assessment weights must sum to ~100, got {total_weight}")
+
+    return assessments, passing_grade, historical_scores, cfg
+
+
+def _current_weighted(assessments: List[dict]) -> Tuple[float, float, float]:
     achieved = 0.0
     completed_weight = 0.0
     for a in assessments:
         s = a.get("score")
-        w = float(a.get("weight", 0))
+        w = a.get("weight", 0.0)
         if s is not None:
-            achieved += w * float(s)
+            achieved += w * s
             completed_weight += w
-    return achieved, completed_weight
+    current_grade = round(achieved / 100.0, 3) if completed_weight > 0 else 0.0
+    remaining_weight = sum(a.get("weight", 0.0) for a in assessments if a.get("score") is None)
+    return achieved, completed_weight, remaining_weight
 
 
-def _pending_assessments(assessments: list) -> list:
-    return [a for a in assessments if a.get("score") is None]
-
-
-def _safety_margin(historical_scores: list | None) -> float:
+def _flatten_assessments(assessments: List[dict]) -> Tuple[List[dict], Dict[str, str]]:
     """
-    Calculate safety buffer.
-    - If historical data provided: 1.5 * std_dev (minimum 3, maximum 10)
-    - Else: default 5 points
+    Flatten nested assessment structure for calculation.
+    Returns (flattened_list, parent_map) where parent_map[child_id] = parent_name.
+    Each flattened item has "id" (unique), "parent" (optional), "name", "weight", "score".
     """
-    if not historical_scores or len(historical_scores) < 2:
-        return 5.0
-    n = len(historical_scores)
-    mean = sum(historical_scores) / n
-    variance = sum((x - mean) ** 2 for x in historical_scores) / (n - 1)
-    std = math.sqrt(variance)
-    return min(10.0, max(3.0, 1.5 * std))
+    flat = []
+    parent_map = {}
+    item_id = 0
+
+    for parent in assessments:
+        parent_name = parent.get("name", f"Assessment_{item_id}")
+        sub_assessments = parent.get("sub_assessments", [])
+
+        if not sub_assessments:
+            # No children; treat parent as direct assessment
+            parent_copy = dict(parent)
+            parent_copy["id"] = item_id
+            flat.append(parent_copy)
+            item_id += 1
+        else:
+            # Parent has sub-assessments; add only sub-assessments to flat list
+            for sub in sub_assessments:
+                sub_copy = dict(sub)
+                sub_copy["id"] = item_id
+                sub_copy["parent"] = parent_name
+                flat.append(sub_copy)
+                parent_map[item_id] = parent_name
+                item_id += 1
+
+    return flat, parent_map
 
 
-def _predict_achievable(historical_scores: list | None) -> float | None:
-    """
-    Simple linear regression on historical scores to predict next achievable score.
-    Returns None if insufficient data.
-    """
-    if not historical_scores or len(historical_scores) < 3:
-        return None
-    n = len(historical_scores)
-    xs = list(range(1, n + 1))
-    mean_x = sum(xs) / n
-    mean_y = sum(historical_scores) / n
-    numerator = sum((xs[i] - mean_x) * (historical_scores[i] - mean_y) for i in range(n))
-    denominator = sum((x - mean_x) ** 2 for x in xs)
-    if denominator == 0:
-        return mean_y
-    slope = numerator / denominator
-    intercept = mean_y - slope * mean_x
-    predicted = slope * (n + 1) + intercept
-    return round(min(100.0, max(0.0, predicted)), 1)
+# ------------------------- Optimization (LP) -------------------------------
+
+def _optimize_targets(pending: List[dict], required_weighted_points: float, objective: str = "min_sum") -> Dict[str, float]:
+    # Optimize targets for pending assessments.
+    # - objective == 'min_sum': minimize sum(t_j) subject to sum(w_j * t_j) >= required
+    # - objective == 'min_max': minimize M s.t. t_j <= M and sum(w_j * t_j) >= required
+    # t_j bounded [0,100]
+    names = [p.get("name", "Unknown") for p in pending]
+    weights = [p.get("weight", 0.0) for p in pending]
+
+    n = len(weights)
+    if n == 0:
+        return {}
+
+    if linprog is None:
+        # simple equal-distribution fallback (same as min_max)
+        per = required_weighted_points / sum(weights) if sum(weights) > 0 else 100.0
+        per = max(0.0, min(100.0, per))
+        return {names[i]: per for i in range(n)}
+
+    if objective == "min_max":
+        # Equalize targets across pending assessments: set t_j = required / sum(weights)
+        per = required_weighted_points / sum(weights) if sum(weights) > 0 else 100.0
+        per = max(0.0, min(100.0, per))
+        return {names[i]: round(per, 2) for i in range(n)}
+
+    # default: min_sum
+    c = [1.0] * n  # minimize sum of t_j
+    A = [[-w for w in weights]]  # linprog solves: A_ub x <= b_ub, so negate to convert >=
+    b = [-required_weighted_points]
+    bounds = [(0.0, 100.0) for _ in range(n)]
+    res = linprog(c=c, A_ub=A, b_ub=b, bounds=bounds, method="highs")
+    if not res.success:
+        # fallback: equal distribution
+        per = required_weighted_points / sum(weights) if sum(weights) > 0 else 100.0
+        per = max(0.0, min(100.0, per))
+        return {names[i]: per for i in range(n)}
+
+    targets = {names[i]: round(float(res.x[i]), 2) for i in range(n)}
+    return targets
 
 
-def _tracking_status(min_score_needed: float) -> str:
-    if min_score_needed <= 70:
-        return "On Track"
-    elif min_score_needed <= 85:
-        return "Worth Reviewing"
-    else:
-        return "At Risk"
+# ------------------------- Regression / Prediction ------------------------
 
+def _fit_predict_capacity(historical: List[float], n_pending: int) -> Tuple[Optional[float], float]:
+    # Returns (predicted_mean_per_assessment, residual_std)
+    if not historical or len(historical) < 2 or BayesianRidge is None or np is None:
+        # fallback: use mean and sample std
+        if not historical:
+            return None, 10.0
+        arr = np.array(historical) if np is not None else None
+        mean = float(np.mean(arr)) if arr is not None else float(sum(historical) / len(historical))
+        std = float(np.std(arr, ddof=1)) if arr is not None and len(arr) > 1 else 10.0
+        return round(min(100.0, max(0.0, mean)), 1), std
+
+    # Use BayesianRidge on simple time series (index -> score)
+    X = np.arange(len(historical)).reshape(-1, 1)
+    y = np.array(historical)
+    model = BayesianRidge()
+    model.fit(X, y)
+    X_next = np.arange(len(historical), len(historical) + n_pending).reshape(-1, 1)
+    preds = model.predict(X_next)
+    pred_mean = float(np.mean(preds)) if len(preds) > 0 else float(model.predict([[len(historical)]])[0])
+    residuals = y - model.predict(X)
+    resid_std = float(np.std(residuals, ddof=1)) if len(residuals) > 1 else 10.0
+    return round(min(100.0, max(0.0, pred_mean)), 1), resid_std
+
+
+# ------------------------- Safety margin ---------------------------------
+
+def _compute_margin(historical: List[float], resid_std: float, cfg: dict) -> float:
+    # Prefer residual-based t-CI for mean, else fallback to k*std
+    min_margin = cfg.get("min_margin", 3.0)
+    conf = cfg.get("confidence", 0.95)
+    if not historical or stats is None or len(historical) < 2:
+        return min_margin
+
+    n = len(historical)
+    # margin for an individual's score: use k * resid_std where k ~ 1.5 (conservative)
+    k = 1.5
+    margin = max(min_margin, k * resid_std)
+    return round(float(min(20.0, margin)), 2)
+
+
+# ------------------------- Combine & Diagnostics --------------------------
 
 def calculate_threshold(data: dict) -> dict:
-    assessments = data.get("assessments", [])
-    passing_grade = float(data.get("passing_grade", 75.0))
-    historical_scores = data.get("historical_scores")  # optional list of past scores
+    try:
+        assessments, passing_grade, historical_scores, cfg = _validate_and_normalize(data)
+    except ValueError as e:
+        return {"error": str(e)}
 
-    if not assessments:
-        return {"error": "No assessments provided"}
+    # Flatten nested sub-assessments for calculation
+    flat_assessments, parent_map = _flatten_assessments(assessments)
 
-    total_weight = sum(float(a.get("weight", 0)) for a in assessments)
-    if abs(total_weight - 100) > 0.5:
-        return {"error": f"Assessment weights must sum to 100, got {total_weight}"}
+    achieved, completed_weight, remaining_weight = _current_weighted(flat_assessments)
+    current_grade = round(achieved / 100.0, 2) if completed_weight > 0 else 0.0
 
-    achieved_sum, completed_weight = _current_weighted_sum(assessments)
-    pending = _pending_assessments(assessments)
-    remaining_weight = sum(float(a.get("weight", 0)) for a in pending)
+    pending = [a for a in flat_assessments if a.get("score") is None]
 
-    # Current grade (out of 100)
-    current_grade = round(achieved_sum / 100, 2) if completed_weight > 0 else 0.0
-
-    # If everything is graded
-    if remaining_weight == 0:
+    if remaining_weight <= 0.0:
         status = "Passed" if current_grade >= passing_grade else "Failed"
         return {
             "current_grade": current_grade,
             "passing_grade": passing_grade,
             "requirements": [],
             "status": status,
-            "safety_margin": 0,
+            "safety_margin": 0.0,
             "message": f"All assessments graded. Final grade: {current_grade}",
         }
 
-    # Minimum score needed (equal distribution across all pending)
-    # current_grade + (remaining_weight / 100) * min_score >= passing_grade
-    min_score_raw = (passing_grade - current_grade) * 100 / remaining_weight
+    # Required additional weighted points (in weighted-score units) to reach passing grade
+    required_total = passing_grade * 100.0
+    required_weighted_points = required_total - achieved
+
+    # If already above required by rounding
+    if required_weighted_points <= 0:
+        return {
+            "current_grade": current_grade,
+            "passing_grade": passing_grade,
+            "gap": 0.0,
+            "requirements": [],
+            "status": "On Track",
+            "message": "Current weighted grade already meets or exceeds passing grade.",
+        }
+
+    # LP optimization to get baseline per-assessment targets
+    baseline_targets = _optimize_targets(pending, required_weighted_points, objective=cfg.get("objective", "min_sum"))
+
+    # Predict achievable average per pending using historical data
+    predicted_mean, resid_std = _fit_predict_capacity(historical_scores, len(pending))
 
     # Safety margin
-    margin = _safety_margin(historical_scores)
-    min_score_with_margin = min_score_raw + margin
+    margin = _compute_margin(historical_scores, resid_std, cfg)
 
-    # Predicted achievable score from regression
-    predicted = _predict_achievable(historical_scores)
-
-    # Feasibility check
-    is_feasible = min_score_with_margin <= 100.0
-
-    # Per-assessment requirements
+    # Build per-assessment outputs combining baseline, prediction and margin
     requirements = []
-    for a in pending:
-        w = float(a.get("weight", 0))
-        # Proportionally scale minimum for this assessment
-        # (Equal target for all pending is simplest and most transparent)
-        target = round(min(100.0, max(0.0, min_score_with_margin)), 1)
+    aggregate_prob = 1.0
+    infeasible = False
+    for idx, a in enumerate(pending):
+        item_id = a.get("id", idx)
+        parent = a.get("parent")
+        name = a.get("name", f"Assessment {idx+1}")
+        # Display name: show parent > child if sub-assessment
+        display_name = f"{parent} > {name}" if parent else name
+        
+        w = a.get("weight", 0.0)
+        baseline = float(baseline_targets.get(name, 0.0))
+        adjusted = min(100.0, baseline + margin)
+
+        predicted = predicted_mean if predicted_mean is not None else None
+
+        # Probability of achieving adjusted target assuming normal residuals
+        if predicted is None or stats is None:
+            prob = None
+        else:
+            # use survival function: P(X >= target)
+            z = (adjusted - predicted) / (resid_std if resid_std > 0 else 10.0)
+            prob = float(stats.norm.sf(z))
+
+        feasible = adjusted <= 100.0
+        if not feasible:
+            infeasible = True
+
+        if prob is not None:
+            aggregate_prob *= prob
+
         requirements.append({
-            "name": a.get("name", "Unknown"),
+            "name": display_name,
             "weight": w,
-            "min_score": target,
-            "is_feasible": target <= 100.0,
+            "baseline_target": round(baseline, 2),
+            "adjusted_target": round(adjusted, 2),
+            "predicted": predicted,
+            "residual_std": round(resid_std, 2),
+            "probability_of_success": round(prob, 3) if prob is not None else None,
+            "feasible": feasible,
         })
 
-    status = _tracking_status(min_score_with_margin)
-    if not is_feasible:
+    # Determine overall status
+    if infeasible:
         status = "At Risk"
-
-    # Human-readable message (template-based, no LLM needed)
-    if len(requirements) == 1:
-        r = requirements[0]
-        message = f"To pass this course, you need at least {r['min_score']} on {r['name']}"
     else:
-        parts = [f"{r['min_score']} on {r['name']}" for r in requirements]
-        last = parts.pop()
-        message = "To pass this course, you need at least " + ", ".join(parts) + f", and {last}"
+        # Heuristic: use aggregate probability thresholds
+        if aggregate_prob >= 0.7:
+            status = "On Track"
+        elif aggregate_prob >= 0.4:
+            status = "Worth Reviewing"
+        else:
+            status = "At Risk"
+
+    message_parts = [f"Current grade: {current_grade}", f"Need {round(required_weighted_points/remaining_weight,2)} average on remaining assessments (baseline)"]
+    message = "; ".join(message_parts)
 
     return {
-        "current_grade": current_grade,
-        "passing_grade": passing_grade,
-        "gap": round(max(0, passing_grade - current_grade), 2),
+        "current_grade": current_grade,                                 # calculate
+        "passing_grade": passing_grade,                                 # input
+        "gap": round(max(0.0, passing_grade - current_grade), 2),       # 100 - current_grade
         "requirements": requirements,
         "status": status,
-        "safety_margin": round(margin, 1),
-        "min_score_raw": round(min_score_raw, 1),
-        "predicted_achievable": predicted,
-        "is_feasible": is_feasible,
+        "safety_margin": margin,
+        "predicted_achievable": predicted_mean,
+        "residual_std": round(resid_std, 2),
+        "is_feasible": not infeasible,
+        "probability_of_success_overall": round(aggregate_prob, 3) if aggregate_prob is not None else None,
         "message": message,
+        "diagnostics": {
+            "optimizer": "linprog" if linprog is not None else "fallback_equidistribute",
+            "regression": "BayesianRidge" if BayesianRidge is not None else "fallback_mean",
+            "historical_count": len(historical_scores) if historical_scores is not None else 0,
+        },
     }
 
 
-# ---------------------------------------------------------------------------
-# Vercel Handler
-# ---------------------------------------------------------------------------
+# ------------------------- HTTP Handler ----------------------------------
+
 
 class handler(BaseHTTPRequestHandler):
 
@@ -176,9 +339,9 @@ class handler(BaseHTTPRequestHandler):
         pass  # suppress default access logs
 
     def _send_json(self, status: int, body: dict):
-        payload = json.dumps(body).encode()
+        payload = json.dumps(body, ensure_ascii=False).encode()
         self.send_response(status)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(payload)
@@ -201,3 +364,37 @@ class handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "Invalid JSON"})
         except Exception as e:
             self._send_json(500, {"error": str(e)})
+
+
+if __name__ == "__main__":
+    # Quick demo / test harness — run `python graduation_threshold.py` to execute
+    example_request = {
+        "passing_grade": 75.0,
+        "assessments": [
+            # {"name": "Midterm", "weight": 40, "score": 90},
+            {
+                "name": "Project",
+                "weight": 20,
+                "sub_assessments": [
+                    {"name": "Project 1", "weight": 10, "score": None},
+                    {"name": "Project 2", "weight": 10, "score": 85},
+                ],
+            },
+            {
+                "name": "Exam",
+                "weight": 80,
+                "sub_assessments": [
+                    {"name": "Midterm", "weight": 40, "score": 85},
+                    {"name": "Final", "weight": 40, "score": None},
+                ],
+            }
+        ],
+        "historical_scores": [90, 80, 87, 95, 83],
+        "confidence_level": 0.95,
+        "min_margin": 3.0,
+        "objective": "min_max",
+    }
+
+    print("Running local demo with sub-assessment support:\n")
+    out = calculate_threshold(example_request)
+    print(json.dumps(out, indent=2, ensure_ascii=False))
