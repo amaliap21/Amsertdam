@@ -4,6 +4,7 @@ import Link from "next/link";
 import { X, Upload, CirclePlus, Loader2, AlertCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
+import LanguagePicker, { type Language } from "@/components/ui/language-picker";
 
 export type GeneratedQuestion = {
   id: string;
@@ -34,6 +35,7 @@ export default function CreateQuizModal({
     file: null as File | null,
   });
   const [requestedQuestions, setRequestedQuestions] = useState(5);
+  const [language, setLanguage] = useState<Language>("en");
   const [recommendedMaxQuestions, setRecommendedMaxQuestions] = useState<number | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -112,13 +114,14 @@ export default function CreateQuizModal({
     }
     setError(null);
     setLoading(true);
-    const t = toast.loading("AI is generating quiz questions…");
+    const t = toast.loading("Generating quiz questions…");
     try {
       const fd = new FormData();
       fd.append("file", formData.file);
       fd.append("title", formData.title);
       fd.append("course", formData.course);
       fd.append("requestedQuestions", String(requestedQuestions));
+      fd.append("language", language);
       const resp = await fetch("/api/ai/quiz/generate", {
         method: "POST",
         body: fd,
@@ -254,7 +257,7 @@ export default function CreateQuizModal({
               {recommendedMaxQuestions
                 ? `This file supports up to ${recommendedMaxQuestions} questions. You can choose any value up to that limit.`
                 : analyzing
-                  ? "AI is estimating the maximum question count…"
+                  ? "Estimating the maximum question count…"
                   : "Upload a file to estimate the maximum question count."}
             </p>
           </div>
@@ -301,6 +304,13 @@ export default function CreateQuizModal({
             </select>
           </div>
 
+          <LanguagePicker
+            value={language}
+            onChange={setLanguage}
+            disabled={loading || analyzing}
+            label="Question Language"
+          />
+
           <div>
             <label className="block text-sm font-medium text-black-primary mb-3">
               Source<span className="text-red-500">*</span>
@@ -329,7 +339,7 @@ export default function CreateQuizModal({
                 </p>
                 {recommendedMaxQuestions ? (
                   <p className="mt-2 text-xs text-indigo-primary">
-                    AI limit: {recommendedMaxQuestions} questions
+                    Estimated max: {recommendedMaxQuestions} questions
                   </p>
                 ) : null}
               </div>
@@ -337,7 +347,7 @@ export default function CreateQuizModal({
                 id="quiz-source-upload"
                 type="file"
                 className="hidden"
-                accept="image/*,.pdf"
+                accept="application/pdf,.pdf,text/plain,.txt"
                 onChange={handleFileChange}
               />
             </label>
@@ -354,7 +364,7 @@ export default function CreateQuizModal({
             {loading ? (
               <>
                 <Loader2 size={20} className="animate-spin" />
-                Generating with AI…
+                Generating…
               </>
             ) : (
               <>

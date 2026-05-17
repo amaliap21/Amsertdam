@@ -6,10 +6,17 @@ import { useStore } from "@/store/use-store";
 
 export default function StudyCompanion() {
   const attempts = useStore((s) => s.attempts);
+  const liveQuizzes = useStore((s) => s.quizzes);
 
-  // De-duplicate by quizId, keep latest
+  // Only show attempts whose quiz still exists in Quiz Lab. When a quiz is
+  // deleted there, its Study Companion entry vanishes too — Study Companion
+  // is a live mirror of takeable quizzes, not a history archive.
+  const liveQuizIds = new Set(liveQuizzes.map((q) => q.id));
+
+  // De-duplicate by quizId, keep latest.
   const latestByQuiz = new Map<string, (typeof attempts)[number]>();
   for (const a of attempts) {
+    if (!liveQuizIds.has(a.quizId)) continue;
     const prev = latestByQuiz.get(a.quizId);
     if (!prev || new Date(a.completedAt) > new Date(prev.completedAt)) {
       latestByQuiz.set(a.quizId, a);

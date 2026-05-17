@@ -616,9 +616,8 @@ export async function POST(req: NextRequest) {
     const methodRaw = String(data.analysis_method ?? "topsis").toLowerCase();
     const analysisMethod = methodRaw === "weighted" ? "weighted" : "topsis";
 
-    let start: Date;
     const parsedStart = data.start_date ? parseIsoDate(data.start_date) : null;
-    start = parsedStart ?? (() => {
+    const start: Date = parsedStart ?? (() => {
       const d = new Date();
       d.setHours(0, 0, 0, 0);
       return d;

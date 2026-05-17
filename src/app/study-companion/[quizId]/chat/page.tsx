@@ -121,7 +121,7 @@ export default function StudyCompanionChat({
   params: Promise<{ quizId: string }>;
 }) {
   const { quizId } = use(params);
-  const quiz = useQuizById(quizId);
+  const liveQuiz = useQuizById(quizId);
   const attempts = useStore((s) => s.attempts);
 
   // Latest attempt for this quiz (so the AI sees what the user actually answered).
@@ -132,6 +132,17 @@ export default function StudyCompanionChat({
       new Date(a.completedAt) > new Date(latest.completedAt) ? a : latest,
     );
   }, [attempts, quizId]);
+
+  // Study Companion is a live mirror of Quiz Lab — if the quiz no longer
+  // exists, this entry shouldn't be reachable.
+  const quiz = useMemo(() => {
+    if (!liveQuiz) return null;
+    return {
+      title: liveQuiz.title,
+      course: liveQuiz.course,
+      questions: liveQuiz.questions,
+    };
+  }, [liveQuiz]);
 
   const wrongQuestions = useMemo(() => {
     if (!quiz || !attempt) return [] as { number: number; prompt: string }[];

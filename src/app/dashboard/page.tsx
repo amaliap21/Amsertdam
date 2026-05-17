@@ -28,20 +28,26 @@ type Courses = {
 export default function Dashboard() {
   const { user } = useCurrentUser();
   const fetchInitial = useStore((s) => s.fetchInitial)
-  const storeDecks = useStore((s) => s.decks)
   const storeTasks = useStore((s) => s.tasks)
   const coursesCache = useStore((s) => s.coursesCache)
-  const flashcardCount = storeDecks.length
 
   // Derive courseItems from the persisted store cache. This renders instantly
   // on mount (from localStorage), then updates when the background fetch lands.
   const courseItems: Courses[] = useMemo(() => {
     if (!Array.isArray(coursesCache)) return []
-    return coursesCache.map((co: any) => {
+    type CachedCourse = {
+      title?: string
+      course_payload?: {
+        credits?: number
+        threshold?: number | null
+        typeTracking?: string
+        scheduleEntries?: Array<{ day?: string; startTime?: string; endTime?: string }>
+      }
+    }
+    return (coursesCache as CachedCourse[]).map((co) => {
       const payload = co.course_payload ?? {}
       const credits = Number(payload.credits) || 0
-      const schedule: Array<{ day?: string; startTime?: string; endTime?: string }> =
-        Array.isArray(payload.scheduleEntries) ? payload.scheduleEntries : []
+      const schedule = Array.isArray(payload.scheduleEntries) ? payload.scheduleEntries : []
       const toMin = (t?: string) => {
         if (!t || typeof t !== 'string' || !t.includes(':')) return null
         const [h, m] = t.split(':').map(Number)
@@ -59,7 +65,7 @@ export default function Dashboard() {
       const threshold = payload.threshold != null ? String(payload.threshold) : '—'
       const typeTracking = payload.typeTracking ?? 'On Track'
       return {
-        courseName: co.title,
+        courseName: co.title ?? 'Untitled',
         credits,
         fromTime,
         toTime,

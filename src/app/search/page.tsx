@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { BookOpen, Sparkles, CheckSquare, NotebookText } from "lucide-react";
 
@@ -13,11 +13,72 @@ type SearchRecord = {
   href?: string;
 };
 
+// Loose row types matching the API responses. All fields optional because
+// the JSON shapes evolve over time and we want the search page to be
+// resilient to missing/extra columns.
+type RawCourse = {
+  id?: string | number;
+  title?: string;
+  description?: string;
+  credits?: number;
+};
+type RawCard = {
+  front?: string;
+  back?: string;
+  question?: string;
+  answer?: string;
+};
+type RawDeck = {
+  id?: string | number;
+  title?: string;
+  description?: string;
+  card_count?: number;
+  cardCount?: number;
+  cards?: RawCard[];
+};
+type RawQuizOption = { text?: string };
+type RawQuizQuestion = {
+  prompt?: string;
+  options?: RawQuizOption[];
+};
+type RawQuiz = {
+  id?: string | number;
+  title?: string;
+  course?: string;
+  source?: string;
+  questions?: RawQuizQuestion[];
+};
+type RawTask = {
+  id?: string | number;
+  title?: string;
+  course?: string;
+  description?: string;
+  priority?: string;
+};
+
 function includesQuery(value: string | undefined, query: string) {
   return (value ?? "").toLowerCase().includes(query.toLowerCase());
 }
 
+// Next.js 16 requires components that call useSearchParams() to be wrapped
+// in a Suspense boundary so the rest of the route can stream / prerender.
 export default function SearchPage() {
+  return (
+    <Suspense fallback={<SearchFallback />}>
+      <SearchInner />
+    </Suspense>
+  );
+}
+
+function SearchFallback() {
+  return (
+    <div className="min-h-screen bg-white px-14.75 py-11.5">
+      <p className="text-sm text-gray-primary">Loading search…</p>
+    </div>
+  );
+}
+
+function SearchInner() {
   const searchParams = useSearchParams();
   const query = (searchParams.get("q") ?? "").trim();
   const [loading, setLoading] = useState(true);
@@ -51,15 +112,15 @@ export default function SearchPage() {
         if (!active) return;
 
         const normalizedQuery = query.toLowerCase();
-        const filteredCourses = (Array.isArray(courses) ? courses : [])
-          .filter((course: any) => {
+        const filteredCourses = ((Array.isArray(courses) ? courses : []) as RawCourse[])
+          .filter((course) => {
             if (!normalizedQuery) return true;
             return (
               includesQuery(course?.title, normalizedQuery) ||
               includesQuery(course?.description, normalizedQuery)
             );
           })
-          .map((course: any) => ({
+          .map((course) => ({
             id: String(course.id),
             type: "Course",
             title: String(course.title ?? "Untitled course"),
@@ -67,12 +128,12 @@ export default function SearchPage() {
             href: "/passing-target",
           }));
 
-        const filteredDecks = (Array.isArray(decks) ? decks : [])
-          .filter((deck: any) => {
+        const filteredDecks = ((Array.isArray(decks) ? decks : []) as RawDeck[])
+          .filter((deck) => {
             if (!normalizedQuery) return true;
             const cardText = Array.isArray(deck?.cards)
               ? deck.cards
-                  .flatMap((card: any) => [card?.front, card?.back, card?.question, card?.answer])
+                  .flatMap((card: RawCard) => [card?.front, card?.back, card?.question, card?.answer])
                   .join(" ")
               : "";
             return (
@@ -81,7 +142,7 @@ export default function SearchPage() {
               includesQuery(cardText, normalizedQuery)
             );
           })
-          .map((deck: any) => ({
+          .map((deck) => ({
             id: String(deck.id),
             type: "Flashcards",
             title: String(deck.title ?? "Untitled deck"),
@@ -89,12 +150,15 @@ export default function SearchPage() {
             href: `/flashcards/${deck.id}/review`,
           }));
 
-        const filteredQuizzes = (Array.isArray(quizzes) ? quizzes : [])
-          .filter((quiz: any) => {
+        const filteredQuizzes = ((Array.isArray(quizzes) ? quizzes : []) as RawQuiz[])
+          .filter((quiz) => {
             if (!normalizedQuery) return true;
             const questionText = Array.isArray(quiz?.questions)
               ? quiz.questions
-                  .flatMap((question: any) => [question?.prompt, ...(question?.options ?? []).map((option: any) => option?.text)])
+                  .flatMap((question: RawQuizQuestion) => [
+                    question?.prompt,
+                    ...(question?.options ?? []).map((option: RawQuizOption) => option?.text),
+                  ])
                   .join(" ")
               : "";
             return (
@@ -104,7 +168,7 @@ export default function SearchPage() {
               includesQuery(questionText, normalizedQuery)
             );
           })
-          .map((quiz: any) => ({
+          .map((quiz) => ({
             id: String(quiz.id),
             type: "Quiz",
             title: String(quiz.title ?? "Untitled quiz"),
@@ -112,8 +176,8 @@ export default function SearchPage() {
             href: `/quiz-lab/${quiz.id}/preview`,
           }));
 
-        const filteredTasks = (Array.isArray(tasks) ? tasks : [])
-          .filter((task: any) => {
+        const filteredTasks = ((Array.isArray(tasks) ? tasks : []) as RawTask[])
+          .filter((task) => {
             if (!normalizedQuery) return true;
             return (
               includesQuery(task?.title, normalizedQuery) ||
@@ -122,7 +186,7 @@ export default function SearchPage() {
               includesQuery(task?.priority, normalizedQuery)
             );
           })
-          .map((task: any) => ({
+          .map((task) => ({
             id: String(task.id),
             type: "Task",
             title: String(task.title ?? "Untitled task"),

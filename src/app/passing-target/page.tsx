@@ -54,12 +54,41 @@ type Courses = {
   isCalculating?: boolean;
 };
 
-function normalizeCourse(course: any): Courses {
-  let packedMeta: any = course.course_payload ?? {};
+type RawCourse = {
+  id?: string;
+  title?: string;
+  courseName?: string;
+  description?: string | null;
+  course_payload?: Record<string, unknown>;
+  credits?: number;
+  scheduleEntries?: Courses["scheduleEntries"];
+  schedule_entries?: Courses["scheduleEntries"];
+  typeTracking?: string;
+  threshold?: number | null;
+  passingGrade?: number;
+  passingRequirement?: string;
+  assessments?: Assessment[];
+  requirements?: Courses["requirements"];
+  thresholdResult?: ThresholdResult;
+  isCalculating?: boolean;
+};
+
+type PackedCourseMeta = {
+  credits?: number;
+  threshold?: number | null;
+  typeTracking?: string;
+  passingRequirement?: string;
+  scheduleEntries?: Courses["scheduleEntries"];
+  assessments?: Assessment[];
+  requirements?: Courses["requirements"];
+};
+
+function normalizeCourse(course: RawCourse): Courses {
+  let packedMeta: PackedCourseMeta = (course.course_payload ?? {}) as PackedCourseMeta;
   if (!Object.keys(packedMeta).length && typeof course.description === "string" && course.description.trim()) {
     try {
       const parsed = JSON.parse(course.description);
-      if (parsed && typeof parsed === "object") packedMeta = parsed;
+      if (parsed && typeof parsed === "object") packedMeta = parsed as PackedCourseMeta;
     } catch {
       packedMeta = {};
     }
@@ -162,7 +191,7 @@ export default function PassingTarget() {
   const setCoursesCache = useStore((s) => s.setCoursesCache);
   // Seed from the persisted cache so the list renders instantly on mount.
   const [courseItems, setCourseItems] = useState<Courses[]>(() =>
-    Array.isArray(coursesCache) ? (coursesCache as any[]).map(normalizeCourse) : [],
+    Array.isArray(coursesCache) ? (coursesCache as RawCourse[]).map(normalizeCourse) : [],
   );
 
   const persistCourse = async (course: Courses) => {
@@ -777,7 +806,7 @@ export default function PassingTarget() {
                         if (!confirm('Delete this course?')) return;
                         // perform server delete when possible
                         (async () => {
-                          const maybeId = (item as any).id;
+                          const maybeId = item.id;
                           if (maybeId) {
                             try { await fetch(`/api/courses?id=${maybeId}`, { method: 'DELETE' }) } catch {}
                           }

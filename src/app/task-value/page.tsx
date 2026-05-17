@@ -685,19 +685,26 @@ export default function TaskValue() {
         </div>
       </div>
 
-      {/* Add Task Modal */}
-      <AddTaskModal
-        isOpen={showAddTaskModal}
-        onClose={() => setShowAddTaskModal(false)}
-        onSubmit={handleAddTask}
-      />
-      {/* Edit Task Modal — same component, pre-filled with the task being edited */}
-      <AddTaskModal
-        isOpen={editingTask !== null}
-        onClose={() => setEditingTask(null)}
-        onSubmit={handleEditSubmit}
-        initialTask={editingTask ? buildInitialFromTask(editingTask) : null}
-      />
+      {/* Add Task Modal — only mounted while open, so its useState
+          initializers run with fresh `initialTask` each time. */}
+      {showAddTaskModal && (
+        <AddTaskModal
+          isOpen={showAddTaskModal}
+          onClose={() => setShowAddTaskModal(false)}
+          onSubmit={handleAddTask}
+        />
+      )}
+      {/* Edit Task Modal — keyed by the task id so picking a different task
+          remounts the form with the new pre-filled values. */}
+      {editingTask && (
+        <AddTaskModal
+          key={editingTask.id}
+          isOpen
+          onClose={() => setEditingTask(null)}
+          onSubmit={handleEditSubmit}
+          initialTask={buildInitialFromTask(editingTask)}
+        />
+      )}
       <InitWrapper />
     </div>
   );

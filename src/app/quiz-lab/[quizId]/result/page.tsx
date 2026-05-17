@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useRef } from "react";
+import { use, useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
 import { useSearchParams, notFound } from "next/navigation";
 import { ArrowLeft, CheckCircle2, XCircle } from "lucide-react";
@@ -23,14 +23,16 @@ export default function QuizResult({
   }
 
   const raw = searchParams.get("a");
-  let answers: Record<string, Answer> = {};
-  if (raw) {
+  // Wrapped in useMemo so the object identity is stable across renders, which
+  // keeps the useEffect below from re-firing every time React rerenders.
+  const answers: Record<string, Answer> = useMemo(() => {
+    if (!raw) return {};
     try {
-      answers = JSON.parse(decodeURIComponent(raw));
+      return JSON.parse(decodeURIComponent(raw));
     } catch {
-      answers = {};
+      return {};
     }
-  }
+  }, [raw]);
 
   const correct = quiz.questions.filter(
     (q) => answers[q.id] === q.correctAnswer,

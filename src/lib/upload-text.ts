@@ -9,7 +9,6 @@ function normalizeText(raw: string) {
   // Keep Unicode (Indonesian, accents, em-dashes, etc.). Only strip control
   // chars that are not whitespace, then collapse runs of whitespace.
   return raw
-    // eslint-disable-next-line no-control-regex
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, " ")
     .replace(/\s+/g, " ")
     .trim();

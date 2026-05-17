@@ -45,35 +45,18 @@ export default function AddTaskModal({
   initialTask,
 }: AddTaskModalProps) {
   const isEditMode = !!initialTask;
-  const [taskName, setTaskName] = useState("");
-  const [courseName, setCourseName] = useState("");
-  const [assessmentName, setAssessmentName] = useState("");
-  const [itemName, setItemName] = useState("");
-  const [deadline, setDeadline] = useState("");
-  const [estimatedHours, setEstimatedHours] = useState<string>("");
+  // Seed values come from `initialTask` once on mount. The parent is expected
+  // to pass a stable `key` (or to mount the modal only when `isOpen` is true)
+  // so a different task always gets a fresh component instance — that way we
+  // don't need a setState-in-effect to reset the form between opens.
+  const [taskName, setTaskName] = useState(initialTask?.taskName ?? "");
+  const [courseName, setCourseName] = useState(initialTask?.course ?? "");
+  const [assessmentName, setAssessmentName] = useState(initialTask?.assessment ?? "");
+  const [itemName, setItemName] = useState(initialTask?.item ?? "");
+  const [deadline, setDeadline] = useState(initialTask?.deadline ?? "");
+  const [estimatedHours, setEstimatedHours] = useState<string>(initialTask?.estimatedHours ?? "");
 
   const [courses, setCourses] = useState<CourseLite[]>([]);
-
-  // Seed form fields whenever the modal opens (and whenever the task being
-  // edited changes). Clears for add mode, fills for edit mode.
-  useEffect(() => {
-    if (!isOpen) return;
-    if (initialTask) {
-      setTaskName(initialTask.taskName);
-      setCourseName(initialTask.course);
-      setAssessmentName(initialTask.assessment);
-      setItemName(initialTask.item);
-      setDeadline(initialTask.deadline);
-      setEstimatedHours(initialTask.estimatedHours);
-    } else {
-      setTaskName("");
-      setCourseName("");
-      setAssessmentName("");
-      setItemName("");
-      setDeadline("");
-      setEstimatedHours("");
-    }
-  }, [isOpen, initialTask]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -83,7 +66,16 @@ export default function AddTaskModal({
         if (!r.ok) return;
         const data = await r.json();
         if (!Array.isArray(data)) return;
-        const mapped: CourseLite[] = data.map((c: any) => {
+        type RawCourse = {
+          id?: string;
+          title?: string;
+          course_payload?: {
+            title?: string;
+            assessments?: CourseLite["assessments"];
+          };
+          assessments?: CourseLite["assessments"];
+        };
+        const mapped: CourseLite[] = (data as RawCourse[]).map((c) => {
           const payload = c.course_payload ?? {};
           return {
             id: c.id,
