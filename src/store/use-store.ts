@@ -44,6 +44,20 @@ export type TaskItem = {
   effort: string;
 };
 
+export type PlannerEventType = "Class" | "Task" | "Self Study";
+
+export type PlannerEvent = {
+  id: number;
+  title: PlannerEventType;
+  /** Optional bracket-label override (e.g. assessment name from a task). */
+  label?: string;
+  date: string; // YYYY-MM-DD (local)
+  time: string; // "8:00 AM - 10:00 AM"
+  subject: string;
+  color: string;
+  bgColor: string;
+};
+
 export type QuizAttempt = {
   id: string;
   quizId: string;
@@ -72,6 +86,17 @@ interface AppState {
   removeDeck: (id: string) => Promise<void>;
   removeQuiz: (id: string) => Promise<void>;
   setTasks: (tasks: TaskItem[]) => void;
+
+  plannerEvents: PlannerEvent[];
+  setPlannerEvents: (events: PlannerEvent[]) => void;
+  hiddenTaskEventIds: number[];
+  setHiddenTaskEventIds: (ids: number[]) => void;
+
+  // Cached courses for fast first paint on the dashboard. Persisted so the
+  // courses overview doesn't blank out between navigations / refreshes.
+  coursesCache: unknown[];
+  setCoursesCache: (courses: unknown[]) => void;
+  fetchCourses: () => Promise<void>;
 
   attempts: QuizAttempt[];
   recordAttempt: (
@@ -222,28 +247,68 @@ export const useStore = create<AppState>()(
           set((state) => ({ quizzes: state.quizzes.filter(q => q.id !== id) }))
         },
         setTasks: (tasks) => set({ tasks }),
+        plannerEvents: [],
+        setPlannerEvents: (plannerEvents) => set({ plannerEvents }),
+        hiddenTaskEventIds: [],
+        setHiddenTaskEventIds: (hiddenTaskEventIds) => set({ hiddenTaskEventIds }),
+        coursesCache: [],
+        setCoursesCache: (coursesCache) => set({ coursesCache }),
+        fetchCourses: async () => {
+          const w = globalThis as unknown as { __realtrackCoursesFetch?: Promise<void> }
+          if (w.__realtrackCoursesFetch) return w.__realtrackCoursesFetch
+          const run = (async () => {
+            try {
+              const r = await fetch('/api/courses')
+              if (!r.ok) return
+              const data = await r.json()
+              if (Array.isArray(data)) set({ coursesCache: data })
+            } catch {
+              // ignore
+            } finally {
+              setTimeout(() => { delete w.__realtrackCoursesFetch }, 2000)
+            }
+          })()
+          w.__realtrackCoursesFetch = run
+          return run
+        },
         fetchInitial: async () => {
-          try {
-            const [tResp, fResp, qResp] = await Promise.all([
-              fetch('/api/tasks'),
-              fetch('/api/flashcards'),
-              fetch('/api/quizzes'),
-            ])
-            if (tResp.ok) {
-              const tasks = await tResp.json()
-              set({ tasks })
+          // Coalesce concurrent calls so multiple page mounts share one fetch.
+          const w = globalThis as unknown as { __realtrackInitialFetch?: Promise<void> }
+          if (w.__realtrackInitialFetch) return w.__realtrackInitialFetch
+          const run = (async () => {
+            try {
+              const [tResp, fResp, qResp, cResp] = await Promise.all([
+                fetch('/api/tasks'),
+                fetch('/api/flashcards'),
+                fetch('/api/quizzes'),
+                fetch('/api/courses'),
+              ])
+              const [tasks, decks, quizzes, courses] = await Promise.all([
+                tResp.ok ? tResp.json() : Promise.resolve(null),
+                fResp.ok ? fResp.json() : Promise.resolve(null),
+                qResp.ok ? qResp.json() : Promise.resolve(null),
+                cResp.ok ? cResp.json() : Promise.resolve(null),
+              ])
+              const next: Partial<AppState> = {}
+              if (Array.isArray(tasks)) next.tasks = tasks
+              if (Array.isArray(decks)) {
+                next.decks = decks.map((d: any) => ({ id: d.id, title: d.title, description: d.description, cardCount: d.card_count, cards: d.cards || [], createdAt: d.created_at }))
+              }
+              if (Array.isArray(quizzes)) {
+                next.quizzes = quizzes.map((q: any) => ({ id: q.id, title: q.title, course: q.course, source: q.source, questions: q.questions || [], createdAt: q.created_at }))
+              }
+              if (Array.isArray(courses)) next.coursesCache = courses
+              if (Object.keys(next).length) set(next)
+            } catch {
+              // ignore
+            } finally {
+              // Allow a fresh fetch after a short cooldown so navigation between
+              // pages doesn't refetch on every mount but data is never too stale.
+              setTimeout(() => { delete w.__realtrackInitialFetch }, 2000)
             }
-            if (fResp.ok) {
-              const decks = await fResp.json()
-              set({ decks: (decks || []).map((d: any) => ({ id: d.id, title: d.title, description: d.description, cardCount: d.card_count, cards: d.cards || [], createdAt: d.created_at })) })
-            }
-            if (qResp.ok) {
-              const quizzes = await qResp.json()
-              set({ quizzes: (quizzes || []).map((q: any) => ({ id: q.id, title: q.title, course: q.course, source: q.source, questions: q.questions || [], createdAt: q.created_at })) })
-            }
-          } catch {
-            // ignore
-          }
+          })()
+          w.__realtrackInitialFetch = run
+          return run
         },
       }),
       {

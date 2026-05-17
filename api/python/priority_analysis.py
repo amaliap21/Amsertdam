@@ -25,19 +25,35 @@ from datetime import datetime
 # MCDA Engine
 # ---------------------------------------------------------------------------
 
-WEIGHT_IMPACT = 0.25
+WEIGHT_IMPACT = 0.22
 WEIGHT_SKS = 0.08
-WEIGHT_URGENCY = 0.35
-WEIGHT_GAP = 0.20
-WEIGHT_EFFORT = 0.12  # inverted (high effort → lower score)
+WEIGHT_URGENCY = 0.30
+WEIGHT_GAP = 0.18
+WEIGHT_EFFICIENCY = 0.14  # grade-per-hour benefit: same grade in less time wins
+WEIGHT_EFFORT = 0.08      # remaining cost penalty for genuinely overwhelming tasks
 
 HIGH_THRESHOLD = 0.5
 MEDIUM_THRESHOLD = 0.3
 
-# Criteria order used in TOPSIS and matrix construction
-CRITERIA_KEYS = ["grade_impact", "sks_score", "urgency", "gap_factor", "effort_penalty"]
-CRITERIA_WEIGHTS = [WEIGHT_IMPACT, WEIGHT_SKS, WEIGHT_URGENCY, WEIGHT_GAP, WEIGHT_EFFORT]
-CRITERIA_BENEFIT = [True, True, True, True, False]
+# Criteria order used in TOPSIS and matrix construction. Efficiency is a
+# benefit criterion (higher → better); effort_penalty is the only cost.
+CRITERIA_KEYS = [
+    "grade_impact",
+    "sks_score",
+    "urgency",
+    "gap_factor",
+    "efficiency",
+    "effort_penalty",
+]
+CRITERIA_WEIGHTS = [
+    WEIGHT_IMPACT,
+    WEIGHT_SKS,
+    WEIGHT_URGENCY,
+    WEIGHT_GAP,
+    WEIGHT_EFFICIENCY,
+    WEIGHT_EFFORT,
+]
+CRITERIA_BENEFIT = [True, True, True, True, True, False]
 
 TYPE_MULTIPLIER = { "exam": 1.30, "project": 1.15, "quiz": 1.15, "homework": 0.95, "generic": 1.00 }
 
@@ -56,12 +72,51 @@ def _urgency_score(deadline_days: float) -> float:
     return math.exp(-0.15 * deadline_days)
 
 
-def _effort_score(estimated_hours: float, weekly_capacity_hours: float) -> float:
-    """Normalized effort cost. Higher effort → higher cost → lower priority contribution."""
+def _effort_score(
+    estimated_hours: float,
+    weekly_capacity_hours: float,
+    deadline_days: float,
+    completion_pct: float = 0.0,
+) -> float:
+    """Effort cost as a fraction of the *time available before the deadline*.
+
+    A 3-hour task is trivial when you have a week, crushing when it's due in
+    two hours. So we compare remaining hours to the capacity-adjusted hours
+    available before the deadline, not to a flat weekly budget.
+
+    Also subtracts the portion already completed: a 10-hour task at 80% done
+    only has 2 hours of real work left.
+
+    The result is in [0, 1] where:
+      0.00 - 0.30  -> easy, fits with plenty of slack
+      0.30 - 0.60  -> moderate
+      0.60 - 0.85  -> tight
+      0.85 - 1.00  -> overwhelming / impossible
+    """
     if weekly_capacity_hours <= 0:
         return 1.0
-    ratio = estimated_hours / weekly_capacity_hours
-    return min(1.0, ratio)   # inverted below
+
+    # Hours of real work still required.
+    completion = max(0.0, min(100.0, completion_pct))
+    remaining = max(0.0, estimated_hours * (1.0 - completion / 100.0))
+    if remaining <= 0.0:
+        return 0.0
+
+    # Capacity-adjusted hours available before the deadline.
+    # Treat day 0 as "due now" — give at least one capacity-hour so we don't
+    # divide by zero and so a tiny task on the same day isn't reported as
+    # infinitely costly.
+    daily_capacity = weekly_capacity_hours / 7.0
+    effective_days = max(deadline_days, 1.0)
+    available = max(1.0, daily_capacity * effective_days)
+
+    ratio = remaining / available
+
+    # Slightly convex curve so the score discriminates between "tight" and
+    # "impossible": ratio 0.5 -> 0.40, ratio 1.0 -> 1.0, ratio >1 saturates.
+    if ratio >= 1.0:
+        return 1.0
+    return ratio ** 1.2
 
 
 def _clamp01(x: float) -> float:
@@ -77,6 +132,7 @@ def compute_breakdown(data: dict) -> dict:
     current_grade = float(data.get("current_grade", 0))
     passing_grade = float(data.get("passing_grade", 75))
     weekly_capacity = float(data.get("weekly_capacity_hours", 40))
+    completion_pct = float(data.get("completion_pct", 0))
     task_type = str(data.get("task_type", "generic")).lower()
 
     # impact adjusted by task type
@@ -90,17 +146,32 @@ def compute_breakdown(data: dict) -> dict:
     gap = passing_grade - current_grade
     gap_factor = _normalize(gap, -20, 40)
 
-    effort_raw = _effort_score(estimated_hours, weekly_capacity)
+    # Effort now compares remaining work to the capacity-adjusted hours
+    # available before the deadline (instead of a flat weekly budget).
+    effort_raw = _effort_score(
+        estimated_hours,
+        weekly_capacity,
+        deadline_days,
+        completion_pct,
+    )
     effort_penalty = effort_raw
+
+    # Time-efficiency = grade-weight earned per hour of remaining work. This
+    # is the direct expression of "same grade in less time should win".
+    # Normalized against 25 (a very efficient task: 25% of grade for 1 hour).
+    remaining_hours = max(1.0, estimated_hours * (1.0 - max(0.0, min(100.0, completion_pct)) / 100.0))
+    efficiency_raw = grade_weight / remaining_hours
+    efficiency = _normalize(efficiency_raw, 0.0, 25.0)
 
     raw_score = (
         WEIGHT_IMPACT * impact
         + WEIGHT_SKS * sks_score
         + WEIGHT_URGENCY * urgency
         + WEIGHT_GAP * gap_factor
+        + WEIGHT_EFFICIENCY * efficiency
         - WEIGHT_EFFORT * effort_penalty
     )
-    composite = _normalize(raw_score, -0.20, 0.80)
+    composite = _normalize(raw_score, -0.10, 0.92)
 
     return {
         "impact": impact,
@@ -108,6 +179,8 @@ def compute_breakdown(data: dict) -> dict:
         "urgency": urgency,
         "gap": gap,
         "gap_factor": gap_factor,
+        "efficiency_raw": efficiency_raw,
+        "efficiency": efficiency,
         "effort_raw": effort_raw,
         "effort_penalty": effort_penalty,
         "composite": composite,

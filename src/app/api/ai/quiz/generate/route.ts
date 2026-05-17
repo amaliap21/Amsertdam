@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callClaude, extractFirstJson } from "@/lib/anthropic";
-import { supabaseAdmin } from "@/lib/supabase/admin";
 import { extractTextFromUpload } from "@/lib/upload-text";
 
 export const runtime = "nodejs";
@@ -79,28 +78,30 @@ export async function POST(req: NextRequest) {
         {
           role: "system",
           content:
-            'You estimate how many quiz questions a source can support. Respond with strict JSON only: {"maxQuestions": number}. Choose a realistic limit between 4 and 20.',
+            'You estimate the MAXIMUM number of quiz questions a source can comfortably support. Be GENEROUS — every distinct concept, definition, formula, or fact in the material is a candidate question. Respond with strict JSON only: {"maxQuestions": number}. The limit must be between 5 and 25. Favor the higher end when the source is dense with terminology.',
         },
         {
           role: "user",
-          content: `Estimate the best quiz size for a quiz titled "${title}"${
+          content: `Estimate the maximum quiz size for a quiz titled "${title}"${
             course ? ` in the course "${course}"` : ""
-          }. Return JSON only.\n\nMATERIAL:\n${filePreview}`,
+          }. Count distinct concepts, terms, definitions, equations, and facts — return the maximum the source can support, not a conservative average. Return JSON only.\n\nMATERIAL:\n${filePreview}`,
         },
       ],
       { jsonMode: true },
     );
 
-    let maxQuestions = 8;
+    const wordCount = filePreview.split(/\s+/).filter(Boolean).length;
+    const heuristic = Math.max(8, Math.min(25, Math.round(wordCount / 80)));
+    let maxQuestions = heuristic;
     try {
       const limitJson = extractFirstJson<{ maxQuestions?: number }>(limitResponse);
       const parsedLimit = Number(limitJson?.maxQuestions);
       if (Number.isFinite(parsedLimit)) {
-        maxQuestions = Math.max(4, Math.min(20, Math.round(parsedLimit)));
+        // Take the higher of the AI estimate and the heuristic — AI tends to underestimate.
+        maxQuestions = Math.max(5, Math.min(25, Math.max(Math.round(parsedLimit), heuristic)));
       }
     } catch {
-      const fallback = Math.round(filePreview.split(/\s+/).filter(Boolean).length / 60) || 8;
-      maxQuestions = Math.max(4, Math.min(20, fallback));
+      maxQuestions = heuristic;
     }
 
     if (mode === "analyze") {
@@ -126,9 +127,9 @@ export async function POST(req: NextRequest) {
         },
         {
           role: "user",
-          content: `Generate 5-10 multiple choice questions from this material for a quiz titled "${title}"${
+          content: `Generate exactly ${effectiveQuestions} multiple choice questions from this material for a quiz titled "${title}"${
             course ? ` in the course "${course}"` : ""
-          }. Return JSON {"questions": [...]}.\n\nMATERIAL:\n${filePreview}`,
+          }. Return JSON {"questions": [...]} with exactly ${effectiveQuestions} items.\n\nMATERIAL:\n${filePreview}`,
         },
       ],
       { jsonMode: true },
@@ -167,6 +168,7 @@ export async function POST(req: NextRequest) {
           q.options.length === 4 &&
           ["A", "B", "C", "D"].includes(q.correctAnswer),
       )
+      .slice(0, effectiveQuestions)
       .map((q, i) => ({
         id: `q${i + 1}`,
         prompt: q.prompt.trim(),
@@ -177,32 +179,7 @@ export async function POST(req: NextRequest) {
         correctAnswer: q.correctAnswer,
       }));
 
-    try {
-      const payload = {
-        title,
-        course,
-        source: file.name,
-        questions,
-      };
-      const { data, error } = await supabaseAdmin
-        .from("quizzes")
-        .insert(payload)
-        .select()
-        .single();
-      if (!error) {
-        return NextResponse.json({
-          title: data.title,
-          course: data.course,
-          source: data.source,
-          questions: data.questions,
-          id: data.id,
-          created_at: data.created_at,
-        });
-      }
-    } catch (e) {
-      // ignore db error
-    }
-
+    // No DB insert here — the client's store calls POST /api/quizzes to persist.
     return NextResponse.json({
       title,
       course,

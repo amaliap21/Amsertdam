@@ -1,8 +1,0 @@
-{
-  "title": "Test Deck",
-  "description": "Test Description",
-  "cards": [
-    { "front": "Q1", "back": "A1" },
-    { "front": "Q2", "back": "A2" }
-  ]
-}

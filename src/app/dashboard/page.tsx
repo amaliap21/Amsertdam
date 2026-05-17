@@ -1,9 +1,10 @@
 "use client";
 import { CircleAlert, CircleQuestionMark, CircleCheck } from "lucide-react";
 import Image from "next/image";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useStore } from "@/store/use-store";
 import { useCurrentUser } from "@/lib/use-current-user";
+import { parseTaskDate, extractAssessmentName } from "@/lib/task-date";
 
 type Tasks = {
   cardColor: string;
@@ -26,91 +27,136 @@ type Courses = {
 
 export default function Dashboard() {
   const { user } = useCurrentUser();
-  const [taskItems, setTaskItems] = useState<Tasks[]>([
-    {
-      cardColor:
-        "linear-gradient(288deg, rgba(229, 61, 61, 0.20) 34.38%, rgba(245, 150, 56, 0.20) 95.91%)",
-      type: "Focus First",
-      icon: <CircleAlert size={20} className="text-[#E53D3D]" />,
-      image: "red-task.svg",
-      taskCount: 0,
-      taskCountColor: "#E53D3D",
-      text: "High impact, worth your effort.",
-    },
-    {
-      cardColor:
-        "linear-gradient(288deg, rgba(223, 229, 61, 0.20) 34.38%, rgba(223, 245, 56, 0.20) 95.91%)",
-      type: "If You Have Energy",
-      icon: <CircleQuestionMark size={20} className="text-[#E5B03D]" />,
-      image: "yellow-task.svg",
-      taskCount: 0,
-      taskCountColor: "#E5B03D",
-      text: "Helpful but this task is not critical.",
-    },
-    {
-      cardColor:
-        "linear-gradient(288deg, var(--Green, rgba(132, 224, 163, 0.20)) 34.38%, var(--Teal, rgba(110, 175, 187, 0.20)) 95.91%)",
-      type: "Safe to Minimize",
-      icon: <CircleCheck size={20} className="text-[#73C58F]" />,
-      image: "green-task.svg",
-      taskCount: 0,
-      taskCountColor: "#73C58F",
-      text: "Low impact, safe to do less.",
-    },
-  ])
+  const fetchInitial = useStore((s) => s.fetchInitial)
+  const storeDecks = useStore((s) => s.decks)
+  const storeTasks = useStore((s) => s.tasks)
+  const coursesCache = useStore((s) => s.coursesCache)
+  const flashcardCount = storeDecks.length
 
-  const [courseItems, setCourseItems] = useState<Courses[]>([])
-  const [flashcardCount, setFlashcardCount] = useState<number>(0)
+  // Derive courseItems from the persisted store cache. This renders instantly
+  // on mount (from localStorage), then updates when the background fetch lands.
+  const courseItems: Courses[] = useMemo(() => {
+    if (!Array.isArray(coursesCache)) return []
+    return coursesCache.map((co: any) => {
+      const payload = co.course_payload ?? {}
+      const credits = Number(payload.credits) || 0
+      const schedule: Array<{ day?: string; startTime?: string; endTime?: string }> =
+        Array.isArray(payload.scheduleEntries) ? payload.scheduleEntries : []
+      const toMin = (t?: string) => {
+        if (!t || typeof t !== 'string' || !t.includes(':')) return null
+        const [h, m] = t.split(':').map(Number)
+        if (!Number.isFinite(h) || !Number.isFinite(m)) return null
+        return h * 60 + m
+      }
+      let totalHours = 0
+      for (const s of schedule) {
+        const a = toMin(s.startTime)
+        const b = toMin(s.endTime)
+        if (a != null && b != null && b > a) totalHours += (b - a) / 60
+      }
+      const fromTime = totalHours > 0 ? Math.round(totalHours) : credits
+      const toTime = fromTime
+      const threshold = payload.threshold != null ? String(payload.threshold) : '—'
+      const typeTracking = payload.typeTracking ?? 'On Track'
+      return {
+        courseName: co.title,
+        credits,
+        fromTime,
+        toTime,
+        typeTracking,
+        threshold,
+      }
+    })
+  }, [coursesCache])
+
+  const taskItems: Tasks[] = useMemo(() => {
+    const counts: Record<string, number> = {
+      "Focus First": 0,
+      "If You Have Energy": 0,
+      "Safe to Minimize": 0,
+    }
+    for (const t of storeTasks) {
+      const key = t.priority ?? "If You Have Energy"
+      counts[key] = (counts[key] ?? 0) + 1
+    }
+    return [
+      {
+        cardColor:
+          "linear-gradient(288deg, rgba(229, 61, 61, 0.20) 34.38%, rgba(245, 150, 56, 0.20) 95.91%)",
+        type: "Focus First",
+        icon: <CircleAlert size={20} className="text-[#E53D3D]" />,
+        image: "red-task.svg",
+        taskCount: counts["Focus First"],
+        taskCountColor: "#E53D3D",
+        text: "High impact, worth your effort.",
+      },
+      {
+        cardColor:
+          "linear-gradient(288deg, rgba(223, 229, 61, 0.20) 34.38%, rgba(223, 245, 56, 0.20) 95.91%)",
+        type: "If You Have Energy",
+        icon: <CircleQuestionMark size={20} className="text-[#E5B03D]" />,
+        image: "yellow-task.svg",
+        taskCount: counts["If You Have Energy"],
+        taskCountColor: "#E5B03D",
+        text: "Helpful but this task is not critical.",
+      },
+      {
+        cardColor:
+          "linear-gradient(288deg, var(--Green, rgba(132, 224, 163, 0.20)) 34.38%, var(--Teal, rgba(110, 175, 187, 0.20)) 95.91%)",
+        type: "Safe to Minimize",
+        icon: <CircleCheck size={20} className="text-[#73C58F]" />,
+        image: "green-task.svg",
+        taskCount: counts["Safe to Minimize"],
+        taskCountColor: "#73C58F",
+        text: "Low impact, safe to do less.",
+      },
+    ]
+  }, [storeTasks])
 
   useEffect(() => {
-    (async () => {
-      try {
-        const t = await fetch('/api/tasks')
-        if (t.ok) {
-          const tasks = await t.json()
-          const counts: Record<string, number> = {
-            'Focus First': 0,
-            'If You Have Energy': 0,
-            'Safe to Minimize': 0,
-          }
-          tasks.forEach((task: any) => { counts[task.priority ?? 'If You Have Energy'] = (counts[task.priority ?? 'If You Have Energy'] || 0) + 1 })
-          setTaskItems((prev) => prev.map((p) => ({ ...p, taskCount: counts[p.type as keyof typeof counts] || 0 })))
-        }
-      } catch {}
-
-      try {
-        const c = await fetch('/api/courses')
-        if (c.ok) {
-          const courses = await c.json()
-          setCourseItems(courses.map((co: any) => ({ courseName: co.title, credits: 3, fromTime: 8, toTime: 10, typeTracking: 'On Track', threshold: '—' })))
-        }
-      } catch {}
-
-      try {
-        const f = await fetch('/api/flashcards')
-        if (f.ok) {
-          const decks = await f.json()
-          setFlashcardCount(Array.isArray(decks) ? decks.length : 0)
-        }
-      } catch {}
-    })()
-  }, [])
+    // fetchInitial now batches tasks + flashcards + quizzes + courses in a
+    // single parallel round-trip and is coalesced across mounts.
+    fetchInitial().catch(() => {})
+  }, [fetchInitial])
 
   const [currentDate, setCurrentDate] = useState(new Date(2026, 0, 8));
   const [selectedDay, setSelectedDay] = useState<number | null>(8);
 
-  const storeTasks = useStore((s) => s.tasks);
-  const events = storeTasks.slice(0, 5).map((t, i) => ({
-    id: i + 1,
-    time: t.timeEstimate ? `${t.timeEstimate} • ${t.date}` : t.date,
-    title: `[Task] ${t.title}`,
-    color:
-      t.priority === "Focus First"
-        ? "bg-red-500"
-        : t.priority === "If You Have Energy"
-          ? "bg-yellow-500"
-          : "bg-green-primary",
-  }));
+  const events = storeTasks.slice(0, 5).map((t, i) => {
+    const assessment = extractAssessmentName(t.description);
+    return {
+      id: i + 1,
+      time: t.timeEstimate ? `${t.timeEstimate} • ${t.date}` : t.date,
+      title: `[${assessment ?? "Task"}] ${t.title}`,
+      color:
+        t.priority === "Focus First"
+          ? "bg-red-500"
+          : t.priority === "If You Have Energy"
+            ? "bg-yellow-500"
+            : "bg-green-primary",
+    };
+  });
+
+  // Map: "YYYY-MM-DD" -> set of priority dot colors (max 3: red/yellow/green).
+  const priorityDotsByIso = useMemo(() => {
+    const map = new Map<string, Set<"red" | "yellow" | "green">>();
+    for (const task of storeTasks) {
+      const { isoDate } = parseTaskDate(task.date);
+      if (!isoDate) continue;
+      const color =
+        task.priority === "Focus First"
+          ? "red"
+          : task.priority === "If You Have Energy"
+            ? "yellow"
+            : "green";
+      if (!map.has(isoDate)) map.set(isoDate, new Set());
+      map.get(isoDate)!.add(color);
+    }
+    return map;
+  }, [storeTasks]);
+
+  const dotColorClass = (c: "red" | "yellow" | "green") =>
+    c === "red" ? "bg-red-500" : c === "yellow" ? "bg-yellow-500" : "bg-green-primary";
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -245,11 +291,15 @@ export default function Dashboard() {
                         border:
                           item.typeTracking === "On Track"
                             ? "1px solid rgba(115, 197, 143, 0.20)"
-                            : "1px solid rgba(197, 178, 115, 0.20)",
+                            : item.typeTracking === "At Risk"
+                              ? "1px solid rgba(229, 61, 61, 0.20)"
+                              : "1px solid rgba(197, 178, 115, 0.20)",
                         background:
                           item.typeTracking === "On Track"
                             ? "rgba(132, 224, 163, 0.20)"
-                            : "rgba(224, 216, 132, 0.20)",
+                            : item.typeTracking === "At Risk"
+                              ? "rgba(229, 61, 61, 0.20)"
+                              : "rgba(224, 216, 132, 0.20)",
                       }}
                     >
                       {item.typeTracking}
@@ -363,25 +413,46 @@ export default function Dashboard() {
 
           {/* Calendar days */}
           <div className="grid grid-cols-7 gap-9">
-            {calendarDays.map((day, index) => (
-              <div
-                key={index}
-                className="aspect-square flex items-center justify-center"
-              >
-                {day && (
-                  <button
-                    onClick={() => setSelectedDay(day)}
-                    className={`w-full h-full flex items-center justify-center rounded-full text-sm font-medium transition-colors ${
-                      day === selectedDay
-                        ? "bg-indigo-600 text-white"
-                        : "text-gray-900 hover:bg-gray-100"
-                    }`}
-                  >
-                    {day}
-                  </button>
-                )}
-              </div>
-            ))}
+            {calendarDays.map((day, index) => {
+              const iso =
+                day != null
+                  ? `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`
+                  : "";
+              const dotSet = iso ? priorityDotsByIso.get(iso) : undefined;
+              // Order red → yellow → green for visual consistency, cap at 3.
+              const dots: Array<"red" | "yellow" | "green"> = dotSet
+                ? (["red", "yellow", "green"] as const).filter((c) => dotSet.has(c))
+                : [];
+              return (
+                <div
+                  key={index}
+                  className="aspect-square flex flex-col items-center justify-center"
+                >
+                  {day && (
+                    <>
+                      <div className="flex gap-0.5 h-1.5 mb-0.5">
+                        {dots.map((c) => (
+                          <span
+                            key={c}
+                            className={`block w-1.5 h-1.5 rounded-full ${dotColorClass(c)}`}
+                          />
+                        ))}
+                      </div>
+                      <button
+                        onClick={() => setSelectedDay(day)}
+                        className={`w-full flex-1 flex items-center justify-center rounded-full text-sm font-medium transition-colors ${
+                          day === selectedDay
+                            ? "bg-indigo-600 text-white"
+                            : "text-gray-900 hover:bg-gray-100"
+                        }`}
+                      >
+                        {day}
+                      </button>
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
 
