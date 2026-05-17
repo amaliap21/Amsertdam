@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import CourseForm from "@/components/ui/course-form";
 import AssessmentForm from "@/components/ui/assessment-form";
 import ItemForm from "@/components/ui/item-form";
+import { useStore } from "@/store/use-store";
 
 type SubItem = {
   name: string;
@@ -11,6 +12,7 @@ type SubItem = {
   score?: number;
   date?: string;
   isEditing?: boolean;
+  isEditingWeight?: boolean;
 };
 
 type Assessment = {
@@ -19,6 +21,7 @@ type Assessment = {
   score?: number;
   date?: string;
   isEditing?: boolean;
+  isEditingWeight?: boolean;
   items?: SubItem[];
 };
 
@@ -126,55 +129,25 @@ async function callGraduationAPI(
     }),
   };
 
+  void aiPayload;
   try {
-    const res = await fetch("/api/ai/passing-target/recommend", {
+    const res = await fetch("/api/python/graduation_threshold", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(aiPayload),
-    });
-    if (!res.ok) {
-      const fb = await fetch("/api/python/graduation_threshold", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          passing_grade: passingGrade,
-          assessments: assessments.map((a) => {
-            const score = effectiveScore(a);
-            return score !== undefined
-              ? { name: a.name, weight: a.weight, score }
-              : { name: a.name, weight: a.weight };
-          }),
+      body: JSON.stringify({
+        passing_grade: passingGrade,
+        assessments: assessments.map((a) => {
+          const score = effectiveScore(a);
+          return score !== undefined
+            ? { name: a.name, weight: a.weight, score }
+            : { name: a.name, weight: a.weight };
         }),
-      });
-      if (!fb.ok) return null;
-      const data = await fb.json();
-      if (data.error) return null;
-      return data as ThresholdResult;
-    }
-    const ai = await res.json();
-    const earned = assessments.reduce((acc, a) => {
-      const s = effectiveScore(a);
-      return s !== undefined ? acc + (a.weight * s) / 100 : acc;
-    }, 0);
-    const requirements = (ai.recommendations ?? []).map(
-      (r: { name: string; weight: number; targetScore: number; status: string }) => ({
-        name: r.name,
-        weight: r.weight,
-        min_score: r.targetScore,
-        is_feasible: r.targetScore <= 100 && r.targetScore >= 0,
       }),
-    );
-    const result: ThresholdResult = {
-      current_grade: Math.round(earned * 10) / 10,
-      passing_grade: ai.passingThreshold ?? passingGrade,
-      gap: Math.max(0, (ai.passingThreshold ?? passingGrade) - earned),
-      requirements,
-      status: ai.risk === "low" ? "On Track" : ai.risk === "high" ? "At Risk" : "Worth Reviewing",
-      safety_margin: Math.max(0, (ai.projectedFinal ?? earned) - (ai.passingThreshold ?? passingGrade)),
-      is_feasible: requirements.every((r: { is_feasible: boolean }) => r.is_feasible),
-      message: ai.summary ?? "",
-    };
-    return result;
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.error) return null;
+    return data as ThresholdResult;
   } catch {
     return null;
   }
@@ -185,7 +158,12 @@ export default function PassingTarget() {
   const [showForm, setShowForm] = useState(false);
   const [addingAssessmentToCourse, setAddingAssessmentToCourse] = useState<number | null>(null);
   const [addingItemTo, setAddingItemTo] = useState<{ courseIndex: number; assessIdx: number } | null>(null);
-  const [courseItems, setCourseItems] = useState<Courses[]>([]);
+  const coursesCache = useStore((s) => s.coursesCache);
+  const setCoursesCache = useStore((s) => s.setCoursesCache);
+  // Seed from the persisted cache so the list renders instantly on mount.
+  const [courseItems, setCourseItems] = useState<Courses[]>(() =>
+    Array.isArray(coursesCache) ? (coursesCache as any[]).map(normalizeCourse) : [],
+  );
 
   const persistCourse = async (course: Courses) => {
     if (!course.id) return;
@@ -216,9 +194,10 @@ export default function PassingTarget() {
         const courses = await c.json();
         if (!Array.isArray(courses)) return;
         setCourseItems(courses.map(normalizeCourse));
+        setCoursesCache(courses); // keep the shared cache fresh for the dashboard
       } catch {}
     })();
-  }, []);
+  }, [setCoursesCache]);
 
   const _seedRemoved: Courses[] = [];
   void _seedRemoved;
@@ -621,6 +600,73 @@ export default function PassingTarget() {
     );
   };
 
+  // Inline editor for assessment / sub-item weight. Validates that the new
+  // weight doesn't blow the parent's remaining capacity, persists, then
+  // re-runs the threshold calculation.
+  const renderWeightField = (
+    weight: number,
+    maxWeight: number,
+    isEditing: boolean | undefined,
+    onWeightChange: (val: number) => void,
+    onEditToggle: (editing: boolean) => void,
+    courseIndex: number,
+    suffix?: string,
+  ) => {
+    if (isEditing) {
+      return (
+        <span className="flex items-center gap-1">
+          <input
+            type="number"
+            min={0}
+            max={maxWeight}
+            value={weight}
+            onChange={(e) => {
+              const parsed = parseFloat(e.target.value);
+              onWeightChange(isNaN(parsed) ? 0 : parsed);
+            }}
+            className="border border-gray-300 rounded px-2 py-0.5 text-sm w-16"
+          />
+          <span className="text-sm text-gray-primary">
+            {suffix ? `/ ${suffix}` : "%"}
+          </span>
+          <button
+            onClick={() => {
+              if (weight < 0 || weight > maxWeight) {
+                alert(`Weight must be between 0 and ${maxWeight}%.`);
+                return;
+              }
+              onEditToggle(false);
+              setTimeout(() => {
+                setCourseItems((prev) => {
+                  void persistCourse(prev[courseIndex]);
+                  triggerCompute(courseIndex, prev);
+                  return prev;
+                });
+              }, 50);
+            }}
+            className="text-indigo-primary hover:text-indigo-500 transition-colors"
+            type="button"
+          >
+            <Check size={16} />
+          </button>
+        </span>
+      );
+    }
+    return (
+      <span className="flex items-center gap-1">
+        <span className="text-sm text-gray-primary">
+          ({weight}
+          {suffix ? `/${suffix}` : "%"})
+        </span>
+        <PencilLine
+          size={14}
+          className="text-indigo-primary cursor-pointer hover:text-indigo-500 transition-colors"
+          onClick={() => onEditToggle(true)}
+        />
+      </span>
+    );
+  };
+
   return (
     <div className="px-14.75 py-11.5 w-full">
       {/* Courses Overview */}
@@ -851,9 +897,33 @@ export default function PassingTarget() {
                                 <p className="font-medium text-base text-black-primary">
                                   {assessment.name}
                                 </p>
-                                <span className="text-sm text-gray-primary">
-                                  ({assessment.weight}%)
-                                </span>
+                                {(() => {
+                                  // Max weight for this assessment = 100 - (sum of others)
+                                  const others = (item.assessments ?? [])
+                                    .filter((_, i) => i !== assessIdx)
+                                    .reduce((s, a) => s + (a.weight || 0), 0);
+                                  const maxWeight = 100 - others;
+                                  return renderWeightField(
+                                    assessment.weight,
+                                    maxWeight,
+                                    assessment.isEditingWeight,
+                                    (val) =>
+                                      setCourseItems((prev) => {
+                                        const updated = [...prev];
+                                        updated[index].assessments![assessIdx].weight = val;
+                                        return updated;
+                                      }),
+                                    (editing) =>
+                                      setCourseItems((prev) => {
+                                        const updated = [...prev];
+                                        updated[index].assessments![
+                                          assessIdx
+                                        ].isEditingWeight = editing;
+                                        return updated;
+                                      }),
+                                    index,
+                                  );
+                                })()}
                               </div>
 
                               {/* Score — only when no sub-items */}
@@ -950,9 +1020,34 @@ export default function PassingTarget() {
                                   <p className="font-medium text-base text-black-primary">
                                     {subItem.name}
                                   </p>
-                                  <span className="text-sm text-gray-primary">
-                                    ({subItem.weight}/{assessment.weight}%)
-                                  </span>
+                                  {(() => {
+                                    // Max for this item = parent's weight - other items
+                                    const otherItems = (assessment.items ?? [])
+                                      .filter((_, i) => i !== subIdx)
+                                      .reduce((s, it) => s + (it.weight || 0), 0);
+                                    const maxWeight = assessment.weight - otherItems;
+                                    return renderWeightField(
+                                      subItem.weight,
+                                      maxWeight,
+                                      subItem.isEditingWeight,
+                                      (val) =>
+                                        setCourseItems((prev) => {
+                                          const updated = [...prev];
+                                          updated[index].assessments![assessIdx].items![subIdx].weight = val;
+                                          return updated;
+                                        }),
+                                      (editing) =>
+                                        setCourseItems((prev) => {
+                                          const updated = [...prev];
+                                          updated[index].assessments![
+                                            assessIdx
+                                          ].items![subIdx].isEditingWeight = editing;
+                                          return updated;
+                                        }),
+                                      index,
+                                      `${assessment.weight}%`,
+                                    );
+                                  })()}
                                 </div>
                                 <div className="flex flex-row gap-1 items-center">
                                   {renderScoreField(

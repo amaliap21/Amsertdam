@@ -1,6 +1,6 @@
 "use client";
 
-import { X, CirclePlus } from "lucide-react";
+import { X, CirclePlus, Check } from "lucide-react";
 import { useEffect, useState } from "react";
 
 type CourseLite = {
@@ -10,6 +10,16 @@ type CourseLite = {
     name: string;
     items?: { name: string }[];
   }[];
+};
+
+export type TaskFormInitial = {
+  taskName: string;
+  course: string;
+  assessment: string;
+  item: string;
+  /** YYYY-MM-DDTHH:MM (datetime-local format) */
+  deadline: string;
+  estimatedHours: string;
 };
 
 type AddTaskModalProps = {
@@ -22,6 +32,8 @@ type AddTaskModalProps = {
     estimatedHours?: number | null;
     course: string;
   }) => void;
+  /** When provided, the modal opens in "edit" mode pre-filled with these values. */
+  initialTask?: TaskFormInitial | null;
 };
 
 const HOUR_OPTIONS = [0.5, 1, 1.5, 2, 3, 4, 5, 6, 8];
@@ -30,7 +42,9 @@ export default function AddTaskModal({
   isOpen,
   onClose,
   onSubmit,
+  initialTask,
 }: AddTaskModalProps) {
+  const isEditMode = !!initialTask;
   const [taskName, setTaskName] = useState("");
   const [courseName, setCourseName] = useState("");
   const [assessmentName, setAssessmentName] = useState("");
@@ -39,6 +53,27 @@ export default function AddTaskModal({
   const [estimatedHours, setEstimatedHours] = useState<string>("");
 
   const [courses, setCourses] = useState<CourseLite[]>([]);
+
+  // Seed form fields whenever the modal opens (and whenever the task being
+  // edited changes). Clears for add mode, fills for edit mode.
+  useEffect(() => {
+    if (!isOpen) return;
+    if (initialTask) {
+      setTaskName(initialTask.taskName);
+      setCourseName(initialTask.course);
+      setAssessmentName(initialTask.assessment);
+      setItemName(initialTask.item);
+      setDeadline(initialTask.deadline);
+      setEstimatedHours(initialTask.estimatedHours);
+    } else {
+      setTaskName("");
+      setCourseName("");
+      setAssessmentName("");
+      setItemName("");
+      setDeadline("");
+      setEstimatedHours("");
+    }
+  }, [isOpen, initialTask]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -82,12 +117,15 @@ export default function AddTaskModal({
       deadline,
       estimatedHours: estimatedHours ? Number(estimatedHours) : undefined,
     });
-    setTaskName("");
-    setCourseName("");
-    setAssessmentName("");
-    setItemName("");
-    setDeadline("");
-    setEstimatedHours("");
+    // Don't clear in edit mode — the parent closes the modal on success.
+    if (!isEditMode) {
+      setTaskName("");
+      setCourseName("");
+      setAssessmentName("");
+      setItemName("");
+      setDeadline("");
+      setEstimatedHours("");
+    }
     onClose();
   };
 
@@ -112,10 +150,12 @@ export default function AddTaskModal({
 
         <div className="mb-6">
           <h2 className="text-2xl font-semibold text-black-primary mb-1">
-            Add New Task
+            {isEditMode ? "Edit Task" : "Add New Task"}
           </h2>
           <p className="text-sm text-gray-primary">
-            Link this task to a course, assessment, and item.
+            {isEditMode
+              ? "Update this task's details below."
+              : "Link this task to a course, assessment, and item."}
           </p>
         </div>
 
@@ -253,8 +293,8 @@ export default function AddTaskModal({
             type="submit"
             className="w-full flex items-center justify-center gap-2 px-4 py-4 bg-indigo-primary text-white rounded-xl hover:bg-indigo-600 transition-colors font-medium"
           >
-            <CirclePlus size={20} />
-            Add Task
+            {isEditMode ? <Check size={20} /> : <CirclePlus size={20} />}
+            {isEditMode ? "Save Changes" : "Add Task"}
           </button>
         </form>
       </div>

@@ -39,76 +39,120 @@ All endpoints are POST and routed via vercel.json -> api/python/*.py
 
 
 ================================================================================
-2) EFFORT IMPACT ANALYZER
-   POST /api/python/effort_impact
-   Algorithm: Multi-Criteria Decision Analysis (MCDA)
-   Supports SINGLE task or BATCH ({ "tasks": [...] })
+2) PRIORITY ANALYSIS (formerly Effort Impact Analyzer)
+   POST /api/python/priority_analysis
+   Algorithm: Multi-Criteria Decision Analysis (MCDA) + optional TOPSIS ranking
+   Supports SINGLE task, BATCH ({ "tasks": [...], "method": "weighted" | "topsis" }),
+   and FEEDBACK ({ "feedback": {...} }) for telemetry logging.
 ================================================================================
 
 ------- REQUEST (single task) -------
 {
-  "task_name": "Final Project Report",
-  "grade_weight": 30,
-  "estimated_hours": 8,
-  "deadline_days": 5,
-  "current_grade": 65,
-  "passing_grade": 75,
-  "stress_level": 4,
-  "weekly_capacity_hours": 30
+  "task_name": "Mathematics Midterm Exam",
+  "task_type": "exam",
+  "sks": 3,
+  "grade_weight": 25,
+  "estimated_hours": 10,
+  "deadline_days": 2,
+  "current_grade": 58,
+  "passing_grade": 70,
+  "weekly_capacity_hours": 20
 }
 
 ------- RESPONSE (single task) -------
 {
-  "task_name": "Final Project Report",
+  "task_id": null,
+  "task_name": "Mathematics Midterm Exam",
+  "task_type": "exam",
   "priority": "HIGH",
   "action": "Do it fully and on time",
   "color": "green",
-  "composite_score": 0.712,
-  "efficiency_ratio": 3.75,
+  "composite_score": 0.682,
+  "confidence": 0.86,
+  "efficiency_ratio": 2.5,
   "breakdown": {
-    "grade_impact": 0.3,
-    "urgency": 0.472,
-    "gap_factor": 0.5,
-    "effort_penalty": 0.267,
-    "stress_penalty": 0.75
+    "grade_impact": 0.325,
+    "sks_score": 0.5,
+    "urgency": 0.741,
+    "gap_factor": 0.467,
+    "effort_penalty": 0.5
   },
-  "rationale": "Final Project Report carries 30% of your final grade; you are 10.0 points below passing; high stress risk."
+  "details": { "...": "echo of request payload" }
 }
 
-------- REQUEST (batch) -------
+------- REQUEST (batch + TOPSIS) -------
 {
+  "method": "topsis",
   "tasks": [
     {
-      "task_name": "Lab 5",
-      "grade_weight": 5,
-      "estimated_hours": 2,
-      "deadline_days": 1,
-      "current_grade": 72,
-      "passing_grade": 75,
-      "stress_level": 3,
-      "weekly_capacity_hours": 30
+      "task_name": "Mathematics Midterm Exam",
+      "task_type": "exam",
+      "sks": 3,
+      "grade_weight": 25,
+      "estimated_hours": 10,
+      "deadline_days": 2,
+      "current_grade": 58,
+      "passing_grade": 70,
+      "weekly_capacity_hours": 20
     },
     {
-      "task_name": "Final Project Report",
-      "grade_weight": 30,
-      "estimated_hours": 8,
-      "deadline_days": 5,
-      "current_grade": 72,
-      "passing_grade": 75,
-      "stress_level": 4,
-      "weekly_capacity_hours": 30
+      "task_name": "History Essay Draft",
+      "task_type": "assignment",
+      "sks": 2,
+      "grade_weight": 12,
+      "estimated_hours": 5,
+      "deadline_days": 7,
+      "current_grade": 74,
+      "passing_grade": 70,
+      "weekly_capacity_hours": 15
     }
   ]
 }
 
-------- RESPONSE (batch) -------
+------- RESPONSE (batch + TOPSIS) -------
 {
+  "method": "topsis",
   "tasks": [
-    { "task_name": "Final Project Report", "priority": "HIGH",   "composite_score": 0.71, "...": "..." },
-    { "task_name": "Lab 5",                "priority": "MEDIUM", "composite_score": 0.48, "...": "..." }
+    {
+      "task_name": "Mathematics Midterm Exam",
+      "task_type": "exam",
+      "priority": "HIGH",
+      "action": "Do it fully and on time",
+      "color": "green",
+      "composite_score": 0.682,
+      "topsis_score": 0.7421,
+      "priority_basis": "topsis",
+      "confidence": 0.86,
+      "efficiency_ratio": 2.5,
+      "breakdown": { "...": "..." },
+      "details": { "...": "..." }
+    },
+    {
+      "task_name": "History Essay Draft",
+      "priority": "LOW",
+      "action": "Already passing - focus on other tasks",
+      "color": "gray",
+      "composite_score": 0.0,
+      "topsis_score": 0.0,
+      "...": "..."
+    }
   ],
-  "summary": { "high": 1, "medium": 1, "low": 0 }
+  "summary": { "high": 1, "medium": 0, "low": 1 }
 }
+
+------- FEEDBACK (optional, append-only logging) -------
+REQUEST:
+{
+  "feedback": {
+    "task_id": "task_3",
+    "predicted_priority": "MEDIUM",
+    "user_marked": "HIGH",
+    "note": "Underestimated stress level"
+  }
+}
+
+RESPONSE:
+{ "status": "ok", "path": "api/python/effort_feedback.jsonl" }
 
 
 ================================================================================
@@ -123,165 +167,159 @@ All endpoints are POST and routed via vercel.json -> api/python/*.py
   "current_grade": 70,
   "passing_grade": 75,
   "tasks": [
-    {
-      "name": "Final Project",
-      "grade_weight": 30,
-      "estimated_hours": 10,
-      "deadline_days": 7,
-      "stress_level": 3,
-      "completion_pct": 20
-    },
-    {
-      "name": "Reading Quiz",
-      "grade_weight": 3,
-      "estimated_hours": 4,
-      "deadline_days": 3,
-      "stress_level": 2,
-      "completion_pct": 0
-    },
-    {
-      "name": "Discussion Post",
-      "grade_weight": 2,
-      "estimated_hours": 1,
-      "deadline_days": 2,
-      "stress_level": 1,
-      "completion_pct": 0
-    }
+    { "name": "Final Project",   "grade_weight": 30, "estimated_hours": 10, "deadline_days": 7, "stress_level": 3, "completion_pct": 20 },
+    { "name": "Reading Quiz",    "grade_weight": 3,  "estimated_hours": 4,  "deadline_days": 3, "stress_level": 2, "completion_pct": 0 },
+    { "name": "Discussion Post", "grade_weight": 2,  "estimated_hours": 1,  "deadline_days": 2, "stress_level": 1, "completion_pct": 0 }
   ]
 }
 
 ------- RESPONSE -------
 {
   "tasks": [
-    {
-      "name": "Final Project",
-      "grade_weight": 30,
-      "estimated_hours": 10,
-      "deadline_days": 7,
-      "tier": "FOCUS",
-      "efficiency": 0.0438,
-      "advice": "Worth 30% of grade — invest time here."
-    },
-    {
-      "name": "Discussion Post",
-      "grade_weight": 2,
-      "estimated_hours": 1,
-      "deadline_days": 2,
-      "tier": "MINIMAL",
-      "efficiency": 0.039,
-      "advice": "Moderate impact (2%). Do it, but cap your time to avoid over-investing."
-    },
-    {
-      "name": "Reading Quiz",
-      "grade_weight": 3,
-      "estimated_hours": 4,
-      "deadline_days": 3,
-      "tier": "SACRIFICE",
-      "efficiency": 0.0098,
-      "advice": "Very small grade contribution — safe to skip entirely."
-    }
+    { "name": "Final Project",   "tier": "FOCUS",     "efficiency": 0.0438, "advice": "Worth 30% of grade — invest time here." },
+    { "name": "Discussion Post", "tier": "MINIMAL",   "efficiency": 0.039,  "advice": "Moderate impact (2%). Do it, but cap your time." },
+    { "name": "Reading Quiz",    "tier": "SACRIFICE", "efficiency": 0.0098, "advice": "Very small grade contribution — safe to skip entirely." }
   ],
   "hours_allocated": 9.0,
   "available_hours": 25,
-  "summary": "Focus on: Final Project | Do minimally: Discussion Post | Sacrifice: Reading Quiz. You'll use 9.0/25h of your weekly budget."
+  "summary": "Focus on: Final Project | Do minimally: Discussion Post | Sacrifice: Reading Quiz."
 }
 
 
 ================================================================================
-4) PRIORITY RECOMMENDATION SYSTEM
-   POST /api/python/priority_system
-   Algorithm: Weighted priority scoring + greedy day-by-day scheduler
+4) SCHEDULING / PRIORITY PLANNER (formerly Priority System)
+   POST /api/python/scheduling
+   Algorithm: priority_analysis pipeline + hybrid scoring + greedy session scheduler
+   Optional fields:
+     - analysis_method: "topsis" (default) | "weighted"
+     - sessions / available_sessions: daily templates ("HH:MM") OR absolute ISO datetimes
 ================================================================================
 
-------- REQUEST -------
+------- REQUEST (daily templates) -------
 {
   "current_grade": 68,
   "passing_grade": 75,
   "daily_study_hours": 5,
-  "start_date": "2026-05-14",
+  "start_date": "2026-05-16",
+  "analysis_method": "topsis",
+  "sessions": [
+    { "start_time": "09:00", "end_time": "12:00" },
+    { "start_time": "18:00", "end_time": "20:00" }
+  ],
   "tasks": [
     {
-      "name": "Operating Systems Midterm",
-      "grade_weight": 35,
-      "deadline_days": 4,
+      "task_id": "task_1",
+      "task_name": "Mathematics Midterm",
+      "task_type": "exam",
+      "sks": 3,
+      "grade_weight": 25,
+      "estimated_hours": 10,
+      "deadline_days": 3,
       "difficulty": "hard",
-      "estimated_hours": 8,
-      "completion_pct": 0
+      "completion_pct": 10,
+      "effort": "high"
     },
     {
-      "name": "Data Structures Assignment",
-      "grade_weight": 10,
-      "deadline_days": 2,
+      "task_id": "task_2",
+      "task_name": "Literature Essay",
+      "task_type": "assignment",
+      "sks": 2,
+      "grade_weight": 12,
+      "estimated_hours": 10,
+      "deadline_days": 5,
       "difficulty": "medium",
-      "estimated_hours": 3,
-      "completion_pct": 40
-    },
-    {
-      "name": "Calculus Practice Set",
-      "grade_weight": 5,
-      "deadline_days": 9,
-      "difficulty": "easy",
-      "estimated_hours": 2,
-      "completion_pct": 0
+      "completion_pct": 20,
+      "effort": "medium"
     }
   ]
 }
 
 ------- RESPONSE -------
 {
+  "analysis": {
+    "method": "topsis",
+    "tasks": [
+      { "task_id": "task_1", "task_name": "Mathematics Midterm", "priority": "HIGH", "composite_score": 0.683 },
+      { "task_id": "task_2", "task_name": "Literature Essay",    "priority": "MEDIUM", "composite_score": 0.451 }
+    ]
+  },
+  "analysis_method": "topsis",
   "ranked_tasks": [
     {
       "rank": 1,
-      "name": "Operating Systems Midterm",
-      "grade_weight": 35,
-      "deadline_days": 4,
+      "task_id": "task_1",
+      "name": "Mathematics Midterm",
+      "sks": 3,
+      "grade_weight": 25,
+      "deadline_days": 3,
       "difficulty": "hard",
-      "estimated_hours": 8,
-      "completion_pct": 0,
-      "priority_score": 0.564,
+      "estimated_hours": 10,
+      "completion_pct": 10,
+      "priority_score": 0.6724,
       "tier": "HIGH",
-      "action": "Tackle Operating Systems Midterm first thing — high impact."
+      "priority_source": "effective_hybrid",
+      "action": "Tackle Mathematics Midterm first thing — high impact.",
+      "analysis": { "task_name": "Mathematics Midterm", "composite_score": 0.683 }
     },
     {
       "rank": 2,
-      "name": "Data Structures Assignment",
-      "grade_weight": 10,
-      "deadline_days": 2,
-      "difficulty": "medium",
-      "estimated_hours": 3,
-      "completion_pct": 40,
-      "priority_score": 0.421,
+      "task_id": "task_2",
+      "name": "Literature Essay",
       "tier": "MEDIUM",
-      "action": "Schedule Data Structures Assignment after HIGH priority tasks."
-    },
-    {
-      "rank": 3,
-      "name": "Calculus Practice Set",
-      "grade_weight": 5,
-      "deadline_days": 9,
-      "difficulty": "easy",
-      "estimated_hours": 2,
-      "completion_pct": 0,
-      "priority_score": 0.215,
-      "tier": "LOW",
-      "action": "Do Calculus Practice Set only if time permits."
+      "priority_score": 0.4521,
+      "action": "Schedule Literature Essay after HIGH priority tasks.",
+      "...": "..."
     }
   ],
   "schedule": [
-    { "day": 1, "date": "2026-05-14", "task_name": "Operating Systems Midterm",  "hours_allocated": 5.0, "priority_score": 0.564, "tier": "HIGH" },
-    { "day": 2, "date": "2026-05-15", "task_name": "Operating Systems Midterm",  "hours_allocated": 3.0, "priority_score": 0.564, "tier": "HIGH" },
-    { "day": 2, "date": "2026-05-15", "task_name": "Data Structures Assignment", "hours_allocated": 1.8, "priority_score": 0.421, "tier": "MEDIUM" },
-    { "day": 3, "date": "2026-05-16", "task_name": "Calculus Practice Set",      "hours_allocated": 2.0, "priority_score": 0.215, "tier": "LOW" }
+    {
+      "day": 1,
+      "start_time": "2026-05-16T09:00:00.000Z",
+      "end_time": "2026-05-16T12:00:00.000Z",
+      "task_id": "task_1",
+      "task_name": "Mathematics Midterm",
+      "hours_allocated": 3.0,
+      "priority_score": 0.6724,
+      "tier": "HIGH",
+      "priority_source": "effective_hybrid",
+      "analysis_priority": "HIGH"
+    },
+    {
+      "day": 1,
+      "start_time": "2026-05-16T18:00:00.000Z",
+      "end_time": "2026-05-16T20:00:00.000Z",
+      "task_id": "task_1",
+      "task_name": "Mathematics Midterm",
+      "hours_allocated": 2.0,
+      "tier": "HIGH"
+    }
+  ],
+  "deadline_warnings": [
+    {
+      "task_id": "task_2",
+      "task_name": "Literature Essay",
+      "deadline_days": 5,
+      "hours_needed": 8.0,
+      "hours_allocated_before_deadline": 6.0,
+      "hours_missing": 2.0,
+      "deadline_date": "2026-05-21",
+      "reason": "Not enough scheduled hours before deadline"
+    }
   ],
   "summary": {
-    "total_tasks": 3,
-    "total_hours_needed": 11.8,
-    "days_needed": 3,
+    "total_tasks": 2,
+    "total_hours_needed": 17.0,
+    "days_needed": 4,
     "daily_study_hours": 5,
     "high_priority": 1,
     "medium_priority": 1,
-    "low_priority": 1
-  }
+    "low_priority": 0,
+    "deadline_warnings": 1
+  },
+  "available_sessions": [
+    { "start_time": "2026-05-16T09:00:00.000Z", "end_time": "2026-05-16T12:00:00.000Z" },
+    { "start_time": "2026-05-16T18:00:00.000Z", "end_time": "2026-05-16T20:00:00.000Z" }
+  ]
 }
 
 
