@@ -1,6 +1,6 @@
 "use client";
 
-import { X, CirclePlus } from "lucide-react";
+import { X, CirclePlus, Check } from "lucide-react";
 import { useEffect, useState } from "react";
 
 type CourseLite = {
@@ -10,6 +10,16 @@ type CourseLite = {
     name: string;
     items?: { name: string }[];
   }[];
+};
+
+export type TaskFormInitial = {
+  taskName: string;
+  course: string;
+  assessment: string;
+  item: string;
+  /** YYYY-MM-DDTHH:MM (datetime-local format) */
+  deadline: string;
+  estimatedHours: string;
 };
 
 type AddTaskModalProps = {
@@ -22,6 +32,8 @@ type AddTaskModalProps = {
     estimatedHours?: number | null;
     course: string;
   }) => void;
+  /** When provided, the modal opens in "edit" mode pre-filled with these values. */
+  initialTask?: TaskFormInitial | null;
 };
 
 const HOUR_OPTIONS = [0.5, 1, 1.5, 2, 3, 4, 5, 6, 8];
@@ -30,13 +42,19 @@ export default function AddTaskModal({
   isOpen,
   onClose,
   onSubmit,
+  initialTask,
 }: AddTaskModalProps) {
-  const [taskName, setTaskName] = useState("");
-  const [courseName, setCourseName] = useState("");
-  const [assessmentName, setAssessmentName] = useState("");
-  const [itemName, setItemName] = useState("");
-  const [deadline, setDeadline] = useState("");
-  const [estimatedHours, setEstimatedHours] = useState<string>("");
+  const isEditMode = !!initialTask;
+  // Seed values come from `initialTask` once on mount. The parent is expected
+  // to pass a stable `key` (or to mount the modal only when `isOpen` is true)
+  // so a different task always gets a fresh component instance — that way we
+  // don't need a setState-in-effect to reset the form between opens.
+  const [taskName, setTaskName] = useState(initialTask?.taskName ?? "");
+  const [courseName, setCourseName] = useState(initialTask?.course ?? "");
+  const [assessmentName, setAssessmentName] = useState(initialTask?.assessment ?? "");
+  const [itemName, setItemName] = useState(initialTask?.item ?? "");
+  const [deadline, setDeadline] = useState(initialTask?.deadline ?? "");
+  const [estimatedHours, setEstimatedHours] = useState<string>(initialTask?.estimatedHours ?? "");
 
   const [courses, setCourses] = useState<CourseLite[]>([]);
 
@@ -48,7 +66,16 @@ export default function AddTaskModal({
         if (!r.ok) return;
         const data = await r.json();
         if (!Array.isArray(data)) return;
-        const mapped: CourseLite[] = data.map((c: any) => {
+        type RawCourse = {
+          id?: string;
+          title?: string;
+          course_payload?: {
+            title?: string;
+            assessments?: CourseLite["assessments"];
+          };
+          assessments?: CourseLite["assessments"];
+        };
+        const mapped: CourseLite[] = (data as RawCourse[]).map((c) => {
           const payload = c.course_payload ?? {};
           return {
             id: c.id,
@@ -82,12 +109,15 @@ export default function AddTaskModal({
       deadline,
       estimatedHours: estimatedHours ? Number(estimatedHours) : undefined,
     });
-    setTaskName("");
-    setCourseName("");
-    setAssessmentName("");
-    setItemName("");
-    setDeadline("");
-    setEstimatedHours("");
+    // Don't clear in edit mode — the parent closes the modal on success.
+    if (!isEditMode) {
+      setTaskName("");
+      setCourseName("");
+      setAssessmentName("");
+      setItemName("");
+      setDeadline("");
+      setEstimatedHours("");
+    }
     onClose();
   };
 
@@ -112,10 +142,12 @@ export default function AddTaskModal({
 
         <div className="mb-6">
           <h2 className="text-2xl font-semibold text-black-primary mb-1">
-            Add New Task
+            {isEditMode ? "Edit Task" : "Add New Task"}
           </h2>
           <p className="text-sm text-gray-primary">
-            Link this task to a course, assessment, and item.
+            {isEditMode
+              ? "Update this task's details below."
+              : "Link this task to a course, assessment, and item."}
           </p>
         </div>
 
@@ -253,8 +285,8 @@ export default function AddTaskModal({
             type="submit"
             className="w-full flex items-center justify-center gap-2 px-4 py-4 bg-indigo-primary text-white rounded-xl hover:bg-indigo-600 transition-colors font-medium"
           >
-            <CirclePlus size={20} />
-            Add Task
+            {isEditMode ? <Check size={20} /> : <CirclePlus size={20} />}
+            {isEditMode ? "Save Changes" : "Add Task"}
           </button>
         </form>
       </div>

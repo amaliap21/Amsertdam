@@ -145,7 +145,7 @@ export default function QuizLab() {
               No quizzes yet
             </p>
             <p className="text-sm text-gray-primary">
-              Click <span className="font-medium text-indigo-primary">Create New Quiz</span> to upload course material — AI will build a practice quiz.
+              Click <span className="font-medium text-indigo-primary">Create New Quiz</span> to upload course material — we&apos;ll build a practice quiz.
             </p>
           </div>
         ) : (
@@ -163,7 +163,7 @@ export default function QuizLab() {
                     </h3>
                     <span className="flex items-center gap-1 text-[10px] font-medium text-indigo-primary bg-indigo-primary/10 px-1.5 py-0.5 rounded">
                       <Sparkles size={10} />
-                      AI
+                      Auto
                     </span>
                     <button
                       title="Delete quiz"

@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
+import type { Database } from '@/types/database'
+
+type CourseRow = Database['public']['Tables']['courses']['Row']
+type CourseUpdate = Database['public']['Tables']['courses']['Update']
 
 function encodeCourseTitle(title: string, payload: Record<string, unknown>) {
   return `${title}|||${JSON.stringify(payload)}`
@@ -69,8 +73,9 @@ export async function POST(req: Request) {
     }
     const { data, error } = await supabaseAdmin.from('courses').insert(payload).select().single()
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    const decoded = decodeCourseTitle(data.title)
-    return NextResponse.json({ ...data, title: decoded.title, course_payload: decoded.payload })
+    const row = data as CourseRow
+    const decoded = decodeCourseTitle(row.title)
+    return NextResponse.json({ ...row, title: decoded.title, course_payload: decoded.payload })
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 })
   }
@@ -81,7 +86,7 @@ export async function PATCH(req: Request) {
     const body = await req.json()
     if (!body.id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
-    const payload: Record<string, unknown> = {}
+    const payload: CourseUpdate = {}
     if (body.title !== undefined) {
       payload.title = encodeCourseTitle(body.title, {
         courseDescription: body.description ?? null,
@@ -103,8 +108,9 @@ export async function PATCH(req: Request) {
       .single()
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    const decoded = decodeCourseTitle(data.title)
-    return NextResponse.json({ ...data, title: decoded.title, course_payload: decoded.payload })
+    const row = data as CourseRow
+    const decoded = decodeCourseTitle(row.title)
+    return NextResponse.json({ ...row, title: decoded.title, course_payload: decoded.payload })
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 })
   }

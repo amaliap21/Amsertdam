@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import CreateFlashcardModal, {
   type GeneratedFlashcard,
+  type ImageFlashcardPayload,
 } from "@/components/ui/flashcard-form";
 import { useStore } from "@/store/use-store";
 
@@ -19,10 +20,11 @@ export default function Flashcards() {
     fetchInitial().catch(() => {});
   }, [fetchInitial]);
 
-  const handleCreated = (data: {
-    deckName: string;
-    cards: GeneratedFlashcard[];
-  }) => {
+  const handleCreated = (
+    data:
+      | { deckName: string; cards: GeneratedFlashcard[] }
+      | ImageFlashcardPayload,
+  ) => {
     addDeck(data);
   };
 
@@ -64,7 +66,7 @@ export default function Flashcards() {
               No flashcard decks yet
             </p>
             <p className="text-sm text-gray-primary">
-              Click <span className="font-medium text-indigo-primary">Create Flashcard</span> to upload a PDF or image — AI will generate a deck for you.
+              Click <span className="font-medium text-indigo-primary">Create Flashcard</span> to upload a PDF or image — we&apos;ll extract a deck for you.
             </p>
           </div>
         ) : (
@@ -85,7 +87,7 @@ export default function Flashcards() {
                         {deck.title}
                       </h3>
                       <span className="text-[10px] font-medium text-indigo-primary bg-indigo-primary/10 px-1.5 py-0.5 rounded">
-                        AI
+                        Auto
                       </span>
                       <button
                         title="Delete deck"

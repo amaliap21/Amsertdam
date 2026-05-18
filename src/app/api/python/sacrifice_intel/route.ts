@@ -30,7 +30,7 @@ interface SacrificeTaskInput {
   completion_pct?: number;
 }
 
-function focusAdvice(days: number, weight: number, hours: number): string {
+function focusAdvice(days: number, weight: number): string {
   if (days <= 3) return `Deadline in ${Math.round(days)} day(s) — prioritise now.`;
   if (weight >= 30) return `Worth ${weight}% of grade — invest time here.`;
   return "Good return on effort — do it fully.";
@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
         tier = "FOCUS"; advice = "Almost done — finish it to lock in the grade.";
       } else if (hoursUsed + item.effHours <= availableHours) {
         if (item.efficiency >= 0.08) {
-          tier = "FOCUS"; advice = focusAdvice(item.days, item.weight, item.hours);
+          tier = "FOCUS"; advice = focusAdvice(item.days, item.weight);
         } else {
           tier = "MINIMAL"; advice = minimalAdvice(item.weight);
         }

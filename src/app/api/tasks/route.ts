@@ -33,22 +33,26 @@ function hoursToDisplay(h: unknown): string {
   return `${h}h`
 }
 
-function shapeForClient(row: Record<string, any>) {
-  const { title, payload } = decodeTitle(row.title ?? '')
+function shapeForClient(row: Record<string, unknown>) {
+  const rawTitle = typeof row.title === 'string' ? row.title : ''
+  const { title, payload } = decodeTitle(rawTitle)
   return {
-    id: row.id,
+    id: row.id as string,
     title,
-    course: payload.course ?? row.course ?? 'General',
-    date: payload.date ?? (row.date ? String(row.date) : '—'),
+    course: payload.course ?? (typeof row.course === 'string' ? row.course : 'General'),
+    date: payload.date ?? (row.date != null ? String(row.date) : '—'),
     timeEstimate:
       payload.estimatedHours != null
         ? hoursToDisplay(payload.estimatedHours)
         : row.estimated_hours != null
           ? hoursToDisplay(row.estimated_hours)
           : '—',
-    priority: payload.priority ?? row.priority ?? 'If You Have Energy',
-    description: payload.description ?? row.description ?? '',
-    effort: payload.effort ?? row.effort ?? 'medium effort',
+    priority:
+      payload.priority ??
+      (typeof row.priority === 'string' ? row.priority : 'If You Have Energy'),
+    description:
+      payload.description ?? (typeof row.description === 'string' ? row.description : ''),
+    effort: payload.effort ?? (typeof row.effort === 'string' ? row.effort : 'medium effort'),
   }
 }
 
@@ -113,7 +117,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    return NextResponse.json(shapeForClient(data as Record<string, any>))
+    return NextResponse.json(shapeForClient(data as Record<string, unknown>))
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 })
   }
@@ -165,7 +169,7 @@ export async function PATCH(req: Request) {
       .select()
       .single()
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    return NextResponse.json(shapeForClient(data as Record<string, any>))
+    return NextResponse.json(shapeForClient(data as Record<string, unknown>))
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 })
   }

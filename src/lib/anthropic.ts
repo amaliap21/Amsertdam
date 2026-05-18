@@ -163,7 +163,7 @@ export async function* streamClaude(
  * Extract JSON from a model response (object or array root, tolerant of
  * trailing commas, single quotes, unquoted keys, and surrounding prose).
  */
-export function extractFirstJson<T = Record<string, any>>(text: string): T {
+export function extractFirstJson<T = Record<string, unknown>>(text: string): T {
   if (!text || typeof text !== "string") {
     throw new Error("No JSON object found in response");
   }

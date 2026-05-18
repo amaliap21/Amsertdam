@@ -875,15 +875,20 @@ def recommend_priorities(data: dict) -> dict:
     analysis_report = _run_analysis_pipeline(canonical_tasks, analysis_method, current_grade, passing_grade)
     merged_tasks = _merge_analysis_results(canonical_tasks, analysis_report, current_grade, passing_grade)
 
-    # Score and annotate each task (hybrid mode only)
+    # Score and annotate each task. The HYBRID score is used to *sort* tasks
+    # for the schedule (it factors in completion %, deadline boosts, etc), but
+    # the TIER label is taken straight from priority_analysis so task-value
+    # and priority-planner show the same HIGH/MEDIUM/LOW for the same task.
     scored = []
     for task in merged_tasks:
         score = _compute_hybrid_priority_score(task, current_grade, passing_grade)
+        analysis_priority = (task.get("analysis") or {}).get("priority")
+        tier = analysis_priority if analysis_priority in ("HIGH", "MEDIUM", "LOW") else _priority_tier_label(score)
         scored.append({
             **task,
             "_priority_score": round(score, 4),
-            "_tier": _priority_tier_label(score),
-            "_priority_source": "effective_hybrid",
+            "_tier": tier,
+            "_priority_source": "analysis_aligned",
         })
 
     # Sort by priority score descending

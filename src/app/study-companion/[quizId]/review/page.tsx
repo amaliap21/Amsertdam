@@ -12,7 +12,7 @@ export default function StudyCompanionReview({
   params: Promise<{ quizId: string }>;
 }) {
   const { quizId } = use(params);
-  const quiz = useQuizById(quizId);
+  const liveQuiz = useQuizById(quizId);
   const attempts = useStore((s) => s.attempts);
 
   // Most recent attempt for this quiz.
@@ -24,7 +24,17 @@ export default function StudyCompanionReview({
     );
   }, [attempts, quizId]);
 
-  if (!quiz) {
+  // Study Companion mirrors the live quiz list. If the quiz was deleted in
+  // Quiz Lab, this entry shouldn't exist — bounce the user back.
+  const quizView = liveQuiz
+    ? {
+        title: liveQuiz.title,
+        course: liveQuiz.course,
+        questions: liveQuiz.questions,
+      }
+    : null;
+
+  if (!quizView) {
     return (
       <div className="min-h-screen bg-white px-14.75 py-11.5">
         <Link
@@ -34,12 +44,15 @@ export default function StudyCompanionReview({
           <ArrowLeft size={18} />
           <span className="text-sm">Back to Study Companion</span>
         </Link>
-        <p className="text-gray-primary">Quiz not found.</p>
+        <p className="text-gray-primary">
+          This quiz was deleted from Quiz Lab. Create or take a new quiz to
+          start a new review here.
+        </p>
       </div>
     );
   }
 
-  const questions = quiz.questions.map((q) => {
+  const questions = quizView.questions.map((q) => {
     const userLetter = attempt?.answers?.[q.id];
     const userOption = q.options.find((o) => o.letter === userLetter);
     const correctOption = q.options.find((o) => o.letter === q.correctAnswer);
@@ -83,13 +96,13 @@ export default function StudyCompanionReview({
       {/* Title */}
       <div className="mb-10">
         <h1 className="text-[28px] font-semibold text-black-primary mb-2">
-          {quiz.title}
+          {quizView.title}
         </h1>
         <p className="text-gray-primary">
           {attempt
             ? `${correctCount}/${total} correct`
             : "No attempt recorded yet"}{" "}
-          &bull; {quiz.course}
+          &bull; {quizView.course}
         </p>
       </div>
 

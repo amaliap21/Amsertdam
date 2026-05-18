@@ -3,16 +3,34 @@
 import { X, Upload, CirclePlus, Loader2 } from "lucide-react";
 import { useState } from "react";
 import toast from "react-hot-toast";
+import LanguagePicker, { type Language } from "@/components/ui/language-picker";
 
 export type GeneratedFlashcard = { front: string; back: string };
+
+export type ImageOcrRegion = {
+  bbox: [number, number, number, number];
+  char: string;
+  confidence: number;
+};
+
+export type ImageFlashcardPayload = {
+  kind: "image";
+  deckName: string;
+  imageDataUrl: string;
+  width: number;
+  height: number;
+  regions: ImageOcrRegion[];
+  modelLoaded?: boolean;
+};
 
 type CreateFlashcardModalProps = {
   isOpen: boolean;
   onClose: () => void;
-  onCreated?: (data: {
-    deckName: string;
-    cards: GeneratedFlashcard[];
-  }) => void;
+  onCreated?: (
+    data:
+      | { deckName: string; cards: GeneratedFlashcard[] }
+      | ImageFlashcardPayload,
+  ) => void;
 };
 
 export default function CreateFlashcardModal({
@@ -25,6 +43,7 @@ export default function CreateFlashcardModal({
     file: null as File | null,
   });
   const [requestedCards, setRequestedCards] = useState(8);
+  const [language, setLanguage] = useState<Language>("en");
   const [recommendedMaxCards, setRecommendedMaxCards] = useState<number | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -41,6 +60,17 @@ export default function CreateFlashcardModal({
   };
 
   const analyzeFile = async (file: File, deckName: string) => {
+    // The analyzer is a PDF-only flow that estimates the max number of
+    // generatable cards. For images we do OCR instead, and the "card count"
+    // is whatever the OCR pipeline detects — no estimation needed.
+    const isImage =
+      file.type.startsWith("image/") ||
+      /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(file.name);
+    if (isImage) {
+      setRecommendedMaxCards(null);
+      setAnalyzing(false);
+      return;
+    }
     setAnalyzing(true);
     try {
       const fd = new FormData();
@@ -86,26 +116,46 @@ export default function CreateFlashcardModal({
       return;
     }
     setLoading(true);
-    const t = toast.loading("AI is generating flashcards…");
+    // Both paths run on custom Python: images → OCR cover-and-reveal, PDFs
+    // → pattern-based flashcard extractor.
+    const isImage =
+      formData.file.type.startsWith("image/") ||
+      /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(formData.file.name);
+
+    const t = toast.loading(
+      isImage
+        ? "Detecting characters in your image…"
+        : "Extracting flashcards…",
+    );
     try {
       const fd = new FormData();
       fd.append("file", formData.file);
       fd.append("deckName", formData.deckName);
-      fd.append("requestedCards", String(requestedCards));
-      const resp = await fetch("/api/ai/flashcards/generate", {
-        method: "POST",
-        body: fd,
-      });
+      if (!isImage) fd.append("requestedCards", String(requestedCards));
+      fd.append("language", language);
+      const endpoint = isImage
+        ? "/api/ai/flashcards/ocr-image"
+        : "/api/ai/flashcards/generate";
+      const resp = await fetch(endpoint, { method: "POST", body: fd });
       if (!resp.ok) {
         const body = await resp.json().catch(() => ({}));
         throw new Error(body.error || `Failed (${resp.status})`);
       }
-      const json = (await resp.json()) as {
-        deckName: string;
-        cards: GeneratedFlashcard[];
-      };
-      toast.success(`Generated ${json.cards.length} flashcards`, { id: t });
-      onCreated?.({ deckName: json.deckName, cards: json.cards });
+      if (isImage) {
+        const json = (await resp.json()) as ImageFlashcardPayload;
+        toast.success(
+          `Found ${json.regions.length} characters — flip them to reveal!`,
+          { id: t },
+        );
+        onCreated?.(json);
+      } else {
+        const json = (await resp.json()) as {
+          deckName: string;
+          cards: GeneratedFlashcard[];
+        };
+        toast.success(`Generated ${json.cards.length} flashcards`, { id: t });
+        onCreated?.({ deckName: json.deckName, cards: json.cards });
+      }
       reset();
       onClose();
     } catch (err) {
@@ -177,32 +227,55 @@ export default function CreateFlashcardModal({
             Create Flashcard
           </h2>
           <p className="text-sm text-gray-primary">
-            Upload an image or PDF — AI will turn it into flashcards
+            Upload an image or PDF — we&apos;ll turn it into flashcards
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <label className="block text-sm font-medium text-black-primary mb-3">
-              Cards to generate
-            </label>
-            <input
-              type="number"
-              min={1}
-              max={recommendedMaxCards ?? undefined}
-              value={requestedCards}
-              onChange={(e) => setRequestedCards(Number(e.target.value || 1))}
+        {(() => {
+          const selectedIsImage =
+            !!formData.file &&
+            (formData.file.type.startsWith("image/") ||
+              /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(formData.file.name));
+          return (
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {selectedIsImage ? (
+                <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-primary">
+                  Image upload detected — we&apos;ll run OCR to find every
+                  alphanumeric character, then cover them with colored boxes
+                  for cover-and-reveal practice. No card count to set.
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-sm font-medium text-black-primary mb-3">
+                    Cards to generate
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={recommendedMaxCards ?? undefined}
+                    value={requestedCards}
+                    onChange={(e) => setRequestedCards(Number(e.target.value || 1))}
+                    disabled={loading || analyzing}
+                    className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-black-primary"
+                  />
+                  <p className="mt-2 text-sm text-gray-primary">
+                    {recommendedMaxCards
+                      ? `This file supports up to ${recommendedMaxCards} cards. You can choose any value up to that limit.`
+                      : analyzing
+                        ? "Estimating the maximum card count…"
+                        : "Upload a PDF to estimate the maximum card count."}
+                  </p>
+                </div>
+              )}
+
+          {!selectedIsImage && (
+            <LanguagePicker
+              value={language}
+              onChange={setLanguage}
               disabled={loading || analyzing}
-              className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-black-primary"
+              label="Card Language"
             />
-            <p className="mt-2 text-sm text-gray-primary">
-              {recommendedMaxCards
-                ? `This file supports up to ${recommendedMaxCards} cards. You can choose any value up to that limit.`
-                : analyzing
-                  ? "AI is estimating the maximum card count…"
-                  : "Upload a file to estimate the maximum card count."}
-            </p>
-          </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-black-primary mb-3">
@@ -249,7 +322,7 @@ export default function CreateFlashcardModal({
                 </p>
                 {recommendedMaxCards ? (
                   <p className="mt-2 text-xs text-indigo-primary">
-                    AI limit: {recommendedMaxCards} cards
+                    Estimated max: {recommendedMaxCards} cards
                   </p>
                 ) : null}
               </div>
@@ -272,7 +345,7 @@ export default function CreateFlashcardModal({
             {loading ? (
               <>
                 <Loader2 size={20} className="animate-spin" />
-                Generating with AI…
+                Generating…
               </>
             ) : (
               <>
@@ -282,6 +355,8 @@ export default function CreateFlashcardModal({
             )}
           </button>
         </form>
+          );
+        })()}
       </div>
     </div>
   );
