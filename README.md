@@ -114,6 +114,75 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 ## API Endpoints
 
+### Effort Impact Analyzer (Vercel Python Function)
+
+Endpoint: `POST /api/python/effort_impact` (Vercel function)
+
+Single-task request (JSON):
+
+```json
+{
+  "task_name": "Final Essay",
+  "grade_weight": 25,
+  "estimated_hours": 8,
+  "deadline_days": 5,
+  "current_grade": 70,
+  "passing_grade": 75,
+  "stress_level": 3,
+  "weekly_capacity_hours": 20,
+  "task_type": "project"
+}
+```
+
+Example response:
+
+```json
+{
+  "task_name": "Final Essay",
+  "task_type": "project",
+  "priority": "HIGH",
+  "action": "Do it fully and on time",
+  "color": "green",
+  "composite_score": 0.81,
+  "confidence": 0.88,
+  "efficiency_ratio": 3.12,
+  "breakdown": {
+    "grade_impact": 0.275,
+    "urgency": 0.47,
+    "gap_factor": 0.25,
+    "effort_penalty": 0.4,
+    "stress_penalty": 0.5
+  },
+  "rationale": "Final Essay carries 25% of your final grade; deadline in 5 day(s)."
+}
+```
+
+Batch request (JSON):
+
+```json
+{
+  "tasks": [
+    { "task_name": "Quiz 1", "grade_weight": 10, "estimated_hours": 1, "deadline_days": 2, "current_grade": 72 },
+    { "task_name": "Project", "grade_weight": 30, "estimated_hours": 15, "deadline_days": 10, "current_grade": 68 }
+  ]
+}
+```
+
+Example batch response (abridged):
+
+```json
+{
+  "tasks": [ /* array of analyzed tasks sorted by composite_score */ ],
+  "summary": { "high": 1, "medium": 1, "low": 0 }
+}
+```
+
+Use a curl call to test locally (Vercel dev):
+
+```bash
+curl -X POST http://localhost:3000/api/python/effort_impact -H "Content-Type: application/json" -d '{"task_name":"T1","grade_weight":20,"estimated_hours":4,"deadline_days":3,"current_grade":68}'
+```
+
 ## Database Schema
 
 ## Project Structure
