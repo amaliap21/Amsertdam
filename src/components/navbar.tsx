@@ -1,36 +1,258 @@
 "use client";
 import Image from "next/image";
-import React, { useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useRouter } from "next/navigation";
-import { Search } from "lucide-react";
+import {
+  Search,
+  Pencil,
+  X,
+  Loader2,
+  BookOpen,
+  Sparkles,
+  NotebookText,
+  CheckSquare,
+} from "lucide-react";
 import { useCurrentUser } from "@/lib/use-current-user";
+import { useStore } from "@/store/use-store";
+import toast from "react-hot-toast";
 
 interface NavbarProps {
   className?: string;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Profile types                                                      */
+/* ------------------------------------------------------------------ */
+type Profile = {
+  id: string;
+  full_name: string | null;
+  avatar_url: string | null;
+  major: string | null;
+  semester: number | null;
+};
+
+/* ------------------------------------------------------------------ */
+/*  Instant-search result type                                         */
+/* ------------------------------------------------------------------ */
+type QuickResult = {
+  id: string;
+  type: "Course" | "Flashcard" | "Quiz" | "Task";
+  title: string;
+  subtitle: string;
+  href: string;
+};
+
+const TYPE_ICON: Record<string, React.ReactNode> = {
+  Course: <BookOpen size={14} />,
+  Flashcard: <Sparkles size={14} />,
+  Quiz: <NotebookText size={14} />,
+  Task: <CheckSquare size={14} />,
+};
+
+function includesQ(value: string | undefined | null, q: string) {
+  return (value ?? "").toLowerCase().includes(q);
+}
+
+/* ================================================================== */
+
 const Navbar: React.FC<NavbarProps> = ({ className = "" }) => {
   const router = useRouter();
   const { user } = useCurrentUser();
-  const [searchValue, setSearchValue] = useState("");
 
-  const profileName = user?.user_metadata?.full_name ?? user?.email ?? "Your profile";
-  const profileSubtitle = user?.email ?? "Signed in";
+  /* ---------- profile state ---------- */
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [showProfile, setShowProfile] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editMajor, setEditMajor] = useState("");
+  const [editSemester, setEditSemester] = useState("");
+  const [saving, setSaving] = useState(false);
+  const profileRef = useRef<HTMLDivElement>(null);
+
+  // Fetch profile on mount (auto-creates if missing via API).
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      try {
+        const r = await fetch("/api/profile");
+        if (r.ok) {
+          const p: Profile = await r.json();
+          setProfile(p);
+          setEditName(p.full_name ?? "");
+          setEditMajor(p.major ?? "");
+          setEditSemester(p.semester != null ? String(p.semester) : "");
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, [user]);
+
+  // Close profile dropdown on outside click.
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (
+        profileRef.current &&
+        !profileRef.current.contains(e.target as Node)
+      ) {
+        setShowProfile(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const saveProfile = async () => {
+    setSaving(true);
+    try {
+      const r = await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          full_name: editName.trim() || null,
+          major: editMajor.trim() || null,
+          semester: editSemester ? Number(editSemester) : null,
+        }),
+      });
+      if (r.ok) {
+        const p: Profile = await r.json();
+        setProfile(p);
+        toast.success("Profile updated");
+        setShowProfile(false);
+      } else {
+        toast.error("Failed to save profile");
+      }
+    } catch {
+      toast.error("Failed to save profile");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /* ---------- display values ---------- */
+  const displayName =
+    profile?.full_name ??
+    user?.user_metadata?.full_name ??
+    user?.email ??
+    "Your profile";
+  const displayEmail = user?.email ?? "Signed in";
+  const avatarUrl =
+    profile?.avatar_url ?? user?.user_metadata?.avatar_url ?? null;
   const initials = useMemo(() => {
-    const source = String(profileName || "U");
+    const source = String(displayName || "U");
     return source
       .split(/\s+/)
       .filter(Boolean)
       .slice(0, 2)
       .map((part) => part[0]?.toUpperCase() ?? "U")
       .join("");
-  }, [profileName]);
+  }, [displayName]);
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    const next = searchValue.trim();
-    router.push(next ? `/search?q=${encodeURIComponent(next)}` : "/search");
-  };
+  /* ---------- instant search ---------- */
+  const [searchValue, setSearchValue] = useState("");
+  const [showResults, setShowResults] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
+
+  const tasks = useStore((s) => s.tasks);
+  const decks = useStore((s) => s.decks);
+  const quizzes = useStore((s) => s.quizzes);
+  const coursesCache = useStore((s) => s.coursesCache);
+
+  const quickResults: QuickResult[] = useMemo(() => {
+    const q = searchValue.trim().toLowerCase();
+    if (!q) return [];
+    const out: QuickResult[] = [];
+    const MAX = 8;
+
+    for (const c of coursesCache as Array<{
+      id?: string;
+      title?: string;
+      description?: string;
+      credits?: number;
+    }>) {
+      if (out.length >= MAX) break;
+      if (includesQ(c.title, q) || includesQ(c.description, q)) {
+        out.push({
+          id: String(c.id),
+          type: "Course",
+          title: String(c.title ?? "Untitled"),
+          subtitle: `${c.credits ?? "?"} credits`,
+          href: "/passing-target",
+        });
+      }
+    }
+    for (const d of decks) {
+      if (out.length >= MAX) break;
+      if (includesQ(d.title, q) || includesQ(d.description, q)) {
+        out.push({
+          id: d.id,
+          type: "Flashcard",
+          title: d.title,
+          subtitle: `${d.cardCount} cards`,
+          href: `/flashcards/${d.id}/review`,
+        });
+      }
+    }
+    for (const qz of quizzes) {
+      if (out.length >= MAX) break;
+      if (
+        includesQ(qz.title, q) ||
+        includesQ(qz.course, q) ||
+        includesQ(qz.source, q)
+      ) {
+        out.push({
+          id: qz.id,
+          type: "Quiz",
+          title: qz.title,
+          subtitle: `${qz.questions.length} questions`,
+          href: `/quiz-lab/${qz.id}/preview`,
+        });
+      }
+    }
+    for (const t of tasks) {
+      if (out.length >= MAX) break;
+      if (
+        includesQ(t.title, q) ||
+        includesQ(t.course, q) ||
+        includesQ(t.description, q)
+      ) {
+        out.push({
+          id: t.id,
+          type: "Task",
+          title: t.title,
+          subtitle: `${t.course} · ${t.priority}`,
+          href: "/task-value",
+        });
+      }
+    }
+    return out;
+  }, [searchValue, coursesCache, decks, quizzes, tasks]);
+
+  // Close search dropdown on outside click.
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowResults(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const handleSearch = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      setShowResults(false);
+      const next = searchValue.trim();
+      router.push(next ? `/search?q=${encodeURIComponent(next)}` : "/search");
+    },
+    [searchValue, router]
+  );
 
   return (
     <nav
@@ -47,30 +269,210 @@ const Navbar: React.FC<NavbarProps> = ({ className = "" }) => {
         />
       </section>
 
-      <form
-        className="flex h-14 w-126.25 items-center gap-4 rounded-[100px] bg-[#F5F5F5] px-4"
-        onSubmit={handleSearch}
-      >
-        <Search size={20} />
-        <input
-          type="text"
-          id="search-input"
-          name="search"
-          value={searchValue}
-          onChange={(e) => setSearchValue(e.target.value)}
-          placeholder="Search courses, tasks, flashcards, quizzes"
-          className="bg-transparent outline-none w-full"
-        />
-      </form>
+      {/* ---- Search bar with instant dropdown ---- */}
+      <div ref={searchRef} className="relative">
+        <form
+          className="flex h-14 w-126.25 items-center gap-4 rounded-[100px] bg-[#F5F5F5] px-4"
+          onSubmit={handleSearch}
+        >
+          <Search size={20} />
+          <input
+            type="text"
+            id="search-input"
+            name="search"
+            value={searchValue}
+            onChange={(e) => {
+              setSearchValue(e.target.value);
+              setShowResults(true);
+            }}
+            onFocus={() => searchValue.trim() && setShowResults(true)}
+            placeholder="Search courses, tasks, flashcards, quizzes"
+            className="bg-transparent outline-none w-full"
+            autoComplete="off"
+          />
+        </form>
 
-      <div className="flex items-center gap-4">
-        <div className="flex flex-col">
-          <span className="font-medium text-black-primary">{profileName}</span>
-          <span className="text-[14px] text-gray-primary">{profileSubtitle}</span>
-        </div>
-        <div className="flex h-13 w-13 items-center justify-center rounded-full border-2 border-gray-500 bg-indigo-primary text-sm font-semibold text-white">
-          {initials || "U"}
-        </div>
+        {showResults && searchValue.trim() && (
+          <div className="absolute top-full left-0 right-0 mt-2 z-50 rounded-2xl border border-gray-200 bg-white shadow-lg max-h-96 overflow-y-auto">
+            {quickResults.length === 0 ? (
+              <div className="p-4 text-sm text-gray-primary text-center">
+                No matches — press Enter for full search
+              </div>
+            ) : (
+              <div className="py-2">
+                {quickResults.map((r) => (
+                  <a
+                    key={`${r.type}-${r.id}`}
+                    href={r.href}
+                    onClick={() => setShowResults(false)}
+                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-indigo-primary/5 transition-colors"
+                  >
+                    <span className="text-indigo-primary">
+                      {TYPE_ICON[r.type]}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-black-primary truncate">
+                        {r.title}
+                      </p>
+                      <p className="text-xs text-gray-primary truncate">
+                        {r.subtitle}
+                      </p>
+                    </div>
+                    <span className="text-[10px] uppercase tracking-wider text-gray-400 shrink-0">
+                      {r.type}
+                    </span>
+                  </a>
+                ))}
+                <button
+                  type="button"
+                  onClick={handleSearch as unknown as React.MouseEventHandler}
+                  className="w-full px-4 py-2 text-xs text-indigo-primary hover:bg-indigo-primary/5 border-t border-gray-100"
+                >
+                  View all results
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ---- Profile section ---- */}
+      <div ref={profileRef} className="relative flex items-center gap-4">
+        <button
+          type="button"
+          onClick={() => {
+            setShowProfile((v) => !v);
+            if (profile) {
+              setEditName(profile.full_name ?? "");
+              setEditMajor(profile.major ?? "");
+              setEditSemester(
+                profile.semester != null ? String(profile.semester) : ""
+              );
+            }
+          }}
+          className="flex items-center gap-3 cursor-pointer"
+        >
+          <div className="flex flex-col text-right">
+            <span className="font-medium text-black-primary">
+              {displayName}
+            </span>
+            <span className="text-[14px] text-gray-primary">
+              {displayEmail}
+            </span>
+          </div>
+          <div className="relative flex h-13 w-13 shrink-0 items-center justify-center rounded-full border-2 border-gray-500 bg-indigo-primary text-sm font-semibold text-white overflow-hidden">
+            {avatarUrl ? (
+              <Image
+                src={avatarUrl}
+                alt="Avatar"
+                fill
+                className="object-cover"
+                sizes="52px"
+              />
+            ) : (
+              initials || "U"
+            )}
+          </div>
+          <span className="absolute bottom-0 right-0 flex h-4 w-4 items-center justify-center rounded-full bg-white shadow">
+            <Pencil size={10} className="text-gray-600" />
+          </span>
+        </button>
+
+        {/* Profile edit dropdown */}
+        {showProfile && (
+          <div className="absolute top-full right-0 mt-2 z-50 w-80 rounded-2xl border border-gray-200 bg-white p-5 shadow-lg">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-black-primary">Edit Profile</h3>
+              <button
+                type="button"
+                onClick={() => setShowProfile(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-indigo-primary text-white font-semibold overflow-hidden">
+                {avatarUrl ? (
+                  <Image
+                    src={avatarUrl}
+                    alt=""
+                    width={48}
+                    height={48}
+                    className="object-cover w-full h-full"
+                  />
+                ) : (
+                  initials
+                )}
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-black-primary truncate">
+                  {displayName}
+                </p>
+                <p className="text-xs text-gray-primary truncate">
+                  {displayEmail}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-primary mb-1">
+                  Full Name
+                </label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-black-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary"
+                  placeholder="Your name"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-primary mb-1">
+                  Major
+                </label>
+                <input
+                  type="text"
+                  value={editMajor}
+                  onChange={(e) => setEditMajor(e.target.value)}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-black-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary"
+                  placeholder="e.g. Computer Science"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-primary mb-1">
+                  Semester
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={14}
+                  value={editSemester}
+                  onChange={(e) => setEditSemester(e.target.value)}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-black-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary"
+                  placeholder="e.g. 3"
+                />
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={saveProfile}
+              disabled={saving}
+              className="mt-4 w-full flex items-center justify-center gap-2 rounded-lg bg-indigo-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-600 transition-colors disabled:opacity-60"
+            >
+              {saving ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" /> Saving…
+                </>
+              ) : (
+                "Save Changes"
+              )}
+            </button>
+          </div>
+        )}
       </div>
     </nav>
   );

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
+import { getUserId } from '@/lib/get-user-id'
 import type { Database } from '@/types/database'
 
 type CourseRow = Database['public']['Tables']['courses']['Row']
@@ -26,14 +27,16 @@ function decodeCourseTitle(rawTitle: string) {
 
 export async function GET() {
   try {
-    const { data, error } = await supabaseAdmin
-      .from('courses')
-      .select('*')
-      .order('created_at', { ascending: false })
+    const userId = await getUserId()
+    let query = supabaseAdmin.from('courses').select('*').order('created_at', { ascending: false })
+    if (userId) query = query.eq('user_id', userId)
+    const { data, error } = await query
 
     if (error) {
       if (String(error.message).includes('created_at') || String(error.message).includes('schema cache')) {
-        const { data: fallbackData, error: fallbackError } = await supabaseAdmin.from('courses').select('*')
+        let q2 = supabaseAdmin.from('courses').select('*')
+        if (userId) q2 = q2.eq('user_id', userId)
+        const { data: fallbackData, error: fallbackError } = await q2
         if (fallbackError) return NextResponse.json({ error: fallbackError.message }, { status: 500 })
         return NextResponse.json(
           (fallbackData ?? []).map((row) => {
@@ -71,7 +74,8 @@ export async function POST(req: Request) {
         requirements: body.requirements ?? [],
       }),
     }
-    const { data, error } = await supabaseAdmin.from('courses').insert(payload).select().single()
+    const userId = await getUserId()
+    const { data, error } = await supabaseAdmin.from('courses').insert({ ...payload, ...(userId ? { user_id: userId } : {}) }).select().single()
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     const row = data as CourseRow
     const decoded = decodeCourseTitle(row.title)
@@ -86,6 +90,7 @@ export async function PATCH(req: Request) {
     const body = await req.json()
     if (!body.id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
+    const userId = await getUserId()
     const payload: CourseUpdate = {}
     if (body.title !== undefined) {
       payload.title = encodeCourseTitle(body.title, {
@@ -100,12 +105,9 @@ export async function PATCH(req: Request) {
       })
     }
 
-    const { data, error } = await supabaseAdmin
-      .from('courses')
-      .update(payload)
-      .eq('id', body.id)
-      .select()
-      .single()
+    let upQ = supabaseAdmin.from('courses').update(payload).eq('id', body.id)
+    if (userId) upQ = upQ.eq('user_id', userId)
+    const { data, error } = await upQ.select().single()
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     const row = data as CourseRow
@@ -121,7 +123,10 @@ export async function DELETE(req: Request) {
     const { searchParams } = new URL(req.url)
     const id = searchParams.get('id')
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
-    const { error } = await supabaseAdmin.from('courses').delete().eq('id', id)
+    const userId = await getUserId()
+    let del = supabaseAdmin.from('courses').delete().eq('id', id)
+    if (userId) del = del.eq('user_id', userId)
+    const { error } = await del
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json({ success: true })
   } catch (err) {

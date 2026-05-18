@@ -1,0 +1,12 @@
+# Exclude Python functions from deployment — all have TypeScript ports
+# in src/app/api/python/*/route.ts that handle the same endpoints.
+api/python/
+
+# Exclude test images in the project root (saves ~3 MB of deploy storage).
+/*.jpg
+/*.jpeg
+/*.png
+/*.gif
+/*.webp
+/*.bmp
+/python-api-samples.txt

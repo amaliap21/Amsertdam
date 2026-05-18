@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
+import { getUserId } from '@/lib/get-user-id'
 
 type TaskPayload = {
   course?: string
@@ -58,17 +59,19 @@ function shapeForClient(row: Record<string, unknown>) {
 
 export async function GET() {
   try {
-    const { data, error } = await supabaseAdmin
-      .from('tasks')
-      .select('*')
-      .order('created_at', { ascending: false })
+    const userId = await getUserId()
+    let query = supabaseAdmin.from('tasks').select('*').order('created_at', { ascending: false })
+    if (userId) query = query.eq('user_id', userId)
+    const { data, error } = await query
 
     if (error) {
       if (
         String(error.message).includes('created_at') ||
         String(error.message).includes('schema cache')
       ) {
-        const { data: d2, error: e2 } = await supabaseAdmin.from('tasks').select('*')
+        let q2 = supabaseAdmin.from('tasks').select('*')
+        if (userId) q2 = q2.eq('user_id', userId)
+        const { data: d2, error: e2 } = await q2
         if (e2) return NextResponse.json({ error: e2.message }, { status: 500 })
         return NextResponse.json((d2 ?? []).map(shapeForClient))
       }
@@ -97,9 +100,10 @@ export async function POST(req: Request) {
       effort: body.effort,
     }
 
+    const userId = await getUserId()
     const { data, error } = await supabaseAdmin
       .from('tasks')
-      .insert({ title: encodeTitle(String(body.title), payload) })
+      .insert({ title: encodeTitle(String(body.title), payload), ...(userId ? { user_id: userId } : {}) })
       .select()
       .single()
 
@@ -128,7 +132,10 @@ export async function DELETE(req: Request) {
     const { searchParams } = new URL(req.url)
     const id = searchParams.get('id')
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
-    const { error } = await supabaseAdmin.from('tasks').delete().eq('id', id)
+    const userId = await getUserId()
+    let del = supabaseAdmin.from('tasks').delete().eq('id', id)
+    if (userId) del = del.eq('user_id', userId)
+    const { error } = await del
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json({ success: true })
   } catch (err) {
@@ -138,14 +145,13 @@ export async function DELETE(req: Request) {
 
 export async function PATCH(req: Request) {
   try {
+    const userId = await getUserId()
     const body = await req.json()
     if (!body.id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
-    const { data: existing, error: readErr } = await supabaseAdmin
-      .from('tasks')
-      .select('*')
-      .eq('id', body.id)
-      .single()
+    let readQ = supabaseAdmin.from('tasks').select('*').eq('id', body.id)
+    if (userId) readQ = readQ.eq('user_id', userId)
+    const { data: existing, error: readErr } = await readQ.single()
     if (readErr) return NextResponse.json({ error: readErr.message }, { status: 500 })
 
     const { title: currentTitle, payload: currentPayload } = decodeTitle(
@@ -162,12 +168,12 @@ export async function PATCH(req: Request) {
 
     const nextTitle = body.title !== undefined ? String(body.title) : currentTitle
 
-    const { data, error } = await supabaseAdmin
+    let upQ = supabaseAdmin
       .from('tasks')
       .update({ title: encodeTitle(nextTitle, nextPayload) })
       .eq('id', body.id)
-      .select()
-      .single()
+    if (userId) upQ = upQ.eq('user_id', userId)
+    const { data, error } = await upQ.select().single()
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json(shapeForClient(data as Record<string, unknown>))
   } catch (err) {

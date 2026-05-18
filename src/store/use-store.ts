@@ -141,7 +141,7 @@ function uid(prefix: string) {
 export const useStore = create<AppState>()(
   devtools(
     persist(
-      (set) => ({
+      (set, get) => ({
         decks: [],
         addDeck: (data) => {
           const id = uid("deck");
@@ -408,9 +408,12 @@ export const useStore = create<AppState>()(
                 qResp.ok ? qResp.json() : Promise.resolve(null),
                 cResp.ok ? cResp.json() : Promise.resolve(null),
               ])
+              // Never overwrite local data with empty API results — protects
+              // against transient API failures, missing env vars, etc.
+              const cur = get()
               const next: Partial<AppState> = {}
-              if (Array.isArray(tasks)) next.tasks = tasks
-              if (Array.isArray(decks)) {
+              if (Array.isArray(tasks) && (tasks.length > 0 || cur.tasks.length === 0)) next.tasks = tasks
+              if (Array.isArray(decks) && (decks.length > 0 || cur.decks.length === 0)) {
                 type RawDeck = {
                   id: string
                   title: string
@@ -460,7 +463,7 @@ export const useStore = create<AppState>()(
                   }
                 })
               }
-              if (Array.isArray(quizzes)) {
+              if (Array.isArray(quizzes) && (quizzes.length > 0 || cur.quizzes.length === 0)) {
                 type RawQuiz = {
                   id: string
                   title: string
@@ -478,7 +481,7 @@ export const useStore = create<AppState>()(
                   createdAt: q.created_at,
                 }))
               }
-              if (Array.isArray(courses)) next.coursesCache = courses
+              if (Array.isArray(courses) && (courses.length > 0 || cur.coursesCache.length === 0)) next.coursesCache = courses
               if (Object.keys(next).length) set(next)
             } catch {
               // ignore

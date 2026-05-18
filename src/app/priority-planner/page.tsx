@@ -8,7 +8,6 @@ import toast from "react-hot-toast";
 import { useStore, type TaskItem } from "@/store/use-store";
 import {
   parseTaskDate as parseTaskDateShared,
-  toLocalIsoDate as toLocalIsoDateShared,
   extractAssessmentName,
 } from "@/lib/task-date";
 
@@ -31,7 +30,12 @@ const TYPE_STYLES: Record<ScheduleType, { color: string; bgColor: string }> = {
   "Self Study": { color: "bg-teal-primary", bgColor: "bg-[#6EAFBB1A]" },
 };
 
-const toLocalIsoDate = toLocalIsoDateShared;
+const PRIORITY_STYLES: Record<string, { color: string; bgColor: string }> = {
+  "Focus First": { color: "bg-red-500", bgColor: "bg-red-50" },
+  "If You Have Energy": { color: "bg-amber-500", bgColor: "bg-amber-50" },
+  "Safe to Minimize": { color: "bg-green-primary", bgColor: "bg-green-50" },
+};
+
 const parseTaskDate = parseTaskDateShared;
 
 function fmtClock(h: number, m: number): string {
@@ -44,7 +48,7 @@ function fmtClock(h: number, m: number): string {
 function parseTimeRange(raw: string): { start: number; end: number } | null {
   if (!raw) return null;
   const match = raw.match(
-    /^\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*[-–]\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*$/i,
+    /^\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*[-–]\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*$/i
   );
   if (!match) return null;
   const start = parseClock(match[1]);
@@ -77,91 +81,58 @@ export default function PriorityPlanner() {
   const fetchInitial = useStore((s) => s.fetchInitial);
   const plannerEvents = useStore((s) => s.plannerEvents);
   const setPlannerEvents = useStore((s) => s.setPlannerEvents);
-  const hiddenTaskEventIds = useStore((s) => s.hiddenTaskEventIds);
-  const setHiddenTaskEventIds = useStore((s) => s.setHiddenTaskEventIds);
 
   const extraEvents = plannerEvents as ScheduleEvent[];
   const setExtraEvents = (
-    updater: ScheduleEvent[] | ((prev: ScheduleEvent[]) => ScheduleEvent[]),
+    updater: ScheduleEvent[] | ((prev: ScheduleEvent[]) => ScheduleEvent[])
   ) => {
     const next = typeof updater === "function" ? updater(extraEvents) : updater;
     setPlannerEvents(next);
-  };
-  const hiddenTaskIds = useMemo(
-    () => new Set(hiddenTaskEventIds),
-    [hiddenTaskEventIds],
-  );
-  const setHiddenTaskIds = (
-    updater: Set<number> | ((prev: Set<number>) => Set<number>),
-  ) => {
-    const next =
-      typeof updater === "function" ? updater(hiddenTaskIds) : updater;
-    setHiddenTaskEventIds(Array.from(next));
   };
 
   useEffect(() => {
     fetchInitial().catch(() => {});
   }, [fetchInitial]);
 
+  // Derive events from tasks in the Task Value store.
   const taskEvents: ScheduleEvent[] = useMemo(() => {
-    return tasks
-      .map((task, idx): ScheduleEvent | null => {
-        const parsed = parseTaskDate(task.date);
-        if (!parsed.isoDate) return null;
+    const result: ScheduleEvent[] = [];
+    for (const task of tasks) {
+      const { isoDate, clock } = parseTaskDate(task.date);
+      if (!isoDate) continue;
+      const pStyle = PRIORITY_STYLES[task.priority] ?? TYPE_STYLES.Task;
+      const timeStr = clock ? fmtClock(clock.h, clock.m) : "All Day";
+      const assessmentName = extractAssessmentName(task.description);
+      result.push({
+        id: Number(task.id) || Math.abs(hashStr(task.id)),
+        title: "Task",
+        label: assessmentName || task.title,
+        date: isoDate,
+        time: timeStr,
+        subject: `${task.title}${task.course ? ` · ${task.course}` : ""}`,
+        color: pStyle.color,
+        bgColor: pStyle.bgColor,
+      });
+    }
+    return result;
+  }, [tasks]);
 
-        const estimate = parseFloat(task.timeEstimate) || 1;
-        const startH = parsed.clock?.h ?? 9;
-        const startM = parsed.clock?.m ?? 0;
-        const totalMin = startH * 60 + startM;
-        const endMin = totalMin + Math.round(estimate * 60);
-        const endH = Math.floor(endMin / 60) % 24;
-        const endMM = endMin % 60;
-        const time = parsed.clock
-          ? `${fmtClock(startH, startM)} - ${fmtClock(endH, endMM)}`
-          : (task.timeEstimate ?? "—");
-
-        const styles =
-          task.priority === "Focus First"
-            ? { color: "bg-red-500", bgColor: "bg-[#FFEDED]" }
-            : task.priority === "If You Have Energy"
-              ? { color: "bg-yellow-500", bgColor: "bg-[#FFFBED]" }
-              : { color: "bg-green-primary", bgColor: "bg-[#84E0A31A]" };
-
-        const assessmentName = extractAssessmentName(task.description);
-        return {
-          id: 100000 + idx,
-          title: assessmentName as ScheduleType,
-          label: assessmentName ?? undefined,
-          date: parsed.isoDate,
-          time,
-          subject: `${task.course}`,
-          color: styles.color,
-          bgColor: styles.bgColor,
-        };
-      })
-      .filter(
-        (e): e is ScheduleEvent => e !== null && !hiddenTaskIds.has(e.id),
-      );
-  }, [tasks, hiddenTaskIds]);
-
-  const events: ScheduleEvent[] = [...taskEvents, ...extraEvents];
+  // Combine task-derived events + manually added events.
+  // Filter out old AI-generated ghost events (subject contains "· HIGH (" etc.).
+  const events: ScheduleEvent[] = useMemo(() => {
+    const aiPattern = /·\s*(?:HIGH|MEDIUM|LOW)\s*\(\d/;
+    const taskIds = new Set(taskEvents.map((e) => e.id));
+    const extra = extraEvents.filter(
+      (e) => !taskIds.has(e.id) && !aiPattern.test(e.subject)
+    );
+    return [...taskEvents, ...extra];
+  }, [taskEvents, extraEvents]);
 
   // Add a new event, dropping any existing event that overlaps it on the same day.
   const addEventReplacingOverlaps = (incoming: ScheduleEvent) => {
-    // Hide any task-derived event that conflicts.
-    const conflictingTaskIds = taskEvents
-      .filter((te) => eventsOverlap(te, incoming))
-      .map((te) => te.id);
-    if (conflictingTaskIds.length) {
-      setHiddenTaskIds((prev) => {
-        const next = new Set(prev);
-        for (const id of conflictingTaskIds) next.add(id);
-        return next;
-      });
-    }
     setExtraEvents((prev) => {
       const filtered = prev.filter(
-        (existing) => !eventsOverlap(existing, incoming),
+        (existing) => !eventsOverlap(existing, incoming)
       );
       return [...filtered, incoming];
     });
@@ -188,6 +159,15 @@ export default function PriorityPlanner() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSummary, setAiSummary] = useState<string | null>(null);
 
+  type GanttBlock = {
+    task_name: string;
+    start_time: string;
+    end_time: string;
+    hours_allocated: number;
+    tier: "HIGH" | "MEDIUM" | "LOW";
+  };
+  const [ganttData, setGanttData] = useState<GanttBlock[] | null>(null);
+
   const handleAiSchedule = async () => {
     if (aiLoading) return;
     if (!tasks.length) {
@@ -204,14 +184,12 @@ export default function PriorityPlanner() {
       const startDateIso = today.toISOString().slice(0, 10);
 
       const parseDeadlineDays = (dateStr: string): number => {
-        // task.date is "May 28, 10:22 PM" — no year. V8 defaults that to
-        // 2001, so use the shared parser which injects the current year.
         const { isoDate } = parseTaskDate(dateStr);
         if (!isoDate) return 7;
         const candidate = new Date(`${isoDate}T00:00:00`);
         if (Number.isNaN(candidate.getTime())) return 7;
         const diff = Math.round(
-          (candidate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+          (candidate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
         );
         return Math.max(0, diff);
       };
@@ -280,38 +258,28 @@ export default function PriorityPlanner() {
         };
       };
 
-      const fmtTime = (iso: string) => {
-        const d = new Date(iso);
-        return d.toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-        });
-      };
-
-      // Each AI block replaces any existing schedule it overlaps.
-      json.schedule.forEach((block, index) => {
-        addEventReplacingOverlaps({
-          id: Date.now() + index,
-          title: "Task" as ScheduleType,
-          date: toLocalIsoDate(new Date(block.start_time)),
-          time: `${fmtTime(block.start_time)} - ${fmtTime(block.end_time)}`,
-          subject: `${block.task_name} · ${block.tier} (${block.hours_allocated}h)`,
-          color: "bg-blue-primary",
-          bgColor: "bg-[#587ECE1A]",
-        });
-      });
+      // Store schedule data for the Gantt chart only (no dummy events).
+      setGanttData(
+        json.schedule.map((block) => ({
+          task_name: block.task_name,
+          start_time: block.start_time,
+          end_time: block.end_time,
+          hours_allocated: block.hours_allocated,
+          tier: block.tier,
+        }))
+      );
 
       const taskWord = json.summary.total_tasks === 1 ? "task" : "tasks";
       const dayWord = json.summary.days_needed === 1 ? "day" : "days";
       const warningNote = json.deadline_warnings.length
-        ? ` ⚠️ ${json.deadline_warnings.length} ${
+        ? ` Warning: ${json.deadline_warnings.length} ${
             json.deadline_warnings.length === 1 ? "task" : "tasks"
           } may miss deadlines.`
         : "";
       setAiSummary(
         `Scheduled ${json.summary.total_tasks} ${taskWord} across ${json.summary.days_needed} ${dayWord} ` +
           `(${json.summary.total_hours_needed}h). ` +
-          `${json.summary.high_priority} HIGH · ${json.summary.medium_priority} MEDIUM · ${json.summary.low_priority} LOW.${warningNote}`,
+          `${json.summary.high_priority} HIGH, ${json.summary.medium_priority} MEDIUM, ${json.summary.low_priority} LOW.${warningNote}`
       );
       toast.success("Schedule generated", { id: t });
     } catch (err) {
@@ -420,10 +388,10 @@ export default function PriorityPlanner() {
     selected.toLowerCase() === "day"
       ? currentDate.toLocaleDateString("en-US", { weekday: "long" })
       : selected.toLowerCase() === "week"
-        ? currentDate.toLocaleDateString("en-US", { weekday: "long" })
-        : selected.toLowerCase() === "month"
-          ? currentDate.toLocaleDateString("en-US", { weekday: "long" })
-          : "";
+      ? currentDate.toLocaleDateString("en-US", { weekday: "long" })
+      : selected.toLowerCase() === "month"
+      ? currentDate.toLocaleDateString("en-US", { weekday: "long" })
+      : "";
 
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isAddScheduleOpen, setIsAddScheduleOpen] = useState(false);
@@ -496,7 +464,7 @@ export default function PriorityPlanner() {
                 <div className={`w-2 h-2 rounded-full ${event.color}`}></div>
                 <div className="flex-1">
                   <p className="text-sm font-medium text-gray-900">
-                    {event.title}
+                    {event.label ?? event.title}
                   </p>
                 </div>
               </div>
@@ -511,8 +479,8 @@ export default function PriorityPlanner() {
                 selected === "Day"
                   ? previousDay
                   : selected === "Week"
-                    ? previousWeek
-                    : previousMonth
+                  ? previousWeek
+                  : previousMonth
               }
               className="px-2 py-1 hover:bg-gray-100 rounded-lg transition-colors"
               aria-label="Previous"
@@ -537,8 +505,8 @@ export default function PriorityPlanner() {
                 selected === "Day"
                   ? nextDay
                   : selected === "Week"
-                    ? nextWeek
-                    : nextMonth
+                  ? nextWeek
+                  : nextMonth
               }
               className="px-2 py-1 hover:bg-gray-100 rounded-lg transition-colors"
               aria-label="Next"
@@ -665,6 +633,9 @@ export default function PriorityPlanner() {
         )}
       </div>
 
+      {/* Gantt chart — calendar-based, shown after AI schedule generation */}
+      {ganttData && ganttData.length > 0 && <GanttChart data={ganttData} />}
+
       <div className="flex justify-center">
         <button
           onClick={() => setIsExportOpen(true)}
@@ -686,6 +657,267 @@ export default function PriorityPlanner() {
         onClose={() => setIsAddScheduleOpen(false)}
         onAdd={handleAddSchedule}
       />
+    </div>
+  );
+}
+
+// Simple string hash for stable task IDs.
+function hashStr(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  }
+  return h;
+}
+
+// ─── Gantt Chart Component ───────────────────────────────────────────────────
+
+type GanttBlock = {
+  task_name: string;
+  start_time: string;
+  end_time: string;
+  hours_allocated: number;
+  tier: "HIGH" | "MEDIUM" | "LOW";
+};
+
+const MONTH_LABELS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+const BAR_COLORS = [
+  "#ef4444",
+  "#3b82f6",
+  "#22c55e",
+  "#a855f7",
+  "#f97316",
+  "#14b8a6",
+  "#eab308",
+  "#ec4899",
+  "#6366f1",
+  "#8b5cf6",
+  "#06b6d4",
+  "#84cc16",
+  "#f43f5e",
+  "#0ea5e9",
+  "#d946ef",
+];
+
+function GanttChart({ data }: { data: GanttBlock[] }) {
+  // 1. For each task, find its earliest start and latest end.
+  const taskMap = new Map<
+    string,
+    { start: Date; end: Date; tier: string; totalH: number }
+  >();
+  const taskOrder: string[] = [];
+
+  for (const block of data) {
+    const s = new Date(block.start_time);
+    const e = new Date(block.end_time);
+    if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) continue;
+    if (!taskMap.has(block.task_name)) {
+      taskOrder.push(block.task_name);
+      taskMap.set(block.task_name, {
+        start: s,
+        end: e,
+        tier: block.tier,
+        totalH: 0,
+      });
+    }
+    const entry = taskMap.get(block.task_name)!;
+    if (s < entry.start) entry.start = s;
+    if (e > entry.end) entry.end = e;
+    entry.totalH += block.hours_allocated;
+  }
+
+  if (!taskOrder.length) return null;
+
+  // 2. Determine the full date range for the X-axis.
+  const allStarts = Array.from(taskMap.values()).map((t) => t.start.getTime());
+  const allEnds = Array.from(taskMap.values()).map((t) => t.end.getTime());
+  const rangeStart = new Date(Math.min(...allStarts));
+  rangeStart.setHours(0, 0, 0, 0);
+  // Snap to first of month
+  rangeStart.setDate(1);
+  const rangeEnd = new Date(Math.max(...allEnds));
+  rangeEnd.setHours(0, 0, 0, 0);
+  // Extend to end of month
+  rangeEnd.setMonth(rangeEnd.getMonth() + 1, 0);
+
+  const totalMs = rangeEnd.getTime() - rangeStart.getTime();
+  if (totalMs <= 0) return null;
+
+  // 3. Build month tick labels.
+  const monthTicks: { label: string; leftPct: number; widthPct: number }[] = [];
+  const cur = new Date(rangeStart);
+  while (cur <= rangeEnd) {
+    const monthStart = new Date(cur.getFullYear(), cur.getMonth(), 1);
+    const monthEnd = new Date(cur.getFullYear(), cur.getMonth() + 1, 0);
+    const clampedStart = Math.max(monthStart.getTime(), rangeStart.getTime());
+    const clampedEnd = Math.min(monthEnd.getTime(), rangeEnd.getTime());
+    monthTicks.push({
+      label: MONTH_LABELS[cur.getMonth()],
+      leftPct: ((clampedStart - rangeStart.getTime()) / totalMs) * 100,
+      widthPct: ((clampedEnd - clampedStart) / totalMs) * 100,
+    });
+    cur.setMonth(cur.getMonth() + 1);
+  }
+
+  // "Today" marker.
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayPct = ((today.getTime() - rangeStart.getTime()) / totalMs) * 100;
+  const showToday = todayPct >= 0 && todayPct <= 100;
+
+  const rowH = 36;
+
+  return (
+    <div
+      className="flex flex-col p-7 items-start self-stretch gap-4"
+      style={{
+        borderRadius: "16px",
+        border: "1px solid rgba(204, 204, 204, 0.75)",
+      }}
+    >
+      <h1 className="text-base font-semibold">Study Schedule (Gantt Chart)</h1>
+
+      <div className="flex w-full">
+        {/* Y-axis: task names */}
+        <div
+          className="shrink-0 pr-3 flex flex-col justify-end"
+          style={{ width: 150 }}
+        >
+          <div style={{ height: 28 }} /> {/* spacer for month labels */}
+          {taskOrder.map((name) => (
+            <div
+              key={name}
+              className="flex items-center text-xs font-medium text-gray-700 truncate"
+              style={{ height: rowH }}
+              title={name}
+            >
+              {name}
+            </div>
+          ))}
+          <div style={{ height: 24 }} /> {/* spacer for X-axis labels */}
+        </div>
+
+        {/* Chart area */}
+        <div className="flex-1 min-w-0 relative">
+          {/* Month labels at top */}
+          <div className="relative" style={{ height: 28 }}>
+            {monthTicks.map((mt, i) => (
+              <span
+                key={i}
+                className="absolute text-xs font-semibold text-gray-600 text-center"
+                style={{
+                  left: `${mt.leftPct}%`,
+                  width: `${mt.widthPct}%`,
+                  top: 4,
+                }}
+              >
+                {mt.label}
+              </span>
+            ))}
+          </div>
+
+          {/* Grid + bars */}
+          <div
+            className="relative w-full bg-gray-50 border border-gray-200 rounded-lg overflow-hidden"
+            style={{ height: taskOrder.length * rowH }}
+          >
+            {/* Vertical grid lines at month boundaries */}
+            {monthTicks.map((mt, i) => (
+              <div
+                key={i}
+                className="absolute top-0 bottom-0 border-l border-gray-200"
+                style={{ left: `${mt.leftPct}%` }}
+              />
+            ))}
+
+            {/* Horizontal row lines */}
+            {taskOrder.map((_, i) => (
+              <div
+                key={i}
+                className="absolute left-0 right-0 border-b border-gray-100"
+                style={{ top: (i + 1) * rowH }}
+              />
+            ))}
+
+            {/* Today line */}
+            {showToday && (
+              <div
+                className="absolute top-0 bottom-0 z-10"
+                style={{
+                  left: `${todayPct}%`,
+                  borderLeft: "2px dashed #3b82f6",
+                }}
+              >
+                <span
+                  className="absolute text-[10px] font-bold text-blue-500 whitespace-nowrap"
+                  style={{ top: -16, left: -14 }}
+                >
+                  Today
+                </span>
+              </div>
+            )}
+
+            {/* Task bars */}
+            {taskOrder.map((name, i) => {
+              const info = taskMap.get(name)!;
+              const barLeft =
+                ((info.start.getTime() - rangeStart.getTime()) / totalMs) * 100;
+              const barWidth =
+                ((info.end.getTime() - info.start.getTime()) / totalMs) * 100;
+              const color = BAR_COLORS[i % BAR_COLORS.length];
+              return (
+                <div
+                  key={name}
+                  className="absolute flex items-center"
+                  style={{
+                    top: i * rowH + 6,
+                    left: `${barLeft}%`,
+                    width: `${Math.max(barWidth, 1)}%`,
+                    height: rowH - 12,
+                  }}
+                  title={`${name}: ${info.totalH}h (${info.tier})`}
+                >
+                  <div
+                    className="w-full h-full rounded-full"
+                    style={{ backgroundColor: color }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+
+          {/* X-axis month labels at bottom */}
+          <div className="relative" style={{ height: 24 }}>
+            {monthTicks.map((mt, i) => (
+              <span
+                key={i}
+                className="absolute text-[10px] text-gray-500 text-center"
+                style={{
+                  left: `${mt.leftPct}%`,
+                  width: `${mt.widthPct}%`,
+                  top: 4,
+                }}
+              >
+                {mt.label}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
