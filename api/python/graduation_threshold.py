@@ -114,17 +114,24 @@ def _validate_and_normalize_input(data: dict) -> Tuple[List[dict], float, List[f
     if not isinstance(assessments, list) or len(assessments) == 0:
         raise ValueError("No assessments provided")
 
-    # Normalize all numeric fields
+    # Normalize all numeric fields (top-level + sub_assessments)
     total_weight = 0.0
     for assessment in assessments:
         if "weight" not in assessment:
             assessment["weight"] = 0.0
         assessment["weight"] = float(assessment.get("weight", 0.0))
-        
+
         score = assessment.get("score")
         if score is not None:
             assessment["score"] = float(score)
-        
+
+        sub_items = assessment.get("sub_assessments") or []
+        for sub in sub_items:
+            sub["weight"] = float(sub.get("weight", 0.0))
+            sub_score = sub.get("score")
+            if sub_score is not None:
+                sub["score"] = float(sub_score)
+
         total_weight += assessment["weight"]
 
     # Validate weight sum (allow small floating-point tolerance)

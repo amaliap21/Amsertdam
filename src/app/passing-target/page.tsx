@@ -34,6 +34,11 @@ type ThresholdResult = {
   safety_margin: number;
   is_feasible: boolean;
   message: string;
+  // "ok" = pending leaves with equal target (joined with "and")
+  // "graded" = all graded + failing, per-leaf recovery (joined with "or")
+  // "incomplete" = weights don't sum to 100
+  // "passing" = already passing
+  kind?: "ok" | "graded" | "incomplete" | "passing";
 };
 
 type Courses = {
@@ -135,51 +140,162 @@ function effectiveScore(a: Assessment): number | undefined {
   return a.score;
 }
 
-async function callGraduationAPI(
+// Flatten an assessment tree into leaf rows (one per gradeable item).
+// An assessment with sub-items is replaced by its leaves; otherwise it IS a leaf.
+type Leaf = { name: string; weight: number; score?: number; parent?: string };
+
+function flattenToLeaves(assessments: Assessment[]): Leaf[] {
+  const leaves: Leaf[] = [];
+  for (const a of assessments) {
+    if (a.items && a.items.length > 0) {
+      for (const item of a.items) {
+        leaves.push({
+          name: item.name,
+          weight: item.weight,
+          score: item.score,
+          parent: a.name,
+        });
+      }
+    } else {
+      leaves.push({ name: a.name, weight: a.weight, score: a.score });
+    }
+  }
+  return leaves;
+}
+
+// Compute per-leaf required scores client-side. Runs synchronously, so the
+// suggestion always reflects the current state without waiting on a serverless
+// round-trip.
+function computeThreshold(
   assessments: Assessment[],
   passingGrade: number,
-  courseName: string,
-): Promise<ThresholdResult | null> {
-  const totalWeight = assessments.reduce((s, a) => s + a.weight, 0);
-  if (Math.abs(totalWeight - 100) > 0.5) return null;
+): ThresholdResult {
+  const leaves = flattenToLeaves(assessments);
+  const totalWeight = leaves.reduce((s, l) => s + l.weight, 0);
 
-  const aiPayload = {
-    course: courseName,
-    passingThreshold: passingGrade,
-    targetGrade: Math.max(passingGrade, 75),
-    assessments: assessments.map((a) => {
-      const score = effectiveScore(a);
-      return {
-        name: a.name,
-        weight: a.weight,
-        current: score ?? null,
-        done: score !== undefined,
-      };
-    }),
-  };
-
-  void aiPayload;
-  try {
-    const res = await fetch("/api/python/graduation_threshold", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        passing_grade: passingGrade,
-        assessments: assessments.map((a) => {
-          const score = effectiveScore(a);
-          return score !== undefined
-            ? { name: a.name, weight: a.weight, score }
-            : { name: a.name, weight: a.weight };
-        }),
-      }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data.error) return null;
-    return data as ThresholdResult;
-  } catch {
-    return null;
+  if (Math.abs(totalWeight - 100) > 0.5) {
+    const remaining = Math.max(0, 100 - totalWeight);
+    return {
+      kind: "incomplete",
+      current_grade: 0,
+      passing_grade: passingGrade,
+      gap: passingGrade,
+      requirements: [],
+      status: "Worth Reviewing",
+      safety_margin: 0,
+      is_feasible: false,
+      message: `Add ${remaining.toFixed(0)}% more assessment weight (currently ${totalWeight.toFixed(0)}%) to see your target scores.`,
+    };
   }
+
+  const achievedSum = leaves
+    .filter((l) => l.score !== undefined)
+    .reduce((s, l) => s + l.weight * (l.score ?? 0), 0);
+  const currentGrade = Math.round((achievedSum / 100) * 100) / 100;
+
+  const pending = leaves.filter((l) => l.score === undefined);
+  const pendingWeight = pending.reduce((s, l) => s + l.weight, 0);
+
+  // Everything is already graded
+  if (pendingWeight === 0) {
+    const passed = currentGrade >= passingGrade;
+    if (passed) {
+      return {
+        kind: "graded",
+        current_grade: currentGrade,
+        passing_grade: passingGrade,
+        gap: 0,
+        requirements: [],
+        status: "On Track",
+        safety_margin: 0,
+        is_feasible: true,
+        message: `All assessments graded. Final grade ${currentGrade} passes.`,
+      };
+    }
+
+    // Failing but all graded. Distribute the gap evenly across the leaves that
+    // are currently below the passing grade: each gets the same delta per
+    // weight unit, so following ALL targets lands at exactly the passing grade
+    // — no overshoot. Targets that would exceed 100 are flagged infeasible.
+    const requiredAdditional = passingGrade * 100 - achievedSum;
+    const underLeaves = leaves.filter((l) => (l.score ?? 0) < passingGrade);
+    const underWeight = underLeaves.reduce((s, l) => s + l.weight, 0);
+    // underWeight is always > 0 here: if every leaf were ≥ passing, the
+    // weighted average couldn't be below passing.
+    const delta = requiredAdditional / underWeight;
+
+    const recoveryReqs = underLeaves.map((l) => {
+      const target = (l.score ?? 0) + delta;
+      return {
+        name: l.parent ? `${l.parent} > ${l.name}` : l.name,
+        weight: l.weight,
+        min_score: Math.round(target * 10) / 10,
+        is_feasible: target <= 100,
+      };
+    });
+    const allFeasible = recoveryReqs.every((r) => r.is_feasible);
+
+    return {
+      kind: "graded",
+      current_grade: currentGrade,
+      passing_grade: passingGrade,
+      gap: Math.round((passingGrade - currentGrade) * 100) / 100,
+      requirements: recoveryReqs,
+      status: "At Risk",
+      safety_margin: 0,
+      is_feasible: allFeasible,
+      message: allFeasible
+        ? `Lift each under-performing assessment to reach the passing grade.`
+        : `Some required targets exceed 100 — recovery isn't possible from these assessments alone.`,
+    };
+  }
+
+  const requiredAdditional = passingGrade * 100 - achievedSum;
+
+  // Already passing without needing the remaining items
+  if (requiredAdditional <= 0) {
+    return {
+      kind: "passing",
+      current_grade: currentGrade,
+      passing_grade: passingGrade,
+      gap: 0,
+      requirements: pending.map((l) => ({
+        name: l.parent ? `${l.parent} > ${l.name}` : l.name,
+        weight: l.weight,
+        min_score: 0,
+        is_feasible: true,
+      })),
+      status: "On Track",
+      safety_margin: 0,
+      is_feasible: true,
+      message: `Current grade ${currentGrade} already meets the passing threshold.`,
+    };
+  }
+
+  // Equal per-leaf target: same min score required on each remaining item to
+  // hit the passing grade. Each leaf is reviewed independently in the UI.
+  const target = requiredAdditional / pendingWeight;
+  const roundedTarget = Math.round(target * 10) / 10;
+  const feasible = target <= 100;
+
+  return {
+    kind: "ok",
+    current_grade: currentGrade,
+    passing_grade: passingGrade,
+    gap: Math.round(Math.max(0, passingGrade - currentGrade) * 100) / 100,
+    requirements: pending.map((l) => ({
+      name: l.parent ? `${l.parent} > ${l.name}` : l.name,
+      weight: l.weight,
+      min_score: roundedTarget,
+      is_feasible: feasible,
+    })),
+    status: !feasible ? "At Risk" : roundedTarget >= 85 ? "Worth Reviewing" : "On Track",
+    safety_margin: 0,
+    is_feasible: feasible,
+    message: feasible
+      ? `Need at least ${roundedTarget} on each remaining assessment to pass.`
+      : `Target of ${roundedTarget} exceeds 100 — may not be achievable.`,
+  };
 }
 
 export default function PassingTarget() {
@@ -227,6 +343,18 @@ export default function PassingTarget() {
       } catch {}
     })();
   }, [setCoursesCache]);
+
+  // Auto-compute target scores on load. triggerCompute always sets
+  // thresholdResult, so the guard below prevents re-firing once each course is
+  // computed.
+  useEffect(() => {
+    courseItems.forEach((course, index) => {
+      if (!course.assessments?.length) return;
+      if (course.thresholdResult) return;
+      triggerCompute(index, courseItems);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courseItems]);
 
   const _seedRemoved: Courses[] = [];
   void _seedRemoved;
@@ -353,26 +481,21 @@ export default function PassingTarget() {
   ];
   void _legacy;
 
-  // Call the Python API and update a course's threshold result
-  const triggerCompute = async (index: number, courses: Courses[]) => {
+  // Recompute target scores for a course from its current assessments. Runs
+  // synchronously client-side so the suggestion always matches the live state.
+  const triggerCompute = (index: number, courses: Courses[]) => {
     const course = courses[index];
     if (!course.assessments?.length) return;
 
-    setCourseItems((prev) =>
-      prev.map((c, i) => (i === index ? { ...c, isCalculating: true } : c)),
-    );
-
-    const result = await callGraduationAPI(
+    const result = computeThreshold(
       course.assessments,
       course.threshold ?? course.passingGrade ?? 75,
-      course.courseName,
     );
 
     setCourseItems((prev) =>
       prev.map((c, i) => {
         if (i !== index) return c;
-        if (!result) return { ...c, isCalculating: false };
-        const nextCourse = {
+        const nextCourse: Courses = {
           ...c,
           isCalculating: false,
           typeTracking: result.status,
@@ -527,19 +650,13 @@ export default function PassingTarget() {
     }
 
     const parts: React.ReactNode[] = [];
+    const isRecovery = course.thresholdResult?.kind === "graded";
 
-    if (details.every((req) => req.score === details[0].score)) {
-      parts.push("To pass this course, you need at least ");
-      parts.push(
-        <span key="overall-score" className="font-semibold text-indigo-primary">
-          {details[0].score}
-        </span>,
-      );
-      parts.push(" overall");
-      return <>{parts}</>;
-    }
-
-    parts.push("To pass this course, you need at least ");
+    parts.push(
+      isRecovery
+        ? "To recover, score at least "
+        : "To pass this course, you need at least ",
+    );
 
     details.forEach((req, index) => {
       parts.push(
