@@ -5,6 +5,32 @@ import { createClient } from "@/lib/supabase/client";
 
 const STORAGE_KEY = "realtrack-storage";
 const LAST_USER_KEY = "realtrack-last-user-id";
+const RELOAD_GUARD_KEY = "realtrack-auth-sync-last-reload";
+// Don't reload more than once per this window — protects against
+// Supabase emitting back-to-back SIGNED_IN events on token refresh,
+// which would otherwise put the tab in an infinite refresh loop.
+const RELOAD_MIN_INTERVAL_MS = 30_000;
+
+/** True iff we have NOT reloaded within the throttle window. */
+function canReload(): boolean {
+  try {
+    const raw = sessionStorage.getItem(RELOAD_GUARD_KEY);
+    if (!raw) return true;
+    const last = Number(raw);
+    if (!Number.isFinite(last)) return true;
+    return Date.now() - last > RELOAD_MIN_INTERVAL_MS;
+  } catch {
+    return true;
+  }
+}
+
+function markReloaded(): void {
+  try {
+    sessionStorage.setItem(RELOAD_GUARD_KEY, String(Date.now()));
+  } catch {
+    /* ignore */
+  }
+}
 
 /**
  * Wipe the persisted Zustand store and reload when the signed-in user
@@ -37,9 +63,12 @@ export default function AuthSync() {
           if (currentId) localStorage.setItem(LAST_USER_KEY, currentId);
           else localStorage.removeItem(LAST_USER_KEY);
           // Hard reload so the in-memory Zustand state is rebuilt from a
-          // blank persisted slot (rather than re-using whatever was already
-          // loaded into memory before the reconcile).
-          if (lastId !== null) window.location.reload();
+          // blank persisted slot. Throttled, so a Supabase quirk that
+          // re-fires this branch can never trap the user in a loop.
+          if (lastId !== null && canReload()) {
+            markReloaded();
+            window.location.reload();
+          }
         }
       } catch {
         // If auth lookup fails, leave state alone, we'd rather show stale
@@ -60,11 +89,22 @@ export default function AuthSync() {
         return;
       }
 
-      if (event === "SIGNED_IN" && currentId !== lastId) {
+      // Only act on REAL sign-ins with a known user. SIGNED_IN with a
+      // null session, or with the same user we already have, should be
+      // a no-op — those are token-refresh / re-emitted events that used
+      // to put the tab into a refresh loop.
+      if (
+        event === "SIGNED_IN" &&
+        currentId &&
+        currentId !== lastId
+      ) {
         localStorage.removeItem(STORAGE_KEY);
-        if (currentId) localStorage.setItem(LAST_USER_KEY, currentId);
-        // Reload so the new user starts from a clean store.
-        window.location.reload();
+        localStorage.setItem(LAST_USER_KEY, currentId);
+        // Reload so the new user starts from a clean store. Throttled.
+        if (canReload()) {
+          markReloaded();
+          window.location.reload();
+        }
       }
     });
 
