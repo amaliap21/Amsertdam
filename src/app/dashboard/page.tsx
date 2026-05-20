@@ -4,7 +4,11 @@ import Image from "next/image";
 import { useState, useEffect, useMemo } from "react";
 import { useStore } from "@/store/use-store";
 import { useCurrentUser } from "@/lib/use-current-user";
-import { parseTaskDate, extractAssessmentName } from "@/lib/task-date";
+import {
+  parseTaskDate,
+  formatTaskDate,
+  extractAssessmentName,
+} from "@/lib/task-date";
 
 type Tasks = {
   cardColor: string;
@@ -27,63 +31,71 @@ type Courses = {
 
 export default function Dashboard() {
   const { user } = useCurrentUser();
-  const fetchInitial = useStore((s) => s.fetchInitial)
-  const storeTasks = useStore((s) => s.tasks)
-  const coursesCache = useStore((s) => s.coursesCache)
+  const fetchInitial = useStore((s) => s.fetchInitial);
+  const storeTasks = useStore((s) => s.tasks);
+  const coursesCache = useStore((s) => s.coursesCache);
+  const plannerEvents = useStore((s) => s.plannerEvents);
 
   // Derive courseItems from the persisted store cache. This renders instantly
   // on mount (from localStorage), then updates when the background fetch lands.
   const courseItems: Courses[] = useMemo(() => {
-    if (!Array.isArray(coursesCache)) return []
+    if (!Array.isArray(coursesCache)) return [];
     type CachedCourse = {
-      title?: string
+      title?: string;
       course_payload?: {
-        credits?: number
-        threshold?: number | null
-        typeTracking?: string
-        scheduleEntries?: Array<{ day?: string; startTime?: string; endTime?: string }>
-      }
-    }
+        credits?: number;
+        threshold?: number | null;
+        typeTracking?: string;
+        scheduleEntries?: Array<{
+          day?: string;
+          startTime?: string;
+          endTime?: string;
+        }>;
+      };
+    };
     return (coursesCache as CachedCourse[]).map((co) => {
-      const payload = co.course_payload ?? {}
-      const credits = Number(payload.credits) || 0
-      const schedule = Array.isArray(payload.scheduleEntries) ? payload.scheduleEntries : []
+      const payload = co.course_payload ?? {};
+      const credits = Number(payload.credits) || 0;
+      const schedule = Array.isArray(payload.scheduleEntries)
+        ? payload.scheduleEntries
+        : [];
       const toMin = (t?: string) => {
-        if (!t || typeof t !== 'string' || !t.includes(':')) return null
-        const [h, m] = t.split(':').map(Number)
-        if (!Number.isFinite(h) || !Number.isFinite(m)) return null
-        return h * 60 + m
-      }
-      let totalHours = 0
+        if (!t || typeof t !== "string" || !t.includes(":")) return null;
+        const [h, m] = t.split(":").map(Number);
+        if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+        return h * 60 + m;
+      };
+      let totalHours = 0;
       for (const s of schedule) {
-        const a = toMin(s.startTime)
-        const b = toMin(s.endTime)
-        if (a != null && b != null && b > a) totalHours += (b - a) / 60
+        const a = toMin(s.startTime);
+        const b = toMin(s.endTime);
+        if (a != null && b != null && b > a) totalHours += (b - a) / 60;
       }
-      const fromTime = totalHours > 0 ? Math.round(totalHours) : credits
-      const toTime = fromTime
-      const threshold = payload.threshold != null ? String(payload.threshold) : '—'
-      const typeTracking = payload.typeTracking ?? 'On Track'
+      const fromTime = totalHours > 0 ? Math.round(totalHours) : credits;
+      const toTime = fromTime;
+      const threshold =
+        payload.threshold != null ? String(payload.threshold) : "—";
+      const typeTracking = payload.typeTracking ?? "On Track";
       return {
-        courseName: co.title ?? 'Untitled',
+        courseName: co.title ?? "Untitled",
         credits,
         fromTime,
         toTime,
         typeTracking,
         threshold,
-      }
-    })
-  }, [coursesCache])
+      };
+    });
+  }, [coursesCache]);
 
   const taskItems: Tasks[] = useMemo(() => {
     const counts: Record<string, number> = {
       "Focus First": 0,
       "If You Have Energy": 0,
       "Safe to Minimize": 0,
-    }
+    };
     for (const t of storeTasks) {
-      const key = t.priority ?? "If You Have Energy"
-      counts[key] = (counts[key] ?? 0) + 1
+      const key = t.priority ?? "If You Have Energy";
+      counts[key] = (counts[key] ?? 0) + 1;
     }
     return [
       {
@@ -116,53 +128,125 @@ export default function Dashboard() {
         taskCountColor: "#73C58F",
         text: "Low impact, safe to do less.",
       },
-    ]
-  }, [storeTasks])
+    ];
+  }, [storeTasks]);
 
   useEffect(() => {
     // fetchInitial now batches tasks + flashcards + quizzes + courses in a
     // single parallel round-trip and is coalesced across mounts.
-    fetchInitial().catch(() => {})
-  }, [fetchInitial])
+    fetchInitial().catch(() => {});
+  }, [fetchInitial]);
 
-  const [currentDate, setCurrentDate] = useState(new Date(2026, 0, 8));
-  const [selectedDay, setSelectedDay] = useState<number | null>(8);
+  const [currentDate, setCurrentDate] = useState(() => new Date());
+  const [selectedDay, setSelectedDay] = useState<number | null>(() =>
+    new Date().getDate(),
+  );
 
-  const events = storeTasks.slice(0, 5).map((t, i) => {
-    const assessment = extractAssessmentName(t.description);
-    return {
-      id: i + 1,
-      time: t.timeEstimate ? `${t.timeEstimate} • ${t.date}` : t.date,
-      title: `[${assessment ?? "Task"}] ${t.title}`,
-      color:
-        t.priority === "Focus First"
-          ? "bg-red-500"
-          : t.priority === "If You Have Energy"
-            ? "bg-yellow-500"
-            : "bg-green-primary",
-    };
-  });
+  // Task-derived events. Filter out planner ghosts that wrap a real task —
+  // those will reappear via plannerEvents otherwise.
+  const taskEvents = useMemo(
+    () =>
+      storeTasks.map((t) => {
+        const assessment = extractAssessmentName(t.description);
+        const { isoDate } = parseTaskDate(t.date);
+        const display = formatTaskDate(t.date);
+        return {
+          id: `task-${t.id}`,
+          isoDate,
+          sortKey: `${isoDate ?? "9999-99-99"} ${t.date}`,
+          time: t.timeEstimate ? `${t.timeEstimate} • ${display}` : display,
+          title: `[${assessment ?? "Task"}] ${t.title}`,
+          color:
+            t.priority === "Focus First"
+              ? "bg-red-500"
+              : t.priority === "If You Have Energy"
+                ? "bg-yellow-500"
+                : "bg-green-primary",
+        };
+      }),
+    [storeTasks],
+  );
 
-  // Map: "YYYY-MM-DD" -> set of priority dot colors (max 3: red/yellow/green).
+  // Manual schedules added from the Priority Planner. Drop AI-generated
+  // ghosts (their `subject` carries a "· HIGH (xh)" suffix) and entries
+  // whose id collides with a real task to avoid duplicates.
+  const plannerOnlyEvents = useMemo(() => {
+    const aiPattern = /·\s*(?:HIGH|MEDIUM|LOW)\s*\(\d/;
+    const taskIds = new Set(storeTasks.map((t) => String(t.id)));
+    const colorFor = (title: string) =>
+      title === "Class"
+        ? "bg-green-primary"
+        : title === "Self Study"
+          ? "bg-teal-primary"
+          : "bg-blue-primary";
+    return plannerEvents
+      .filter(
+        (e) =>
+          !aiPattern.test(e.subject) && !taskIds.has(String(e.id)),
+      )
+      .map((e) => ({
+        id: `planner-${e.id}`,
+        isoDate: e.date,
+        sortKey: `${e.date} ${e.time}`,
+        time: `${e.time} • ${e.date}`,
+        title: `[${e.label ?? e.title}] ${e.subject}`,
+        color: colorFor(e.title),
+      }));
+  }, [plannerEvents, storeTasks]);
+
+  // Combine and surface the upcoming 5 across both sources.
+  const events = useMemo(
+    () =>
+      [...taskEvents, ...plannerOnlyEvents]
+        .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
+        .slice(0, 5),
+    [taskEvents, plannerOnlyEvents],
+  );
+
+  type DotColor = "red" | "yellow" | "green" | "blue" | "teal";
+
+  // Map: "YYYY-MM-DD" -> set of dot colors (priority for tasks, type for
+  // manual planner events). Order in render: red → yellow → green → blue → teal.
   const priorityDotsByIso = useMemo(() => {
-    const map = new Map<string, Set<"red" | "yellow" | "green">>();
+    const map = new Map<string, Set<DotColor>>();
+    const push = (iso: string | null | undefined, color: DotColor) => {
+      if (!iso) return;
+      if (!map.has(iso)) map.set(iso, new Set());
+      map.get(iso)!.add(color);
+    };
     for (const task of storeTasks) {
       const { isoDate } = parseTaskDate(task.date);
-      if (!isoDate) continue;
-      const color =
+      const color: DotColor =
         task.priority === "Focus First"
           ? "red"
           : task.priority === "If You Have Energy"
             ? "yellow"
             : "green";
-      if (!map.has(isoDate)) map.set(isoDate, new Set());
-      map.get(isoDate)!.add(color);
+      push(isoDate, color);
+    }
+    for (const ev of plannerOnlyEvents) {
+      // ev.color is a bg-class; map it back to a DotColor.
+      const color: DotColor =
+        ev.color === "bg-green-primary"
+          ? "green"
+          : ev.color === "bg-teal-primary"
+            ? "teal"
+            : "blue";
+      push(ev.isoDate, color);
     }
     return map;
-  }, [storeTasks]);
+  }, [storeTasks, plannerOnlyEvents]);
 
-  const dotColorClass = (c: "red" | "yellow" | "green") =>
-    c === "red" ? "bg-red-500" : c === "yellow" ? "bg-yellow-500" : "bg-green-primary";
+  const dotColorClass = (c: DotColor) =>
+    c === "red"
+      ? "bg-red-500"
+      : c === "yellow"
+        ? "bg-yellow-500"
+        : c === "green"
+          ? "bg-green-primary"
+          : c === "blue"
+            ? "bg-blue-primary"
+            : "bg-teal-primary";
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -198,13 +282,17 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="flex flex-row justify-between gap-23 px-14.75 py-11.5">
+    <div className="flex flex-col xl:flex-row justify-between gap-6 md:gap-8 xl:gap-16 px-4 sm:px-6 md:px-8 lg:px-10 xl:px-14 py-6 md:py-8 xl:py-12">
       {/* Overviews */}
-      <div className="flex flex-col gap-10 w-168.75">
+      <div className="flex flex-col gap-10 w-full max-w-full xl:w-1/2">
         {/* Greetings */}
-        <div className="flex flex-col gap-3">
+        <div data-tour="dashboard-hero" className="flex flex-col gap-3">
           <h1 className="text-[28px] font-semibold text-black-primary">
-            Hello, {user?.user_metadata?.full_name?.split(" ")[0] ?? user?.email?.split("@")[0] ?? "there"}!
+            Hello,{" "}
+            {user?.user_metadata?.full_name?.split(" ")[0] ??
+              user?.email?.split("@")[0] ??
+              "there"}
+            !
           </h1>
           <p className="text-gray-primary">
             You&apos;re on track to pass your courses, without needing to
@@ -214,7 +302,7 @@ export default function Dashboard() {
 
         {/* Tasks Overview */}
         <div>
-          <div className="flex flex-row justify-between items-center mb-5">
+          <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <h1 className="text-[20px] font-semibold text-black-primary">
               Tasks Overview
             </h1>
@@ -225,11 +313,11 @@ export default function Dashboard() {
               See Tasks
             </a>
           </div>
-          <div className="flex flex-row gap-6">
+          <div className="flex flex-col md:flex-row gap-6">
             {taskItems.map((item, index) => (
               <div
                 key={index}
-                className="flex-col gap-2.5 pt-4 rounded-lg w-1/3"
+                className="flex w-full flex-col gap-2.5 rounded-lg pt-4 md:w-1/3"
                 style={{
                   background: item.cardColor,
                 }}
@@ -247,7 +335,7 @@ export default function Dashboard() {
                     alt={`${item.type} Tasks Graph`}
                     width={105}
                     height={87}
-                    className="w-auto h-auto"
+                    style={{ width: "auto", height: "auto" }}
                   />
                   <div>
                     <h1 className="text-sm">
@@ -269,7 +357,7 @@ export default function Dashboard() {
 
         {/* Courses Overview */}
         <div className="flex flex-col gap-8">
-          <div className="flex flex-row justify-between items-center">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <h1 className="text-[20px] font-semibold text-black-primary">
               Courses Overview
             </h1>
@@ -331,7 +419,7 @@ export default function Dashboard() {
       </div>
 
       {/* Calendar */}
-      <div className="max-w-md bg-white w-1/2">
+      <div className="w-full xl:max-w-md bg-white xl:w-1/2">
         {/* Header Section */}
         <div className="flex flex-col gap-3 mb-10">
           <h1 className="text-2xl font-semibold text-gray-800">
@@ -346,7 +434,7 @@ export default function Dashboard() {
         </div>
 
         {/* Priority Planner Section */}
-        <div className="flex flex-row justify-between items-center mb-6">
+        <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-xl font-semibold text-gray-900">
             Priority Planner
           </h2>
@@ -359,7 +447,7 @@ export default function Dashboard() {
         </div>
 
         {/* Month Navigation */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="mb-8 flex items-center justify-between gap-3">
           <h3 className="text-lg font-medium text-gray-900">{monthName}</h3>
           <div className="flex gap-2">
             <button
@@ -406,7 +494,7 @@ export default function Dashboard() {
         {/* Calendar Grid */}
         <div className="mb-8">
           {/* Day headers */}
-          <div className="grid grid-cols-7 gap-9 mb-2">
+          <div className="mb-2 grid grid-cols-7 gap-2 sm:gap-4 lg:gap-9">
             {daysOfWeek.map((day) => (
               <div
                 key={day}
@@ -418,43 +506,49 @@ export default function Dashboard() {
           </div>
 
           {/* Calendar days */}
-          <div className="grid grid-cols-7 gap-9">
+          <div className="grid grid-cols-7 gap-2 sm:gap-4 lg:gap-9">
             {calendarDays.map((day, index) => {
               const iso =
                 day != null
                   ? `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`
                   : "";
               const dotSet = iso ? priorityDotsByIso.get(iso) : undefined;
-              // Order red → yellow → green for visual consistency, cap at 3.
-              const dots: Array<"red" | "yellow" | "green"> = dotSet
-                ? (["red", "yellow", "green"] as const).filter((c) => dotSet.has(c))
+              // Order red → yellow → green → blue → teal for visual consistency.
+              const dots: DotColor[] = dotSet
+                ? (["red", "yellow", "green", "blue", "teal"] as const).filter(
+                    (c) => dotSet.has(c),
+                  )
                 : [];
               return (
                 <div
                   key={index}
-                  className="aspect-square flex flex-col items-center justify-center"
+                  className="aspect-square flex items-center justify-center"
                 >
                   {day && (
-                    <>
-                      <div className="flex gap-0.5 h-1.5 mb-0.5">
-                        {dots.map((c) => (
-                          <span
-                            key={c}
-                            className={`block w-1.5 h-1.5 rounded-full ${dotColorClass(c)}`}
-                          />
-                        ))}
-                      </div>
-                      <button
-                        onClick={() => setSelectedDay(day)}
-                        className={`w-full flex-1 flex items-center justify-center rounded-full text-sm font-medium transition-colors ${
-                          day === selectedDay
-                            ? "bg-indigo-600 text-white"
-                            : "text-gray-900 hover:bg-gray-100"
-                        }`}
-                      >
-                        {day}
-                      </button>
-                    </>
+                    <button
+                      onClick={() => setSelectedDay(day)}
+                      className={`relative w-full h-full flex items-center justify-center rounded-full text-sm font-medium transition-colors ${
+                        day === selectedDay
+                          ? "bg-indigo-600 text-white"
+                          : "text-gray-900 hover:bg-gray-100"
+                      }`}
+                    >
+                      {day}
+                      {dots.length > 0 && (
+                        <span className="absolute bottom-1 left-1/2 -translate-x-1/2 flex gap-0.5">
+                          {dots.map((c) => (
+                            <span
+                              key={c}
+                              className={`block w-1 h-1 rounded-full ${
+                                day === selectedDay
+                                  ? "bg-white"
+                                  : dotColorClass(c)
+                              }`}
+                            />
+                          ))}
+                        </span>
+                      )}
+                    </button>
                   )}
                 </div>
               );
@@ -471,7 +565,9 @@ export default function Dashboard() {
           ) : (
             events.map((event) => (
               <div key={event.id} className="flex items-start gap-3">
-                <div className={`w-2 h-2 rounded-full mt-1 ${event.color}`}></div>
+                <div
+                  className={`w-2 h-2 rounded-full mt-1 ${event.color}`}
+                ></div>
                 <div className="flex-1">
                   <p className="text-xs text-gray-600 mb-1">{event.time}</p>
                   <p className="text-sm font-medium text-gray-900">

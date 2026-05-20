@@ -11,7 +11,7 @@ export const maxDuration = 60;
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
 
-// Quiz generation — NO AI, NO external APIs. Inline TypeScript port of the
+// Quiz generation, NO AI, NO external APIs. Inline TypeScript port of the
 // Python extractor so the route works in `next dev` without a Python deploy.
 
 function tidyText(raw: string): string {

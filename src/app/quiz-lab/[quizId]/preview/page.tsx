@@ -20,8 +20,8 @@ export default function QuizPreview({
   }
 
   return (
-    <div className="min-h-screen bg-white px-14.75 py-11.5">
-      <div className="flex items-center justify-between mb-8">
+    <div className="min-h-dvh bg-white px-4 sm:px-6 md:px-10 lg:px-14.75 py-6 md:py-11.5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8">
         <Link
           href="/quiz-lab"
           className="flex items-center gap-2 text-black-primary hover:text-indigo-primary transition-colors"
@@ -30,7 +30,7 @@ export default function QuizPreview({
           <span className="text-sm font-medium">Back to Quizzes</span>
         </Link>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             onClick={() => toast.success("Download started")}
             className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 text-black-primary hover:bg-gray-50 transition-colors"

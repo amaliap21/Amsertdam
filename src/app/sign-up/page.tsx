@@ -29,17 +29,31 @@ export default function SignUpPage() {
     }
     setLoading(true);
     try {
+      // Server-side sign-up that auto-confirms the email so the user can
+      // sign in immediately. Skips the "check your email" round-trip that
+      // surfaces as "Invalid login credentials" if the user signs in
+      // before clicking the confirmation link.
+      const resp = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const body = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(body.error || `Sign-up failed (${resp.status})`);
+      }
+
+      // Establish a session immediately.
       const supabase = createClient();
-      const { error } = await supabase.auth.signUp({
+      const { error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/dashboard`,
-        },
       });
-      if (error) throw error;
-      toast.success("Check your email to confirm — then sign in");
-      router.push("/sign-in");
+      if (signInError) throw signInError;
+
+      toast.success("Account created");
+      router.push("/dashboard");
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Sign up failed");
     } finally {
@@ -65,13 +79,14 @@ export default function SignUpPage() {
   };
 
   return (
-    <div className="flex min-h-screen w-full bg-white">
+    <div className="flex min-h-dvh w-full bg-white">
       <div className="relative hidden w-1/2 overflow-hidden lg:block">
         <Image
           src="/laptop-sign.jpg"
           alt="RealTrack"
           fill
           className="object-cover"
+          sizes="(min-width: 1024px) 38vw, 100vw"
           priority
         />
       </div>

@@ -109,8 +109,8 @@ export default function QuizLab() {
   }, [fetchInitial]);
 
   return (
-    <div className="min-h-screen bg-white px-14.75 py-11.5">
-      <header className="flex justify-between items-start mb-12">
+    <div className="min-h-dvh bg-white px-4 sm:px-6 md:px-10 lg:px-14.75 py-6 md:py-11.5">
+      <header className="mb-12 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h1 className="text-[28px] font-semibold text-black-primary mb-2">
             Quiz Lab
@@ -120,8 +120,9 @@ export default function QuizLab() {
           </p>
         </div>
         <button
+          data-tour="create-quiz"
           onClick={() => setShowCreateModal(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-indigo-primary text-white rounded-lg hover:bg-indigo-600 transition-colors"
+          className="self-auto inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-primary px-4 py-2.5 text-white transition-colors hover:bg-indigo-600"
         >
           <CirclePlus size={18} />
           Create New Quiz
@@ -129,7 +130,7 @@ export default function QuizLab() {
       </header>
 
       <section>
-        <div className="flex justify-between items-center mb-6">
+        <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-xl font-semibold text-black-primary">
             Your Quizzes
           </h2>
@@ -145,11 +146,11 @@ export default function QuizLab() {
               No quizzes yet
             </p>
             <p className="text-sm text-gray-primary">
-              Click <span className="font-medium text-indigo-primary">Create New Quiz</span> to upload course material — we&apos;ll build a practice quiz.
+              Click <span className="font-medium text-indigo-primary">Create New Quiz</span> to upload course material, we&apos;ll build a practice quiz.
             </p>
           </div>
         ) : (
-        <div className="grid grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           {quizzes.map((quiz) => (
             <article
               key={quiz.id}
@@ -185,7 +186,7 @@ export default function QuizLab() {
                 </div>
                 <Link
                   href={`/quiz-lab/${quiz.id}/take`}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-primary text-white text-sm rounded-lg hover:bg-indigo-600 transition-colors flex-shrink-0"
+                  className="flex shrink-0 items-center gap-1.5 rounded-lg bg-indigo-primary px-3 py-1.5 text-sm text-white transition-colors hover:bg-indigo-600"
                 >
                   <Play size={14} />
                   Take Quiz

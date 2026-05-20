@@ -1,4 +1,4 @@
-// TypeScript port of api/python/flashcard_extractor.py — runs in Next's
+// TypeScript port of api/python/flashcard_extractor.py, runs in Next's
 // Node runtime so the route works in `next dev` and on Vercel without
 // needing the Python function to be deployed. The algorithm is line-for-line
 // equivalent: pattern matching + cloze deletion, no AI.
@@ -100,14 +100,14 @@ function stripPdfArtifacts(text: string): string {
 
 // Drop everything after a "References" / "Daftar Pustaka" / "Bibliography"
 // heading, and drop the front-matter (title page, author affiliations) before
-// the first content heading. What's left is the body — the only part of an
+// the first content heading. What's left is the body, the only part of an
 // academic paper that should produce flashcards.
 function isolateBody(text: string): string {
   let body = text;
 
   // 1. Cut the references list. PDF extracts often glue "DAFTAR PUSTAKA" onto
   // the end of the previous line, so we don't require a newline before it.
-  // Pick the LAST occurrence — refs are always at the end.
+  // Pick the LAST occurrence, refs are always at the end.
   const refsRe = /\b(?:references|daftar\s+pustaka|bibliography|works\s+cited)\b/gi;
   let lastRefsIdx = -1;
   let m: RegExpExecArray | null;
@@ -121,7 +121,7 @@ function isolateBody(text: string): string {
   // 2. Cut the front-matter. Academic PDFs from pdf-parse glue the title
   // page, author list, and affiliations onto one long line ending right
   // before "ABSTRAK"/"ABSTRACT"/"PENDAHULUAN". Slice from the document
-  // start up to the FIRST occurrence of any of those headings — academic
+  // start up to the FIRST occurrence of any of those headings, academic
   // papers always put them near the top, so first-match is reliable.
   // We deliberately don't constrain position: short documents put the
   // heading 50%+ into the text, and missing the cut means front-matter
@@ -157,7 +157,7 @@ export function isSectionHeading(term: string): boolean {
 }
 
 // Citation-shaped sentences look like content because they have rare nouns,
-// but they're noise — author lists, journal volumes/pages, etc.
+// but they're noise, author lists, journal volumes/pages, etc.
 function looksLikeCitation(sentence: string): boolean {
   // Two or more "Surname Initials," tokens in a row
   // → "Scott MRV, Chandler J, Olmstead S"
@@ -182,12 +182,12 @@ function looksLikeCitation(sentence: string): boolean {
       sentence,
     )
   ) return true;
-  // Numbered reference line: "1. Author, Title, Journal..." — a bare digit
+  // Numbered reference line: "1. Author, Title, Journal...", a bare digit
   // followed by a period followed by capitalized surname.
   if (/^\s*\d+\.\s+[A-Z][a-z]+(?:\s+[A-Z]{1,5})?,/.test(sentence)) return true;
   // Editor / "dalam" (Indonesian for "in") citation context
   if (/\b(?:Editor|Editors?|dalam\s+The)\b/i.test(sentence) && /\(/.test(sentence)) return true;
-  // "Kata Kunci: …" / "Keywords: …" — front-matter metadata. These look
+  // "Kata Kunci: …" / "Keywords: …", front-matter metadata. These look
   // content-rich (terms separated by commas) but are useless for cards.
   if (/^\s*(?:Kata\s+Kunci|Keywords?)\s*:/i.test(sentence)) return true;
   return false;
@@ -223,7 +223,7 @@ function looksLikeAffiliation(sentence: string): boolean {
   // surviving pipes mid-body are likely content tables, not headers.
   const pipeCount = (sentence.match(/\|/g) ?? []).length;
   if (pipeCount >= 3 && sentence.length < 120) return true;
-  // Strong byline signal: VOL.+NO. on the same line — even if long, it's
+  // Strong byline signal: VOL.+NO. on the same line, even if long, it's
   // a header that escaped the artifact scrubber.
   if (/\bVOL\.?\s*\d+\b/i.test(sentence) && /\bNO\.?\s*\d+\b/i.test(sentence)) return true;
   return false;
@@ -343,7 +343,7 @@ function extractDefinitionPairs(sentence: string): Array<[string, string]> {
 
 // Term/definition separator. We accept `:`, em-dash, en-dash, and a
 // stand-alone hyphen surrounded by whitespace, but NOT a hyphen with no
-// whitespace on either side — otherwise terms like "Kolagen tipe I-III"
+// whitespace on either side, otherwise terms like "Kolagen tipe I-III"
 // get split into "Kolagen tipe I" / "III adalah ...".
 const COLON_DASH_RE = /^\s*([A-ZА-Я][\w\s\-]{1,60}?)\s*(?::|—|–|\s-\s)\s*(.{10,280})$/;
 
@@ -437,7 +437,7 @@ export function extractFlashcards(
     cards.push({ front, back });
   };
 
-  // Strategy 1 + 2 — definition patterns.
+  // Strategy 1 + 2, definition patterns.
   for (const sent of sentences) {
     if (cards.length >= maxCards) break;
     for (const [term, defn] of extractDefinitionPairs(sent)) {
@@ -450,7 +450,7 @@ export function extractFlashcards(
     }
   }
 
-  // Strategy 3 — cloze fallback. Try first with the strict 4-char minimum,
+  // Strategy 3, cloze fallback. Try first with the strict 4-char minimum,
   // then re-run with a 3-char floor if we still have nothing.
   if (cards.length < maxCards) {
     const termFreq = new Map<string, number>();
@@ -475,7 +475,7 @@ export function extractFlashcards(
     if (cards.length === 0) tryCloze(3);
   }
 
-  // Strategy 4 — last resort: take the longest words and pair each with the
+  // Strategy 4, last resort: take the longest words and pair each with the
   // sentence they appear in. Guarantees a non-empty result as long as the
   // text has any meaningful tokens at all.
   if (cards.length === 0) {

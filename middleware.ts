@@ -4,12 +4,11 @@ import { createServerClient } from "@supabase/ssr";
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
 
-  // Only refresh the auth session on requests that actually need it. API
-  // routes use the service-role admin client (not user auth), and adding a
-  // 100-500ms Supabase auth round-trip to every fetch is why the dashboard
-  // was taking 6 seconds to render its course list.
+  // Skip static assets only. API routes DO need the auth refresh, they use
+  // the service-role admin client but still call getUserId() to scope queries
+  // by user_id; without a refresh, an expired access token returns null and
+  // queries fall back to the unscoped path, leaking other users' data.
   const pathname = request.nextUrl.pathname;
-  if (pathname.startsWith("/api/")) return response;
   if (pathname.startsWith("/_next/")) return response;
   if (pathname === "/favicon.ico" || /\.[a-z0-9]+$/i.test(pathname)) return response;
 
@@ -21,10 +20,16 @@ export async function middleware(request: NextRequest) {
         getAll() {
           return request.cookies.getAll();
         },
+        // Standard Supabase SSR template: build the response once after
+        // mutating request cookies, then mirror each cookie onto it. The
+        // previous loop recreated `response` for every cookie, dropping any
+        // earlier cookies that had already been written.
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
+          cookiesToSet.forEach(({ name, value }) => {
             request.cookies.set(name, value);
-            response = NextResponse.next({ request });
+          });
+          response = NextResponse.next({ request });
+          cookiesToSet.forEach(({ name, value, options }) => {
             response.cookies.set(name, value, options);
           });
         },
@@ -33,7 +38,7 @@ export async function middleware(request: NextRequest) {
   );
 
   // getSession() reads cookies locally and refreshes the access token only
-  // when needed — no unconditional round-trip to the auth server.
+  // when needed, no unconditional round-trip to the auth server.
   await supabase.auth.getSession();
 
   return response;
@@ -41,8 +46,8 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Skip Next internals, static files, and all /api/* routes (those use the
-    // admin client and don't need a per-request auth check).
-    "/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    // Skip Next internals and static files. /api/* IS included so API routes
+    // get a fresh session cookie before they call getUserId().
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

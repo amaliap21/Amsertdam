@@ -156,8 +156,8 @@ function rankAction(tier: string, task: CanonicalTask): string {
   const days = safeFloat(task.deadline_days, 7);
   const name = taskName(task as unknown as Record<string, unknown>);
   if (tier === "HIGH") {
-    if (days <= 2) return `Start ${name} today — deadline is critical.`;
-    return `Tackle ${name} first thing — high impact.`;
+    if (days <= 2) return `Start ${name} today, deadline is critical.`;
+    return `Tackle ${name} first thing, high impact.`;
   }
   if (tier === "MEDIUM") return `Schedule ${name} after HIGH priority tasks.`;
   return `Do ${name} only if time permits.`;

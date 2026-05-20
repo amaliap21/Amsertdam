@@ -31,9 +31,9 @@ interface SacrificeTaskInput {
 }
 
 function focusAdvice(days: number, weight: number): string {
-  if (days <= 3) return `Deadline in ${Math.round(days)} day(s) — prioritise now.`;
-  if (weight >= 30) return `Worth ${weight}% of grade — invest time here.`;
-  return "Good return on effort — do it fully.";
+  if (days <= 3) return `Deadline in ${Math.round(days)} day(s), prioritise now.`;
+  if (weight >= 30) return `Worth ${weight}% of grade, invest time here.`;
+  return "Good return on effort, do it fully.";
 }
 
 function minimalAdvice(weight: number): string {
@@ -41,7 +41,7 @@ function minimalAdvice(weight: number): string {
 }
 
 function sacrificeAdvice(weight: number, hours: number): string {
-  if (weight <= 5) return "Very small grade contribution — safe to skip entirely.";
+  if (weight <= 5) return "Very small grade contribution, safe to skip entirely.";
   if (hours >= 10) return `Too costly (${hours}h) for a ${weight}% task. Consider submitting a basic attempt only.`;
   return "Low efficiency. Submit minimal work to capture partial credit and redirect energy to higher-value tasks.";
 }
@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
       let advice: string;
 
       if (item.done >= 80) {
-        tier = "FOCUS"; advice = "Almost done — finish it to lock in the grade.";
+        tier = "FOCUS"; advice = "Almost done, finish it to lock in the grade.";
       } else if (hoursUsed + item.effHours <= availableHours) {
         if (item.efficiency >= 0.08) {
           tier = "FOCUS"; advice = focusAdvice(item.days, item.weight);
@@ -94,7 +94,7 @@ export async function POST(req: NextRequest) {
       } else {
         const remaining = availableHours - hoursUsed;
         if (item.efficiency >= 0.12 && remaining >= item.effHours * 0.5) {
-          tier = "MINIMAL"; advice = `Time is tight — spend only ${Math.round(remaining)}h on this.`;
+          tier = "MINIMAL"; advice = `Time is tight, spend only ${Math.round(remaining)}h on this.`;
           hoursUsed = availableHours;
         } else {
           tier = "SACRIFICE"; advice = sacrificeAdvice(item.weight, item.hours);

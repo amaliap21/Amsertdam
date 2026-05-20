@@ -4,7 +4,7 @@ import {
   analyzeEffortImpact,
 } from "@/lib/python-ports/priority-analysis";
 
-// Mirror of api/python/priority_analysis.py — same input/output schema so the
+// Mirror of api/python/priority_analysis.py, same input/output schema so the
 // front-end can target this URL in dev and the Vercel Python function in prod.
 
 export async function POST(req: NextRequest) {

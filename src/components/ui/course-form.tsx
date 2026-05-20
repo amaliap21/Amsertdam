@@ -33,6 +33,10 @@ function diffHours(start: string, end: string): number {
 }
 
 export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
+  // Lock the submit button after first click so a rapid second click can't
+  // produce a duplicate POST. The parent unmounts this form on success, so
+  // we only need to handle the "click → in-flight" window.
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({
     courseName: "",
     credits: 0,
@@ -69,12 +73,15 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
       scheduleEntries:
         prev.scheduleEntries.length === 1
           ? prev.scheduleEntries
-          : prev.scheduleEntries.filter((_, entryIndex) => entryIndex !== index),
+          : prev.scheduleEntries.filter(
+              (_, entryIndex) => entryIndex !== index,
+            ),
     }));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
 
     if (formData.credits < 0) {
       alert("Credits cannot be negative.");
@@ -136,15 +143,16 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
       }[],
     };
 
+    setIsSubmitting(true);
     onSubmit(newCourse);
   };
 
   return (
     <div
-      className="fixed inset-0 flex justify-center items-center z-50"
+      className="fixed inset-0 flex items-end justify-center p-2 sm:items-center sm:p-4 z-50"
       style={{ background: "rgba(0, 0, 0, 0.64)" }}
     >
-      <div className="bg-white rounded-2xl shadow-lg w-125 p-6 relative">
+      <div className="relative w-[calc(100vw-0.5rem)] max-w-[20.5rem] max-h-[90dvh] overflow-y-auto rounded-2xl bg-white px-2.5 pb-2.5 pt-9 shadow-xl sm:w-full sm:max-w-lg sm:px-6 sm:pb-6 sm:pt-6">
         {/* Close button */}
         <button
           onClick={onCancel}
@@ -154,8 +162,8 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
         </button>
 
         {/* Header */}
-        <div className="mb-6">
-          <h2 className="text-xl font-semibold text-black-primary">
+        <div className="mb-5 sm:mb-6">
+          <h2 className="text-lg font-semibold text-black-primary sm:text-xl">
             Add New Course
           </h2>
           <p className="text-sm text-gray-primary mt-1">
@@ -164,7 +172,7 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
           {/* Course Name */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -177,7 +185,7 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
               onChange={(e) =>
                 setFormData({ ...formData, courseName: e.target.value })
               }
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent"
+              className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent sm:px-4"
               required
             />
           </div>
@@ -197,7 +205,7 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
                 const safe = Number.isNaN(parsed) ? 0 : Math.max(0, parsed);
                 setFormData({ ...formData, credits: safe });
               }}
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent appearance-none"
+              className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent appearance-none sm:px-4"
               required
             />
             <p className="text-xs text-gray-500 mt-1">
@@ -223,7 +231,7 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
                     e.target.value === "" ? "" : Number(e.target.value),
                 })
               }
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent appearance-none"
+              className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent appearance-none sm:px-4"
               required
             />
             <p className="text-xs text-gray-500 mt-1">
@@ -247,16 +255,21 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
             </div>
 
             {formData.scheduleEntries.map((entry, index) => (
-              <div key={index} className="flex items-end gap-2">
-                <div className="grid grid-cols-3 gap-3 flex-1 min-w-0">
+              <div
+                key={index}
+                className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-2"
+              >
+                <div className="grid grid-cols-1 gap-3 flex-1 min-w-0 sm:grid-cols-3">
                   <div className="min-w-0">
                     <label className="block text-xs font-medium text-gray-700 mb-2">
                       Day
                     </label>
                     <select
                       value={entry.day}
-                      onChange={(e) => updateScheduleEntry(index, "day", e.target.value)}
-                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent appearance-none bg-white text-sm"
+                      onChange={(e) =>
+                        updateScheduleEntry(index, "day", e.target.value)
+                      }
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent appearance-none bg-white"
                     >
                       <option value="">Select day</option>
                       <option value="Monday">Monday</option>
@@ -269,27 +282,67 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
                     </select>
                   </div>
 
-                  <div className="min-w-0">
+                  <div className="min-w-0 w-full">
                     <label className="block text-xs font-medium text-gray-700 mb-2">
                       Start Time
                     </label>
+
                     <input
                       type="time"
                       value={entry.startTime}
-                      onChange={(e) => updateScheduleEntry(index, "startTime", e.target.value)}
-                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-sm"
+                      onChange={(e) =>
+                        updateScheduleEntry(index, "startTime", e.target.value)
+                      }
+                      className="
+                        w-full
+                        min-w-0
+                        max-w-full
+                        px-2 sm:px-3
+                        py-2.5
+                        border border-gray-300
+                        rounded-lg
+                        text-base sm:text-sm
+                        focus:outline-none
+                        focus:ring-2
+                        focus:ring-indigo-primary
+                        focus:border-transparent
+                        overflow-hidden
+                      "
+                      style={{
+                        WebkitAppearance: "none",
+                      }}
                     />
                   </div>
 
-                  <div className="min-w-0">
+                  <div className="min-w-0 w-full">
                     <label className="block text-xs font-medium text-gray-700 mb-2">
                       End Time
                     </label>
+
                     <input
                       type="time"
                       value={entry.endTime}
-                      onChange={(e) => updateScheduleEntry(index, "endTime", e.target.value)}
-                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-sm"
+                      onChange={(e) =>
+                        updateScheduleEntry(index, "endTime", e.target.value)
+                      }
+                      className="
+                        w-full
+                        min-w-0
+                        max-w-full
+                        px-2 sm:px-3
+                        py-2.5
+                        border border-gray-300
+                        rounded-lg
+                        text-base sm:text-sm
+                        focus:outline-none
+                        focus:ring-2
+                        focus:ring-indigo-primary
+                        focus:border-transparent
+                        overflow-hidden
+                      "
+                      style={{
+                        WebkitAppearance: "none",
+                      }}
                     />
                   </div>
                 </div>
@@ -300,7 +353,7 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
                     onClick={() => removeScheduleEntry(index)}
                     title="Remove this time"
                     aria-label="Remove this time"
-                    className="shrink-0 h-11 w-11 flex items-center justify-center rounded-lg border border-gray-300 text-gray-500 hover:text-red-500 hover:border-red-300"
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 text-gray-500 hover:text-red-500 hover:border-red-300 sm:h-11 sm:w-11"
                   >
                     <Trash2 size={16} />
                   </button>
@@ -312,7 +365,8 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
           {/* Submit Button */}
           <button
             type="submit"
-            className="w-full mt-6 px-4 py-3 bg-indigo-primary text-white rounded-lg font-medium hover:bg-indigo-500 transition-colors flex items-center justify-center gap-2"
+            disabled={isSubmitting}
+            className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-primary px-4 py-3 font-medium text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <svg
               width="20"
@@ -335,7 +389,7 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
                 strokeLinecap="round"
               />
             </svg>
-            Add Course
+            {isSubmitting ? "Adding…" : "Add Course"}
           </button>
         </form>
       </div>

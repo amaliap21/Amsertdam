@@ -1,9 +1,9 @@
 "use client";
 
-import { Download, CirclePlus, Sparkles, Loader2 } from "lucide-react";
+import { Download, CirclePlus, Sparkles, Loader2, PencilLine, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import ExportModal from "@/components/ui/export-form";
-import AddScheduleModal from "@/components/ui/add-schedule-form";
+import AddScheduleModal, { type ScheduleInitial } from "@/components/ui/add-schedule-form";
 import toast from "react-hot-toast";
 import { useStore, type TaskItem } from "@/store/use-store";
 import {
@@ -48,7 +48,7 @@ function fmtClock(h: number, m: number): string {
 function parseTimeRange(raw: string): { start: number; end: number } | null {
   if (!raw) return null;
   const match = raw.match(
-    /^\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*[-–]\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*$/i
+    /^\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*[-–]\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*$/i,
   );
   if (!match) return null;
   const start = parseClock(match[1]);
@@ -84,7 +84,7 @@ export default function PriorityPlanner() {
 
   const extraEvents = plannerEvents as ScheduleEvent[];
   const setExtraEvents = (
-    updater: ScheduleEvent[] | ((prev: ScheduleEvent[]) => ScheduleEvent[])
+    updater: ScheduleEvent[] | ((prev: ScheduleEvent[]) => ScheduleEvent[]),
   ) => {
     const next = typeof updater === "function" ? updater(extraEvents) : updater;
     setPlannerEvents(next);
@@ -123,7 +123,7 @@ export default function PriorityPlanner() {
     const aiPattern = /·\s*(?:HIGH|MEDIUM|LOW)\s*\(\d/;
     const taskIds = new Set(taskEvents.map((e) => e.id));
     const extra = extraEvents.filter(
-      (e) => !taskIds.has(e.id) && !aiPattern.test(e.subject)
+      (e) => !taskIds.has(e.id) && !aiPattern.test(e.subject),
     );
     return [...taskEvents, ...extra];
   }, [taskEvents, extraEvents]);
@@ -132,11 +132,16 @@ export default function PriorityPlanner() {
   const addEventReplacingOverlaps = (incoming: ScheduleEvent) => {
     setExtraEvents((prev) => {
       const filtered = prev.filter(
-        (existing) => !eventsOverlap(existing, incoming)
+        (existing) => !eventsOverlap(existing, incoming),
       );
       return [...filtered, incoming];
     });
   };
+
+  // The event being edited (if any). When set, the AddScheduleModal opens
+  // pre-filled with this event's values and the submit path updates it in
+  // place rather than adding a new entry.
+  const [editingEvent, setEditingEvent] = useState<ScheduleEvent | null>(null);
 
   const handleAddSchedule = (data: {
     title: string;
@@ -145,6 +150,27 @@ export default function PriorityPlanner() {
     time: string;
   }) => {
     const styles = TYPE_STYLES[data.type];
+    if (editingEvent) {
+      // Update the existing manual event by id, preserving its id so any
+      // cross-page references (dashboard merging) stay stable.
+      setExtraEvents((prev) =>
+        prev.map((e) =>
+          e.id === editingEvent.id
+            ? {
+                ...e,
+                title: data.type,
+                date: data.date,
+                time: data.time,
+                subject: data.title,
+                color: styles.color,
+                bgColor: styles.bgColor,
+              }
+            : e,
+        ),
+      );
+      setEditingEvent(null);
+      return;
+    }
     addEventReplacingOverlaps({
       id: Date.now(),
       title: data.type,
@@ -155,6 +181,37 @@ export default function PriorityPlanner() {
       bgColor: styles.bgColor,
     });
   };
+
+  // Is this event one the user added manually (vs derived from a Task Value
+  // task)? Manual events live in `extraEvents` and are editable / deletable
+  // from here; task-derived events must be managed from Task Value.
+  const taskEventIds = useMemo(
+    () => new Set(taskEvents.map((e) => e.id)),
+    [taskEvents],
+  );
+  const isManualEvent = (e: ScheduleEvent) => !taskEventIds.has(e.id);
+
+  const handleDeleteEvent = (event: ScheduleEvent) => {
+    if (!isManualEvent(event)) return;
+    if (!confirm("Delete this schedule?")) return;
+    setExtraEvents((prev) => prev.filter((e) => e.id !== event.id));
+    toast.success("Schedule deleted");
+  };
+
+  const handleEditEvent = (event: ScheduleEvent) => {
+    if (!isManualEvent(event)) return;
+    setEditingEvent(event);
+    setIsAddScheduleOpen(true);
+  };
+
+  const editingInitial: ScheduleInitial | null = editingEvent
+    ? {
+        title: editingEvent.subject,
+        type: editingEvent.title,
+        date: editingEvent.date,
+        time: editingEvent.time,
+      }
+    : null;
 
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSummary, setAiSummary] = useState<string | null>(null);
@@ -189,7 +246,7 @@ export default function PriorityPlanner() {
         const candidate = new Date(`${isoDate}T00:00:00`);
         if (Number.isNaN(candidate.getTime())) return 7;
         const diff = Math.round(
-          (candidate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+          (candidate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
         );
         return Math.max(0, diff);
       };
@@ -266,7 +323,7 @@ export default function PriorityPlanner() {
           end_time: block.end_time,
           hours_allocated: block.hours_allocated,
           tier: block.tier,
-        }))
+        })),
       );
 
       const taskWord = json.summary.total_tasks === 1 ? "task" : "tasks";
@@ -279,7 +336,7 @@ export default function PriorityPlanner() {
       setAiSummary(
         `Scheduled ${json.summary.total_tasks} ${taskWord} across ${json.summary.days_needed} ${dayWord} ` +
           `(${json.summary.total_hours_needed}h). ` +
-          `${json.summary.high_priority} HIGH, ${json.summary.medium_priority} MEDIUM, ${json.summary.low_priority} LOW.${warningNote}`
+          `${json.summary.high_priority} HIGH, ${json.summary.medium_priority} MEDIUM, ${json.summary.low_priority} LOW.${warningNote}`,
       );
       toast.success("Schedule generated", { id: t });
     } catch (err) {
@@ -292,7 +349,9 @@ export default function PriorityPlanner() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState<number>(new Date().getDate());
 
-  const [selected, setSelected] = useState<"Day" | "Week" | "Month">("Day");
+  // Default to "Week" so a newly-added task with a future deadline is
+  // visible immediately instead of being hidden behind today's empty Day view.
+  const [selected, setSelected] = useState<"Day" | "Week" | "Month">("Week");
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -388,18 +447,18 @@ export default function PriorityPlanner() {
     selected.toLowerCase() === "day"
       ? currentDate.toLocaleDateString("en-US", { weekday: "long" })
       : selected.toLowerCase() === "week"
-      ? currentDate.toLocaleDateString("en-US", { weekday: "long" })
-      : selected.toLowerCase() === "month"
-      ? currentDate.toLocaleDateString("en-US", { weekday: "long" })
-      : "";
+        ? currentDate.toLocaleDateString("en-US", { weekday: "long" })
+        : selected.toLowerCase() === "month"
+          ? currentDate.toLocaleDateString("en-US", { weekday: "long" })
+          : "";
 
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isAddScheduleOpen, setIsAddScheduleOpen] = useState(false);
 
   return (
-    <div className="flex flex-col gap-9 px-14.75 py-11.5 w-full">
+    <div className="flex w-full flex-col gap-9 px-4 sm:px-6 md:px-10 lg:px-14.75 py-6 md:py-11.5">
       {/* Header */}
-      <div className="flex flex-row justify-between items-center">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-col">
           <h1 className="text-[28px] font-semibold text-black-primary">
             Priority Planner
@@ -409,11 +468,12 @@ export default function PriorityPlanner() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center self-auto">
           <button
+            data-tour="plan-with-ai"
             onClick={handleAiSchedule}
             disabled={aiLoading || !tasks.length}
-            className="flex flex-row gap-2 px-3 py-2 rounded-lg border border-indigo-primary text-indigo-primary items-center cursor-pointer hover:bg-indigo-primary/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex flex-row items-center justify-center gap-2 rounded-lg border border-indigo-primary px-3 py-2 text-indigo-primary cursor-pointer transition-colors hover:bg-indigo-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {aiLoading ? (
               <Loader2 size={16} className="animate-spin" />
@@ -424,7 +484,7 @@ export default function PriorityPlanner() {
           </button>
           <button
             onClick={() => setIsAddScheduleOpen(true)}
-            className="flex flex-row gap-2 px-3 py-2 rounded-lg bg-indigo-primary text-white items-center cursor-pointer hover:bg-indigo-500 transition-colors"
+            className="flex flex-row items-center justify-center gap-2 rounded-lg bg-indigo-primary px-3 py-2 text-white cursor-pointer transition-colors hover:bg-indigo-500"
           >
             <CirclePlus size={16} />
             Add Schedule
@@ -441,9 +501,9 @@ export default function PriorityPlanner() {
 
       {/* Content */}
       <div className="flex flex-col gap-6">
-        <div className="flex flex-row justify-between items-end">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           {/* repetition day/week/month */}
-          <div className="flex flex-row gap-18 p-2 bg-[#3D42E51A] rounded-xl">
+          <div className="flex flex-wrap gap-3 p-2 bg-[#3D42E51A] rounded-xl">
             {["Day", "Week", "Month"].map((label) => (
               <button
                 key={label}
@@ -458,7 +518,7 @@ export default function PriorityPlanner() {
           </div>
 
           {/* types */}
-          <div className="flex flex-row gap-9">
+          <div className="flex flex-wrap gap-4 xl:gap-9">
             {getFilteredEvents().map((event) => (
               <div key={event.id} className="flex flex-row items-center gap-3">
                 <div className={`w-2 h-2 rounded-full ${event.color}`}></div>
@@ -479,8 +539,8 @@ export default function PriorityPlanner() {
                 selected === "Day"
                   ? previousDay
                   : selected === "Week"
-                  ? previousWeek
-                  : previousMonth
+                    ? previousWeek
+                    : previousMonth
               }
               className="px-2 py-1 hover:bg-gray-100 rounded-lg transition-colors"
               aria-label="Previous"
@@ -505,8 +565,8 @@ export default function PriorityPlanner() {
                 selected === "Day"
                   ? nextDay
                   : selected === "Week"
-                  ? nextWeek
-                  : nextMonth
+                    ? nextWeek
+                    : nextMonth
               }
               className="px-2 py-1 hover:bg-gray-100 rounded-lg transition-colors"
               aria-label="Next"
@@ -530,7 +590,7 @@ export default function PriorityPlanner() {
       </div>
 
       <div
-        className="flex flex-col p-7 items-start self-stretch gap-5"
+        className="flex flex-col p-4 sm:p-7 items-start self-stretch gap-5 overflow-x-hidden"
         style={{
           borderRadius: "16px",
           border: "1px solid rgba(204, 204, 204, 0.75)",
@@ -551,13 +611,35 @@ export default function PriorityPlanner() {
               key={event.id}
               className={`flex flex-col gap-2 px-5 py-3 w-full rounded-lg ${event.bgColor}`}
             >
-              <div className="flex flex-row justify-start items-center gap-3">
-                <div className={`w-3 h-3 rounded-full ${event.color}`}></div>
-                <p className="text-sm font-semibold text-black-primary">
-                  {event.time}
-                </p>
+              <div className="flex flex-row justify-between items-start gap-3">
+                <div className="flex flex-row items-center gap-3 min-w-0">
+                  <div className={`w-3 h-3 rounded-full shrink-0 ${event.color}`}></div>
+                  <p className="text-sm font-semibold text-black-primary">
+                    {event.time}
+                  </p>
+                </div>
+                {isManualEvent(event) && (
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      title="Edit schedule"
+                      onClick={() => handleEditEvent(event)}
+                      className="text-indigo-primary hover:text-indigo-600"
+                    >
+                      <PencilLine size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      title="Delete schedule"
+                      onClick={() => handleDeleteEvent(event)}
+                      className="text-red-500 hover:text-red-600"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                )}
               </div>
-              <p className="text-sm font-medium text-gray-primary">
+              <p className="text-sm font-medium text-gray-primary break-words">
                 [{event.label ?? event.title}] {event.subject}
               </p>
             </div>
@@ -565,9 +647,9 @@ export default function PriorityPlanner() {
         )}
       </div>
 
-      {/* All upcoming events grouped by date — always visible regardless of the day filter above */}
+      {/* All upcoming events grouped by date, always visible regardless of the day filter above */}
       <div
-        className="flex flex-col p-7 items-start self-stretch gap-5"
+        className="flex flex-col p-4 sm:p-7 items-start self-stretch gap-5 overflow-x-hidden"
         style={{
           borderRadius: "16px",
           border: "1px solid rgba(204, 204, 204, 0.75)",
@@ -613,15 +695,37 @@ export default function PriorityPlanner() {
                       key={event.id}
                       className={`flex flex-col gap-2 px-5 py-3 w-full rounded-lg ${event.bgColor}`}
                     >
-                      <div className="flex flex-row justify-start items-center gap-3">
-                        <div
-                          className={`w-3 h-3 rounded-full ${event.color}`}
-                        ></div>
-                        <p className="text-sm font-semibold text-black-primary">
-                          {event.time}
-                        </p>
+                      <div className="flex flex-row justify-between items-start gap-3">
+                        <div className="flex flex-row items-center gap-3 min-w-0">
+                          <div
+                            className={`w-3 h-3 rounded-full shrink-0 ${event.color}`}
+                          ></div>
+                          <p className="text-sm font-semibold text-black-primary">
+                            {event.time}
+                          </p>
+                        </div>
+                        {isManualEvent(event) && (
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              type="button"
+                              title="Edit schedule"
+                              onClick={() => handleEditEvent(event)}
+                              className="text-indigo-primary hover:text-indigo-600"
+                            >
+                              <PencilLine size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              title="Delete schedule"
+                              onClick={() => handleDeleteEvent(event)}
+                              className="text-red-500 hover:text-red-600"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        )}
                       </div>
-                      <p className="text-sm font-medium text-gray-primary">
+                      <p className="text-sm font-medium text-gray-primary break-words">
                         [{event.label ?? event.title}] {event.subject}
                       </p>
                     </div>
@@ -633,7 +737,7 @@ export default function PriorityPlanner() {
         )}
       </div>
 
-      {/* Gantt chart — calendar-based, shown after AI schedule generation */}
+      {/* Gantt chart, calendar-based, shown after AI schedule generation */}
       {ganttData && ganttData.length > 0 && <GanttChart data={ganttData} />}
 
       <div className="flex justify-center">
@@ -654,8 +758,12 @@ export default function PriorityPlanner() {
 
       <AddScheduleModal
         isOpen={isAddScheduleOpen}
-        onClose={() => setIsAddScheduleOpen(false)}
+        onClose={() => {
+          setIsAddScheduleOpen(false);
+          setEditingEvent(null);
+        }}
         onAdd={handleAddSchedule}
+        initial={editingInitial}
       />
     </div>
   );

@@ -53,13 +53,14 @@ export default function SignInPage() {
   };
 
   return (
-    <div className="flex min-h-screen w-full bg-white">
+    <div className="flex min-h-dvh w-full bg-white">
       <div className="relative hidden w-1/2 overflow-hidden lg:block">
         <Image
           src="/laptop-sign.jpg"
           alt="RealTrack"
           fill
           className="object-cover"
+          sizes="(min-width: 1024px) 50vw, 100vw"
           priority
         />
       </div>

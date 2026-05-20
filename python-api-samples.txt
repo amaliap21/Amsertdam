@@ -1,5 +1,5 @@
 ================================================================================
-AMSERTDAM — PYTHON API JSON SAMPLES (request + response for every feature)
+AMSERTDAM, PYTHON API JSON SAMPLES (request + response for every feature)
 All endpoints are POST and routed via vercel.json -> api/python/*.py
 ================================================================================
 
@@ -176,9 +176,9 @@ RESPONSE:
 ------- RESPONSE -------
 {
   "tasks": [
-    { "name": "Final Project",   "tier": "FOCUS",     "efficiency": 0.0438, "advice": "Worth 30% of grade — invest time here." },
+    { "name": "Final Project",   "tier": "FOCUS",     "efficiency": 0.0438, "advice": "Worth 30% of grade, invest time here." },
     { "name": "Discussion Post", "tier": "MINIMAL",   "efficiency": 0.039,  "advice": "Moderate impact (2%). Do it, but cap your time." },
-    { "name": "Reading Quiz",    "tier": "SACRIFICE", "efficiency": 0.0098, "advice": "Very small grade contribution — safe to skip entirely." }
+    { "name": "Reading Quiz",    "tier": "SACRIFICE", "efficiency": 0.0098, "advice": "Very small grade contribution, safe to skip entirely." }
   ],
   "hours_allocated": 9.0,
   "available_hours": 25,
@@ -258,7 +258,7 @@ RESPONSE:
       "priority_score": 0.6724,
       "tier": "HIGH",
       "priority_source": "effective_hybrid",
-      "action": "Tackle Mathematics Midterm first thing — high impact.",
+      "action": "Tackle Mathematics Midterm first thing, high impact.",
       "analysis": { "task_name": "Mathematics Midterm", "composite_score": 0.683 }
     },
     {

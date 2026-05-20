@@ -1,18 +1,24 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
-import { getUserId } from '@/lib/get-user-id'
+import { requireUserId } from '@/lib/get-user-id'
 
 export async function GET() {
   try {
-    const userId = await getUserId()
-    let query = supabaseAdmin.from('flashcard_decks').select('*').order('created_at', { ascending: false })
-    if (userId) query = query.eq('user_id', userId)
-    const { data, error } = await query
+    const auth = await requireUserId()
+    if (auth.response) return auth.response
+    const { userId } = auth
+
+    const { data, error } = await supabaseAdmin
+      .from('flashcard_decks')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
     if (error) {
       if (String(error.message).includes('created_at')) {
-        let q2 = supabaseAdmin.from('flashcard_decks').select('*')
-        if (userId) q2 = q2.eq('user_id', userId)
-        const { data: d2, error: e2 } = await q2
+        const { data: d2, error: e2 } = await supabaseAdmin
+          .from('flashcard_decks')
+          .select('*')
+          .eq('user_id', userId)
         if (e2) return NextResponse.json({ error: e2.message }, { status: 500 })
         return NextResponse.json(d2)
       }
@@ -26,15 +32,19 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
+    const auth = await requireUserId()
+    if (auth.response) return auth.response
+    const { userId } = auth
+
     const body = await req.json()
     const payload = {
       title: body.title,
       description: body.description ?? null,
       card_count: Array.isArray(body.cards) ? body.cards.length : body.card_count ?? 0,
       cards: body.cards ?? null,
+      user_id: userId,
     }
-    const userId = await getUserId()
-    const { data, error } = await supabaseAdmin.from('flashcard_decks').insert({ ...payload, ...(userId ? { user_id: userId } : {}) }).select().single()
+    const { data, error } = await supabaseAdmin.from('flashcard_decks').insert(payload).select().single()
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json(data)
   } catch (err) {
@@ -44,13 +54,18 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
+    const auth = await requireUserId()
+    if (auth.response) return auth.response
+    const { userId } = auth
+
     const { searchParams } = new URL(req.url)
     const id = searchParams.get('id')
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
-    const userId = await getUserId()
-    let del = supabaseAdmin.from('flashcard_decks').delete().eq('id', id)
-    if (userId) del = del.eq('user_id', userId)
-    const { error } = await del
+    const { error } = await supabaseAdmin
+      .from('flashcard_decks')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json({ success: true })
   } catch (err) {

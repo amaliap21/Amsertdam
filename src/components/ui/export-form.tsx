@@ -145,36 +145,68 @@ export default function ExportModal({ isOpen, onClose, events }: Props) {
   );
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl p-6 w-[400px] relative">
-        <button onClick={onClose} className="absolute right-4 top-4">
+    <div
+      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-3 sm:p-4 overflow-y-auto"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl p-5 sm:p-6 w-full max-w-[22rem] sm:max-w-md max-h-[90dvh] overflow-y-auto relative my-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          onClick={onClose}
+          className="absolute right-3 top-3 sm:right-4 sm:top-4 flex h-8 w-8 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+          aria-label="Close"
+        >
           <X size={18} />
         </button>
 
-        <h2 className="text-lg font-semibold mb-2">Export Schedule</h2>
-        <p className="text-sm text-gray-500 mb-4">
+        <h2 className="text-base sm:text-lg font-semibold mb-1 sm:mb-2 pr-8">Export Schedule</h2>
+        <p className="text-xs sm:text-sm text-gray-500 mb-4">
           Choose the date range and format
         </p>
 
         {/* Start Date */}
+        <label
+          htmlFor="export-start-date"
+          className="block text-xs font-medium text-gray-700 mb-1.5"
+        >
+          Start date
+        </label>
         <input
+          id="export-start-date"
           type="date"
-          className="w-full border rounded-lg p-2 mb-3"
+          className="w-full border border-gray-300 rounded-lg px-3 py-2.5 mb-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-primary"
           value={startDate}
           onChange={(e) => setStartDate(e.target.value)}
         />
 
         {/* End Date */}
+        <label
+          htmlFor="export-end-date"
+          className="block text-xs font-medium text-gray-700 mb-1.5"
+        >
+          End date
+        </label>
         <input
+          id="export-end-date"
           type="date"
-          className="w-full border rounded-lg p-2 mb-3"
+          className="w-full border border-gray-300 rounded-lg px-3 py-2.5 mb-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-primary"
           value={endDate}
           onChange={(e) => setEndDate(e.target.value)}
         />
 
         {/* Format */}
+        <label
+          htmlFor="export-format"
+          className="block text-xs font-medium text-gray-700 mb-1.5"
+        >
+          Format
+        </label>
         <select
-          className="w-full border rounded-lg p-2 mb-4"
+          id="export-format"
+          className="w-full border border-gray-300 bg-white rounded-lg px-3 py-2.5 mb-5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-primary"
           value={format}
           onChange={(e) => setFormat(e.target.value)}
         >
@@ -183,9 +215,10 @@ export default function ExportModal({ isOpen, onClose, events }: Props) {
         </select>
 
         <button
+          type="button"
           onClick={handleDownload}
           disabled={isInvalid}
-          className="w-full bg-indigo-primary text-white py-2 rounded-lg disabled:opacity-50"
+          className="w-full bg-indigo-primary text-white py-2.5 rounded-lg text-sm font-medium hover:bg-indigo-500 transition disabled:opacity-50"
         >
           Download {format === "excel" ? "Excel" : "PDF"}
         </button>

@@ -1,10 +1,18 @@
 "use client";
 
-import { useState } from "react";
-import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { LogOut, House, Crosshair, BookOpen, Calendar, BookOpenCheck, MessagesSquare } from "lucide-react";
-import HamburgerIcon from "@/components/icons/hamburger-icon";
+import Image from "next/image";
+import { usePathname } from "next/navigation";
+import {
+  LogOut,
+  House,
+  Crosshair,
+  BookOpen,
+  Calendar,
+  BookOpenCheck,
+  MessagesSquare,
+  X,
+} from "lucide-react";
 import FlashcardsIcon from "@/components/icons/flashcards-icon";
 import { createClient } from "@/lib/supabase/client";
 
@@ -14,26 +22,24 @@ type MenuItem = {
   icon: React.ReactNode;
 };
 
-export default function Sidebar({ className }: { className?: string }) {
+type SidebarProps = {
+  className?: string;
+  // Controlled from the layout so the navbar's mobile hamburger can toggle it.
+  isOpen: boolean;
+  onToggle: () => void;
+};
+
+export default function Sidebar({ className, isOpen, onToggle }: SidebarProps) {
   const pathname = usePathname();
-  const [isOpen, setIsOpen] = useState(true);
 
   const menuItems: MenuItem[] = [
-    {
-      label: "Dashboard",
-      href: "/dashboard",
-      icon: <House size={18} />,
-    },
+    { label: "Dashboard", href: "/dashboard", icon: <House size={18} /> },
     {
       label: "Passing Target",
       href: "/passing-target",
       icon: <Crosshair size={18} />,
     },
-    {
-      label: "Task Value",
-      href: "/task-value",
-      icon: <BookOpen size={18} />,
-    },
+    { label: "Task Value", href: "/task-value", icon: <BookOpen size={18} /> },
     {
       label: "Priority Planner",
       href: "/priority-planner",
@@ -44,11 +50,7 @@ export default function Sidebar({ className }: { className?: string }) {
       href: "/flashcards",
       icon: <FlashcardsIcon size={18} />,
     },
-    {
-      label: "Quiz Lab",
-      href: "/quiz-lab",
-      icon: <BookOpenCheck size={18} />,
-    },
+    { label: "Quiz Lab", href: "/quiz-lab", icon: <BookOpenCheck size={18} /> },
     {
       label: "Study Companion",
       href: "/study-companion",
@@ -58,24 +60,42 @@ export default function Sidebar({ className }: { className?: string }) {
 
   return (
     <aside
-      className={`${
-        isOpen ? "w-64" : "w-16"
-      } min-h-screen bg-[#3d42e50d] text-white flex flex-col justify-between pl-4 py-6 shrink-0 transition-all duration-300 ${className}`}
+      className={`
+        ${isOpen ? "translate-x-0" : "-translate-x-full"}
+        lg:translate-x-0
+        fixed lg:static inset-y-0 left-0 z-40
+        w-[82vw] max-w-80 lg:w-64
+        h-dvh bg-white border-r border-gray-200 shadow-xl lg:shadow-none
+        shrink-0 transition-transform duration-300
+        ${className ?? ""}
+      `}
     >
-      {/* TOP */}
-      <div>
-        {/* LOGO & COLLAPSE */}
-        <div className="flex items-center justify-between mb-10 px-2">
+      <div
+        className="flex h-full flex-col px-4 py-5 lg:px-5"
+        style={{ paddingTop: "max(1.25rem, env(safe-area-inset-top))" }}
+      >
+        <div className="mb-6 flex items-center justify-between gap-3">
+          <Link href="/dashboard" className="flex items-center gap-2 lg:hidden">
+            <Image
+              src="/logo.svg"
+              alt="RealTrack"
+              width={152}
+              height={53}
+              className="h-10 w-auto"
+              priority
+            />
+          </Link>
+
           <button
-            className="cursor-pointer rounded"
-            onClick={() => setIsOpen(!isOpen)}
+            className="flex h-9 w-9 items-center justify-center rounded-full text-black-primary hover:bg-gray-100 lg:hidden"
+            onClick={onToggle}
+            aria-label={isOpen ? "Close sidebar" : "Open sidebar"}
           >
-            <HamburgerIcon size={20} className="stroke-black-primary" />
+            <X size={18} />
           </button>
         </div>
 
-        {/* MENU */}
-        <nav className="space-y-2">
+        <nav className="flex-1 space-y-2 overflow-y-auto">
           {menuItems.map((item) => {
             const isActive = pathname === item.href;
 
@@ -83,48 +103,42 @@ export default function Sidebar({ className }: { className?: string }) {
               <Link
                 key={item.label}
                 href={item.href}
-                className={`relative flex items-center gap-3 px-2 py-3 rounded-md transition font-inter
+                className={`relative flex items-center gap-3 rounded-xl px-3 py-3 font-inter transition
                   ${
                     isActive
-                      ? "text-indigo-primary stroke-indigo-primary"
-                      : "text-black-primary stroke-black-primary hover:text-indigo-primary hover:stroke-indigo-primary"
+                      ? "text-indigo-primary stroke-indigo-primary bg-indigo-primary/5"
+                      : "text-black-primary stroke-black-primary hover:text-indigo-primary hover:stroke-indigo-primary hover:bg-gray-50"
                   }
                 `}
               >
                 {item.icon}
-                {isOpen && (
-                  <span className="text-sm font-medium">{item.label}</span>
-                )}
+                <span className="text-sm font-medium">{item.label}</span>
                 {isActive && (
-                  <span className="absolute right-0 top-0 h-full w-1 bg-indigo-primary rounded-tr-md rounded-br-md"></span>
+                  <span className="absolute right-0 top-0 h-full w-1 rounded-tr-xl rounded-br-xl bg-indigo-primary" />
                 )}
               </Link>
             );
           })}
         </nav>
-      </div>
 
-      {/* BOTTOM */}
-      <div className="space-y-6">
-        {/* LOGOUT */}
-        <button
-          className="flex items-center gap-3 w-full px-2 text-black-primary hover:text-indigo-primary rounded-md transition cursor-pointer"
-          onClick={async () => {
-            try {
-              const supabase = createClient();
-              await supabase.auth.signOut();
-            } catch {}
-            try {
-              localStorage.removeItem("realtrack-storage");
-            } catch {}
-            window.location.href = "/sign-in";
-          }}
-        >
-          <LogOut size={18} />
-          {isOpen && (
+        <div className="mt-6">
+          <button
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-black-primary transition hover:bg-gray-50 hover:text-indigo-primary"
+            onClick={async () => {
+              try {
+                const supabase = createClient();
+                await supabase.auth.signOut();
+              } catch {}
+              try {
+                localStorage.removeItem("realtrack-storage");
+              } catch {}
+              window.location.href = "/sign-in";
+            }}
+          >
+            <LogOut size={18} />
             <span className="font-inter text-sm font-medium">Logout</span>
-          )}
-        </button>
+          </button>
+        </div>
       </div>
     </aside>
   );

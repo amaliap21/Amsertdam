@@ -1,5 +1,5 @@
 """
-OCR Image — detect alphanumeric characters in an image and (optionally)
+OCR Image, detect alphanumeric characters in an image and (optionally)
 classify them with a custom-trained CNN.
 
 Pipeline:
@@ -18,7 +18,7 @@ pipeline is enough to *detect* alphanumeric regions; the small CNN
 provides the character labels.
 
 If the trained model isn't on disk yet, the endpoint still returns the
-bboxes so the frontend can cover the regions — the labels just default
+bboxes so the frontend can cover the regions, the labels just default
 to "?". When the user types their answer the frontend can grade against
 that placeholder or skip grading.
 """

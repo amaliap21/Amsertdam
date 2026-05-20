@@ -3,7 +3,9 @@
     "allow": [
       "Bash(git lfs *)",
       "PowerShell($ts = \\(npx tsc --noEmit 2>&1\\); $errors = \\($ts | Out-String\\) -split \"`n\" | Where-Object { $_ -match \"error TS\" }; \"TS errors: $\\($errors.Count\\)\"; $errors | Select-Object -First 10)",
-      "Bash(npx next *)"
+      "Bash(npx next *)",
+      "Bash(node -e \"const p=JSON.parse\\(require\\('fs'\\).readFileSync\\(0\\)\\); console.log\\('version:', p.version\\); console.log\\('main:', p.main, '| module:', p.module\\); console.log\\('exports:', JSON.stringify\\(p.exports, null, 2\\).slice\\(0, 300\\)\\)\")",
+      "Bash(npx tsc *)"
     ]
   }
 }

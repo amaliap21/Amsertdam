@@ -57,7 +57,7 @@ export default function QuizResult({
   }, [quiz, total, correct, answers, recordAttempt]);
 
   return (
-    <div className="min-h-screen bg-white px-14.75 py-11.5">
+    <div className="min-h-dvh bg-white px-4 sm:px-6 md:px-10 lg:px-14.75 py-6 md:py-11.5">
       <div className="mb-10">
         <Link
           href="/quiz-lab"
@@ -78,16 +78,16 @@ export default function QuizResult({
         <p className="text-base text-gray-primary mb-6">
           You answered {correct} out of {total} questions correctly
         </p>
-        <div className="flex items-center justify-center gap-3">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3">
           <Link
             href={`/quiz-lab/${quiz.id}/take`}
-            className="rounded-lg border border-gray-300 px-6 py-2.5 text-sm font-medium text-black-primary hover:bg-gray-50 transition-colors"
+            className="text-center rounded-lg border border-gray-300 px-6 py-2.5 text-sm font-medium text-black-primary hover:bg-gray-50 transition-colors"
           >
             Retake Quiz
           </Link>
           <Link
             href={`/study-companion/${quiz.id}/chat`}
-            className="rounded-lg bg-indigo-primary px-6 py-2.5 text-sm font-medium text-white hover:opacity-90 transition"
+            className="text-center rounded-lg bg-indigo-primary px-6 py-2.5 text-sm font-medium text-white hover:opacity-90 transition"
           >
             Review with Study Companion
           </Link>

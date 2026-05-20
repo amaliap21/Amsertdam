@@ -163,8 +163,8 @@ def _analysis_priority_action(score: float, task: dict) -> str:
     days = _safe_float(task.get("deadline_days", 7), 7)
     if score >= 0.5:
         if days <= 2:
-            return f"Start {name} today — deadline is critical."
-        return f"Tackle {name} first thing — high impact."
+            return f"Start {name} today, deadline is critical."
+        return f"Tackle {name} first thing, high impact."
     if score >= 0.3:
         return f"Schedule {name} after HIGH priority tasks."
     return f"Do {name} only if time permits."
@@ -1040,8 +1040,8 @@ def _build_rank_action(tier: str, task: dict) -> str:
     name = _task_name(task) if task else "this task"
     if tier == "HIGH":
         if days <= 2:
-            return f"Start {name} today — deadline is critical."
-        return f"Tackle {name} first thing — high impact."
+            return f"Start {name} today, deadline is critical."
+        return f"Tackle {name} first thing, high impact."
     elif tier == "MEDIUM":
         return f"Schedule {name} after HIGH priority tasks."
     else:

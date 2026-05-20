@@ -358,7 +358,7 @@ export const useStore = create<AppState>()(
           try { await fetch(`/api/quizzes?id=${id}`, { method: 'DELETE' }) } catch {}
           // Cascade-delete attempts that belong to this quiz so its Study
           // Companion entry disappears automatically. Study Companion is
-          // strictly a live mirror of "quizzes you can still take" — once
+          // strictly a live mirror of "quizzes you can still take", once
           // the quiz is gone, the review/chat for it should be gone too.
           set((state) => ({
             quizzes: state.quizzes.filter((q) => q.id !== id),
@@ -408,7 +408,7 @@ export const useStore = create<AppState>()(
                 qResp.ok ? qResp.json() : Promise.resolve(null),
                 cResp.ok ? cResp.json() : Promise.resolve(null),
               ])
-              // Never overwrite local data with empty API results — protects
+              // Never overwrite local data with empty API results, protects
               // against transient API failures, missing env vars, etc.
               const cur = get()
               const next: Partial<AppState> = {}
