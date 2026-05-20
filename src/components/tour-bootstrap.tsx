@@ -35,19 +35,30 @@ export default function TourBootstrap() {
       tour.start();
     };
 
-    // Auto-start once on first /dashboard visit for new users.
-    if (
-      !autoStartedRef.current &&
+    // Two triggers will start the tour on /dashboard:
+    //   1. First-visit auto-start (legacy behaviour).
+    //   2. A "pending tour" flag set by sign-in / sign-up just before the
+    //      redirect, so the tour fires the moment the user lands here —
+    //      even if AuthSync's reload-on-account-switch interrupted the
+    //      first attempt.
+    const shouldStart =
       pathname === "/dashboard" &&
-      !isTourCompleted()
-    ) {
+      (sessionStorage.getItem("realtrack-pending-tour") === "1" ||
+        !isTourCompleted());
+
+    if (!autoStartedRef.current && shouldStart) {
       autoStartedRef.current = true;
+      try {
+        sessionStorage.removeItem("realtrack-pending-tour");
+      } catch {
+        /* ignore */
+      }
       (async () => {
         const tour = await createTour(router);
         if (cancelled) return;
         // Small delay so the dashboard finishes its first paint before the
         // overlay drops in.
-        setTimeout(() => tour.start(), 350);
+        setTimeout(() => tour.start(), 500);
       })();
     }
 

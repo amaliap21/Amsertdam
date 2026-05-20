@@ -7,7 +7,14 @@ type CourseFormProps = {
     courseName: string;
     credits: number;
     threshold: number | null;
-    scheduleEntries: { day: string; startTime: string; endTime: string }[];
+    scheduleEntries: {
+      day: string;
+      /** Specific calendar date for this session (YYYY-MM-DD).
+       *  Lets the user see exactly which day a "Monday 9-11" maps to. */
+      date: string;
+      startTime: string;
+      endTime: string;
+    }[];
     typeTracking: string;
     assessments?: {
       name: string;
@@ -23,6 +30,15 @@ type CourseFormProps = {
   }) => void;
   onCancel: () => void;
 };
+
+// "2026-05-20" → "Wednesday". Used to auto-fill the Day select when the
+// user picks a date, so the two stay in sync without manual juggling.
+function dayNameFromIso(iso: string): string {
+  if (!iso) return "";
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-US", { weekday: "long" });
+}
 
 function diffHours(start: string, end: string): number {
   if (!start || !end) return 0;
@@ -41,19 +57,27 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
     courseName: "",
     credits: 0,
     threshold: "" as number | "",
-    scheduleEntries: [{ day: "", startTime: "", endTime: "" }],
+    scheduleEntries: [{ day: "", date: "", startTime: "", endTime: "" }],
   });
 
   const updateScheduleEntry = (
     index: number,
-    field: "day" | "startTime" | "endTime",
+    field: "day" | "date" | "startTime" | "endTime",
     value: string,
   ) => {
     setFormData((prev) => ({
       ...prev,
-      scheduleEntries: prev.scheduleEntries.map((entry, entryIndex) =>
-        entryIndex === index ? { ...entry, [field]: value } : entry,
-      ),
+      scheduleEntries: prev.scheduleEntries.map((entry, entryIndex) => {
+        if (entryIndex !== index) return entry;
+        const next = { ...entry, [field]: value };
+        // Picking a date auto-fills the matching weekday, so the user
+        // can't end up with "Monday" + a date that's actually Friday.
+        if (field === "date") {
+          const auto = dayNameFromIso(value);
+          if (auto) next.day = auto;
+        }
+        return next;
+      }),
     }));
   };
 
@@ -62,7 +86,7 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
       ...prev,
       scheduleEntries: [
         ...prev.scheduleEntries,
-        { day: "", startTime: "", endTime: "" },
+        { day: "", date: "", startTime: "", endTime: "" },
       ],
     }));
   };
@@ -89,18 +113,26 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
     }
 
     const scheduleEntries = formData.scheduleEntries.filter(
-      (entry) => entry.day && entry.startTime && entry.endTime,
+      (entry) =>
+        entry.day && entry.date && entry.startTime && entry.endTime,
     );
 
     if (!scheduleEntries.length) {
-      alert("Please add at least one valid schedule day and time.");
+      alert("Please add at least one schedule date, day, and time.");
       return;
     }
 
     for (const entry of scheduleEntries) {
       if (entry.startTime >= entry.endTime) {
         alert(
-          `Schedule on ${entry.day}: start time (${entry.startTime}) must be earlier than end time (${entry.endTime}).`,
+          `Schedule on ${entry.day} (${entry.date}): start time (${entry.startTime}) must be earlier than end time (${entry.endTime}).`,
+        );
+        return;
+      }
+      const expectedDay = dayNameFromIso(entry.date);
+      if (expectedDay && expectedDay !== entry.day) {
+        alert(
+          `Schedule date ${entry.date} falls on ${expectedDay}, not ${entry.day}. Adjust the day or the date.`,
         );
         return;
       }
@@ -259,7 +291,22 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
                 key={index}
                 className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-2"
               >
-                <div className="grid grid-cols-1 gap-3 flex-1 min-w-0 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-3 flex-1 min-w-0 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="min-w-0 w-full">
+                    <label className="block text-xs font-medium text-gray-700 mb-2">
+                      Date
+                    </label>
+                    <input
+                      type="date"
+                      value={entry.date}
+                      onChange={(e) =>
+                        updateScheduleEntry(index, "date", e.target.value)
+                      }
+                      className="w-full min-w-0 max-w-full px-2 sm:px-3 py-2.5 border border-gray-300 rounded-lg text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent overflow-hidden"
+                      style={{ WebkitAppearance: "none" }}
+                    />
+                  </div>
+
                   <div className="min-w-0">
                     <label className="block text-xs font-medium text-gray-700 mb-2">
                       Day

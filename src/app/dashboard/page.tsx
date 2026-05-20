@@ -103,7 +103,7 @@ export default function Dashboard() {
           "linear-gradient(288deg, rgba(229, 61, 61, 0.20) 34.38%, rgba(245, 150, 56, 0.20) 95.91%)",
         type: "Focus First",
         icon: <CircleAlert size={20} className="text-[#E53D3D]" />,
-        image: "red-task.svg",
+        image: "/red-task.svg",
         taskCount: counts["Focus First"],
         taskCountColor: "#E53D3D",
         text: "High impact, worth your effort.",
@@ -113,7 +113,7 @@ export default function Dashboard() {
           "linear-gradient(288deg, rgba(223, 229, 61, 0.20) 34.38%, rgba(223, 245, 56, 0.20) 95.91%)",
         type: "If You Have Energy",
         icon: <CircleQuestionMark size={20} className="text-[#E5B03D]" />,
-        image: "yellow-task.svg",
+        image: "/yellow-task.svg",
         taskCount: counts["If You Have Energy"],
         taskCountColor: "#E5B03D",
         text: "Helpful but this task is not critical.",
@@ -123,7 +123,7 @@ export default function Dashboard() {
           "linear-gradient(288deg, var(--Green, rgba(132, 224, 163, 0.20)) 34.38%, var(--Teal, rgba(110, 175, 187, 0.20)) 95.91%)",
         type: "Safe to Minimize",
         icon: <CircleCheck size={20} className="text-[#73C58F]" />,
-        image: "green-task.svg",
+        image: "/green-task.svg",
         taskCount: counts["Safe to Minimize"],
         taskCountColor: "#73C58F",
         text: "Low impact, safe to do less.",
@@ -180,10 +180,7 @@ export default function Dashboard() {
           ? "bg-teal-primary"
           : "bg-blue-primary";
     return plannerEvents
-      .filter(
-        (e) =>
-          !aiPattern.test(e.subject) && !taskIds.has(String(e.id)),
-      )
+      .filter((e) => !aiPattern.test(e.subject) && !taskIds.has(String(e.id)))
       .map((e) => ({
         id: `planner-${e.id}`,
         isoDate: e.date,
@@ -284,7 +281,7 @@ export default function Dashboard() {
   return (
     <div className="flex flex-col xl:flex-row justify-between gap-6 md:gap-8 xl:gap-16 px-4 sm:px-6 md:px-8 lg:px-10 xl:px-14 py-6 md:py-8 xl:py-12">
       {/* Overviews */}
-      <div className="flex flex-col gap-10 w-full max-w-full xl:w-1/2">
+      <div className="flex flex-col gap-10 w-full max-w-full xl:w-3/5">
         {/* Greetings */}
         <div data-tour="dashboard-hero" className="flex flex-col gap-3">
           <h1 className="text-[28px] font-semibold text-black-primary">
@@ -313,41 +310,55 @@ export default function Dashboard() {
               See Tasks
             </a>
           </div>
-          <div className="flex flex-col md:flex-row gap-6">
+          {/*
+            Card layout mirrors the outer dashboard layout:
+              - Below xl: calendar has dropped beneath the overview, so this
+                column is full-width and 3 cards across fit comfortably.
+              - At xl+:  calendar sits to the right and this column is only
+                ~half the viewport. 3 cards across would squeeze each one,
+                so collapse to a single vertical stack instead.
+          */}
+          <div className="grid grid-cols-1 2xl:grid-cols-3 gap-4 sm:gap-6">
             {taskItems.map((item, index) => (
               <div
                 key={index}
-                className="flex w-full flex-col gap-2.5 rounded-lg pt-4 md:w-1/3"
+                className="flex w-full min-w-0 flex-col gap-3 rounded-2xl px-4 pt-4"
                 style={{
                   background: item.cardColor,
                 }}
               >
-                <div className="flex flex-row justify-between items-center px-4">
-                  <h1 className="text-sm text-black-primary font-medium ">
+                {/* Header: title left, status icon right */}
+                <div className="flex flex-row justify-between items-center">
+                  <h1 className="text-sm font-semibold text-black-primary">
                     {item.type}
                   </h1>
                   {item.icon}
                 </div>
 
-                <div className="flex flex-row gap-1">
+                {/* Body: illustration on the left, metric + description on the right */}
+                <div className="flex flex-row items-center gap-3">
                   <Image
                     src={item.image}
                     alt={`${item.type} Tasks Graph`}
-                    width={105}
-                    height={87}
-                    style={{ width: "auto", height: "auto" }}
+                    width={88}
+                    height={73}
+                    className="shrink-0"
+                    style={{ width: "88px", height: "auto" }}
                   />
-                  <div>
-                    <h1 className="text-sm">
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <p className="text-sm leading-tight text-black-primary">
                       <span
-                        className="text-xl"
+                        className="text-2xl font-semibold leading-none"
                         style={{ color: item.taskCountColor }}
                       >
                         {item.taskCount}
                       </span>{" "}
                       task
-                    </h1>
-                    <p className="text-xs text-gray-primary">{item.text}</p>
+                    </p>
+                    {/* Locked to two lines so all three cards line up. */}
+                    <p className="text-xs leading-snug text-gray-primary break-words line-clamp-2 min-h-[2rem]">
+                      {item.text}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -419,7 +430,7 @@ export default function Dashboard() {
       </div>
 
       {/* Calendar */}
-      <div className="w-full xl:max-w-md bg-white xl:w-1/2">
+      <div className="w-full xl:max-w-md bg-white xl:w-2/5">
         {/* Header Section */}
         <div className="flex flex-col gap-3 mb-10">
           <h1 className="text-2xl font-semibold text-gray-800">

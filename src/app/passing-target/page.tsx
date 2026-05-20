@@ -50,7 +50,14 @@ type Courses = {
   id?: string;
   courseName: string;
   credits: number;
-  scheduleEntries?: { day: string; startTime: string; endTime: string }[];
+  scheduleEntries?: {
+    day: string;
+    /** Specific calendar date for this session (YYYY-MM-DD). Optional so
+     *  older rows without a date still load. */
+    date?: string;
+    startTime: string;
+    endTime: string;
+  }[];
   typeTracking: string;
   threshold?: number | null;
   passingGrade?: number;
@@ -921,6 +928,7 @@ export default function PassingTarget() {
                           key={`${entry.day}-${entry.startTime}-${scheduleIndex}`}
                           className="rounded-full bg-gray-100 px-2.5 py-1 text-[11px] sm:text-xs text-gray-700 whitespace-nowrap"
                         >
+                          {entry.date ? `${entry.date} · ` : ""}
                           {entry.day} {entry.startTime}–{entry.endTime}
                         </span>
                       ))

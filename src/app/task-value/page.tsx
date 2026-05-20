@@ -392,38 +392,45 @@ export default function TaskValue() {
         <h2 className="text-[20px] font-semibold text-black-primary mb-5">
           What to Work on First?
         </h2>
-        <div className="flex flex-col gap-6 md:flex-row">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           {priorityCards.map((card) => (
             <div
               key={card.priority}
-              className="flex justify-between w-full flex-col gap-2.5 rounded-lg px-4 pt-4 md:w-1/3"
+              className="flex w-full min-w-0 flex-col gap-3 rounded-2xl px-4 py-4"
               style={{
                 background: card.gradient,
               }}
             >
-              <div className="flex flex-row justify-between items-center px-4">
-                <h1 className="text-sm text-black-primary font-medium">
+              {/* Header: title left, status icon right */}
+              <div className="flex flex-row justify-between items-center">
+                <h1 className="text-sm font-semibold text-black-primary">
                   {card.priority}
                 </h1>
                 <div style={{ color: card.iconColor }}>{card.icon}</div>
               </div>
 
-              <div className="flex flex-row gap-1">
+              {/* Body: illustration on the left, metric + description on the right */}
+              <div className="flex flex-row items-center gap-3">
                 <Image
                   src={card.image}
                   alt={`${card.priority} Tasks`}
-                  width={105}
-                  height={87}
-                  style={{ width: "auto", height: "auto" }}
+                  width={88}
+                  height={73}
+                  className="shrink-0"
+                  style={{ width: "88px", height: "auto" }}
                 />
-                <div>
-                  <h1 className="text-sm">
-                    <span className="text-xl" style={{ color: card.textColor }}>
+                <div className="flex min-w-0 flex-1 flex-col gap-1">
+                  <p className="text-sm leading-tight text-black-primary">
+                    <span
+                      className="text-2xl font-semibold leading-none"
+                      style={{ color: card.textColor }}
+                    >
                       {getTasksByPriority(card.priority).length}
                     </span>{" "}
                     task
-                  </h1>
-                  <p className="text-xs text-gray-primary">
+                  </p>
+                  {/* Locked to two lines so all three cards line up. */}
+                  <p className="text-xs leading-snug text-gray-primary break-words line-clamp-2 min-h-[2rem]">
                     {card.description}
                   </p>
                 </div>

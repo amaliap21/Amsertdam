@@ -16,7 +16,16 @@ const inter = Inter({
   display: "swap",
 });
 
-const PUBLIC_PATHS = new Set(["/", "/sign-in", "/sign-up"]);
+const PUBLIC_PATHS = new Set([
+  "/",
+  "/sign-in",
+  "/sign-up",
+  "/check-email",
+  "/forgot-password",
+  "/reset-password",
+  "/terms",
+  "/privacy",
+]);
 
 export default function RootLayout({
   children,

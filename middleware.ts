@@ -39,7 +39,29 @@ export async function middleware(request: NextRequest) {
 
   // getSession() reads cookies locally and refreshes the access token only
   // when needed, no unconditional round-trip to the auth server.
-  await supabase.auth.getSession();
+  //
+  // When the cookie holds a refresh token the auth server no longer knows
+  // about (user deleted, token revoked, project reset), Supabase throws
+  // "Invalid Refresh Token: Refresh Token Not Found". Treat that as
+  // signed-out: swallow the throw and clear the stale cookies so the
+  // client doesn't keep re-attempting the refresh on every navigation.
+  try {
+    await supabase.auth.getSession();
+  } catch (err) {
+    const msg = String((err as Error)?.message ?? err);
+    if (/refresh token|invalid|jwt/i.test(msg)) {
+      // Local-scope signOut clears every sb-* cookie via the setAll
+      // callback above without hitting the auth server (which would
+      // also fail with the same invalid token). Breaks the refresh loop.
+      await supabase.auth
+        .signOut({ scope: "local" })
+        .catch(() => undefined);
+    } else {
+      // Unknown error — log but don't block the request. The page will
+      // render as signed-out; the user can sign in again.
+      console.error("middleware: getSession failed", err);
+    }
+  }
 
   return response;
 }

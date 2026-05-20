@@ -55,7 +55,21 @@ export default function AuthSync() {
     //    current session, the previous user's persisted data is stale.
     (async () => {
       try {
-        const { data } = await supabase.auth.getUser();
+        const { data, error } = await supabase.auth.getUser();
+        if (error) {
+          // "Invalid Refresh Token: Refresh Token Not Found" lands here.
+          // Treat as signed-out and clear the stale session so the SDK
+          // stops re-attempting the refresh on every page load.
+          const msg = String(error.message ?? "");
+          if (/refresh token|invalid|jwt/i.test(msg)) {
+            await supabase.auth
+              .signOut({ scope: "local" })
+              .catch(() => undefined);
+            localStorage.removeItem(STORAGE_KEY);
+            localStorage.removeItem(LAST_USER_KEY);
+          }
+          return;
+        }
         const currentId = data.user?.id ?? null;
         const lastId = localStorage.getItem(LAST_USER_KEY);
         if (currentId !== lastId) {

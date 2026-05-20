@@ -26,6 +26,14 @@ export default function SignInPage() {
       });
       if (error) throw error;
       toast.success("Welcome back");
+      // Signal tour-bootstrap to launch the onboarding the moment the
+      // dashboard mounts — survives the AuthSync hard-reload because
+      // it's stored in sessionStorage, not React state.
+      try {
+        sessionStorage.setItem("realtrack-pending-tour", "1");
+      } catch {
+        /* ignore */
+      }
       router.push("/dashboard");
       router.refresh();
     } catch (err) {
@@ -38,6 +46,13 @@ export default function SignInPage() {
   const handleGoogle = async () => {
     setLoading(true);
     try {
+      // Set the pending-tour flag BEFORE the OAuth redirect so it's
+      // already in sessionStorage by the time we land back on /dashboard.
+      try {
+        sessionStorage.setItem("realtrack-pending-tour", "1");
+      } catch {
+        /* ignore */
+      }
       const supabase = createClient();
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
@@ -118,7 +133,12 @@ export default function SignInPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="Please enter your email"
-                className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-black-primary placeholder:text-gray-primary focus:border-indigo-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary/20"
+                autoComplete="email"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                inputMode="email"
+                className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-base text-black-primary placeholder:text-gray-primary focus:border-indigo-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary/20"
               />
             </div>
 
@@ -136,7 +156,11 @@ export default function SignInPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Please enter your password"
-                  className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 pr-11 text-sm text-black-primary placeholder:text-gray-primary focus:border-indigo-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary/20"
+                  autoComplete="current-password"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 pr-11 text-base text-black-primary placeholder:text-gray-primary focus:border-indigo-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary/20"
                 />
                 <button
                   type="button"
@@ -149,10 +173,10 @@ export default function SignInPage() {
               </div>
               <div className="flex justify-end">
                 <Link
-                  href="#"
+                  href="/forgot-password"
                   className="text-xs font-medium text-indigo-primary hover:opacity-80"
                 >
-                  Forget Password?
+                  Forgot Password?
                 </Link>
               </div>
             </div>
