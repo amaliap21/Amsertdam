@@ -60,10 +60,18 @@ function Shell({ email }: { email?: string }) {
               )}
               . Click it to activate your account.
             </p>
-            <p className="text-xs text-gray-primary">
-              Didn&apos;t get the email? Check your spam folder, or try signing
-              up again with a different address.
-            </p>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-left text-xs text-amber-900">
+              <p className="font-medium">Can&apos;t find the email?</p>
+              <ol className="mt-1 list-decimal space-y-1 pl-4">
+                <li>Check your <strong>Spam</strong> or <strong>Promotions</strong> folder.</li>
+                <li>
+                  If it&apos;s there, mark it <strong>Not spam</strong> — next
+                  emails from RealTrack will arrive in your inbox.
+                </li>
+                <li>Wait 1–2 minutes — delivery can be slow.</li>
+                <li>The sender is <code>amsertdam@resend.dev</code>.</li>
+              </ol>
+            </div>
           </div>
           <div className="flex flex-col gap-3">
             <Link

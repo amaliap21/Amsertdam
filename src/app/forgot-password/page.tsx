@@ -78,6 +78,14 @@ export default function ForgotPasswordPage() {
                 we&apos;ve sent a password reset link. The link expires in 1
                 hour.
               </p>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-left text-xs text-amber-900">
+                <p className="font-medium">Don&apos;t see it?</p>
+                <ol className="mt-1 list-decimal space-y-1 pl-4">
+                  <li>Check <strong>Spam</strong> / <strong>Promotions</strong>.</li>
+                  <li>If it&apos;s there, mark <strong>Not spam</strong> so the next one reaches your inbox.</li>
+                  <li>Sender is <code>amsertdam@resend.dev</code>.</li>
+                </ol>
+              </div>
               <Link
                 href="/sign-in"
                 className="mt-2 w-full rounded-full bg-indigo-primary px-5 py-3 text-center text-sm font-medium text-white transition hover:opacity-90"
