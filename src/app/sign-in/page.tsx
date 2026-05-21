@@ -39,12 +39,25 @@ function SignInPageInner() {
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    // Read credentials from the form DOM, not from React state. Password
+    // managers and browser autofill commonly write the value into the
+    // <input> without firing onChange — so on the first click, React
+    // state was still empty and the request failed with "Invalid login
+    // credentials". The user could only succeed on the second click after
+    // blur synced state. Pulling from FormData makes the first click work.
+    const formData = new FormData(e.currentTarget);
+    const submittedEmail = String(formData.get("email") ?? email).trim();
+    const submittedPassword = String(formData.get("password") ?? password);
+    if (!submittedEmail || !submittedPassword) {
+      toast.error("Please enter your email and password");
+      return;
+    }
     setLoading(true);
     try {
       const supabase = createClient();
       const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+        email: submittedEmail,
+        password: submittedPassword,
       });
       if (error) throw error;
       toast.success("Welcome back");
@@ -151,6 +164,7 @@ function SignInPageInner() {
               </label>
               <input
                 id="email"
+                name="email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -174,6 +188,7 @@ function SignInPageInner() {
               <div className="relative">
                 <input
                   id="password"
+                  name="password"
                   type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}

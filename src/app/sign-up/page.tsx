@@ -25,15 +25,23 @@ export default function SignUpPage() {
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!EMAIL_RE.test(email.trim())) {
+    // Read from the form DOM (handles autofill that skips React's
+    // onChange). Falls back to React state if a name attribute is missing.
+    const fd = new FormData(e.currentTarget);
+    const submittedEmail = String(fd.get("email") ?? email).trim();
+    const submittedPassword = String(fd.get("password") ?? password);
+    const submittedConfirm = String(
+      fd.get("confirm-password") ?? confirmPassword,
+    );
+    if (!EMAIL_RE.test(submittedEmail)) {
       toast.error("Please enter a valid email address");
       return;
     }
-    if (password !== confirmPassword) {
+    if (submittedPassword !== submittedConfirm) {
       toast.error("Passwords do not match");
       return;
     }
-    if (password.length < 8) {
+    if (submittedPassword.length < 8) {
       toast.error("Password must be at least 8 characters");
       return;
     }
@@ -51,8 +59,8 @@ export default function SignUpPage() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          email,
-          password,
+          email: submittedEmail,
+          password: submittedPassword,
           agreedToTerms: true,
           origin: window.location.origin,
         }),
@@ -63,7 +71,7 @@ export default function SignUpPage() {
       }
 
       toast.success("Check your email to verify your account");
-      router.push(`/check-email?email=${encodeURIComponent(email)}`);
+      router.push(`/check-email?email=${encodeURIComponent(submittedEmail)}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Sign up failed");
     } finally {
@@ -156,6 +164,7 @@ export default function SignUpPage() {
               </label>
               <input
                 id="email"
+                name="email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -179,6 +188,7 @@ export default function SignUpPage() {
               <div className="relative">
                 <input
                   id="password"
+                  name="password"
                   type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -210,6 +220,7 @@ export default function SignUpPage() {
               <div className="relative">
                 <input
                   id="confirm-password"
+                  name="confirm-password"
                   type={showConfirmPassword ? "text" : "password"}
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}

@@ -1,5 +1,6 @@
 "use client";
 import Image from "next/image";
+import Link from "next/link";
 import React, {
   useCallback,
   useEffect,
@@ -160,7 +161,13 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
   /* ---------- instant search ---------- */
   const [searchValue, setSearchValue] = useState("");
   const [showResults, setShowResults] = useState(false);
-  const searchRef = useRef<HTMLDivElement>(null);
+  // Two refs: desktop and mobile search render side-by-side (each hidden
+  // at the other breakpoint). Sharing one ref made `searchRef.current`
+  // point to whichever rendered last (mobile), so the outside-click
+  // handler thought the desktop dropdown's anchors were "outside" and
+  // closed it on mousedown — before the click could navigate.
+  const desktopSearchRef = useRef<HTMLDivElement>(null);
+  const mobileSearchRef = useRef<HTMLDivElement>(null);
 
   const tasks = useStore((s) => s.tasks);
   const decks = useStore((s) => s.decks);
@@ -240,7 +247,10 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
   // Close search dropdown on outside click.
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const insideDesktop = desktopSearchRef.current?.contains(target) ?? false;
+      const insideMobile = mobileSearchRef.current?.contains(target) ?? false;
+      if (!insideDesktop && !insideMobile) {
         setShowResults(false);
       }
     };
@@ -285,7 +295,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
       </section>
 
       {/* ---- Search bar with instant dropdown ---- */}
-      <div ref={searchRef} className="relative hidden min-w-0 flex-1 max-w-126.25 sm:block">
+      <div ref={desktopSearchRef} className="relative hidden min-w-0 flex-1 max-w-126.25 sm:block">
         <form
           className="flex h-11 md:h-14 items-center gap-3 rounded-[100px] bg-[#F5F5F5] px-4"
           onSubmit={handleSearch}
@@ -316,7 +326,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
             ) : (
               <div className="py-2">
                 {quickResults.map((r) => (
-                  <a
+                  <Link
                     key={`${r.type}-${r.id}`}
                     href={r.href}
                     onClick={() => setShowResults(false)}
@@ -336,7 +346,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
                     <span className="text-[10px] uppercase tracking-wider text-gray-400 shrink-0">
                       {r.type}
                     </span>
-                  </a>
+                  </Link>
                 ))}
                 <button
                   type="button"
@@ -352,7 +362,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
       </div>
 
       {/* Mobile search, compact so it can sit between the hamburger and the help/profile area */}
-      <div ref={searchRef} className="relative flex min-w-0 flex-1 sm:hidden">
+      <div ref={mobileSearchRef} className="relative flex min-w-0 flex-1 sm:hidden">
         <form
           className="flex h-10 w-full items-center gap-2 rounded-full bg-[#F5F5F5] px-3"
           onSubmit={handleSearch}
@@ -383,7 +393,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
             ) : (
               <div className="py-2">
                 {quickResults.map((r) => (
-                  <a
+                  <Link
                     key={`${r.type}-${r.id}`}
                     href={r.href}
                     onClick={() => setShowResults(false)}
@@ -403,7 +413,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
                     <span className="text-[10px] uppercase tracking-wider text-gray-400 shrink-0">
                       {r.type}
                     </span>
-                  </a>
+                  </Link>
                 ))}
                 <button
                   type="button"
