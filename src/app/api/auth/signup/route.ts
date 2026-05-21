@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
-import { Resend } from "resend";
+import sgMail from "@sendgrid/mail";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 // Disposable / temporary inbox providers. Sign-ups from these domains were
@@ -152,11 +152,11 @@ export async function POST(req: Request) {
       // Supabase's built-in SMTP can fail or be rate-limited (free tier
       // caps signup emails very aggressively). When the failure is
       // specifically about delivery, fall back to creating the user via
-      // the admin API and sending the confirmation link through Resend
+      // the admin API and sending the confirmation link through SendGrid
       // directly. The account still ends up in Supabase — the user is
       // simply not relying on Supabase's SMTP relay for the email.
       if (/sending\s+(confirmation|signup)?\s*email|smtp|rate/i.test(msg)) {
-        const fallback = await sendSignupViaResend({
+        const fallback = await sendSignupViaSendGrid({
           email,
           password,
           fullName,
@@ -167,7 +167,7 @@ export async function POST(req: Request) {
             id: fallback.userId,
             email,
             needsEmailConfirmation: true,
-            via: "resend-fallback",
+            via: "sendgrid-fallback",
           });
         }
         return NextResponse.json(
@@ -204,25 +204,28 @@ export async function POST(req: Request) {
   }
 }
 
-type ResendFallbackResult =
+type SendGridFallbackResult =
   | { ok: true; userId: string | undefined; error?: never; status?: never }
   | { ok: false; userId?: never; error: string; status: number };
 
 /**
  * Create the account via the admin API and send the verification link
- * through Resend directly. Used when Supabase Auth's own SMTP relay can't
- * deliver (rate limit, transient SMTP error). Requires `RESEND_API_KEY`
- * to be set; without it we surface a clear error so the UI doesn't lie.
+ * through SendGrid directly. Used when Supabase Auth's own SMTP relay
+ * can't deliver (rate limit, transient SMTP error). Requires
+ * `SENDGRID_API_KEY` and `SENDGRID_FROM_EMAIL` (a sender verified in the
+ * SendGrid dashboard); without them we surface a clear error so the UI
+ * doesn't lie.
  */
-async function sendSignupViaResend(args: {
+async function sendSignupViaSendGrid(args: {
   email: string;
   password: string;
   fullName: string | undefined;
   redirectTo: string;
-}): Promise<ResendFallbackResult> {
+}): Promise<SendGridFallbackResult> {
   const { email, password, fullName, redirectTo } = args;
-  const resendKey = process.env.RESEND_API_KEY;
-  if (!resendKey) {
+  const apiKey = process.env.SENDGRID_API_KEY;
+  const fromAddress = process.env.SENDGRID_FROM_EMAIL;
+  if (!apiKey || !fromAddress) {
     return {
       ok: false,
       status: 503,
@@ -270,36 +273,38 @@ async function sendSignupViaResend(args: {
   if (!userId) userId = linkData.user?.id;
 
   const actionLink: string = linkData.properties.action_link;
-  const fromAddress =
-    process.env.RESEND_FROM_EMAIL ?? "amsertdam@resend.dev";
 
   try {
-    const resend = new Resend(resendKey);
-    const send = await resend.emails.send({
-      from: `RealTrack <${fromAddress}>`,
-      to: [email],
+    sgMail.setApiKey(apiKey);
+    await sgMail.send({
+      from: { email: fromAddress, name: "RealTrack" },
+      to: email,
       subject: "Verify your RealTrack account",
       html: buildVerificationEmailHtml({ actionLink, fullName }),
     });
-    if (send.error) {
-      return {
-        ok: false,
-        status: 502,
-        error: `Email provider rejected the message: ${send.error.message ?? "unknown error"}`,
-      };
-    }
   } catch (err) {
+    // SendGrid surfaces details under `response.body.errors` on rejection
+    // (invalid sender, rate limit, malformed payload). Bubble the most
+    // useful one up so we don't show the user a generic "send failed".
+    const detail = extractSendGridError(err);
     return {
       ok: false,
       status: 502,
-      error:
-        err instanceof Error
-          ? `Email send failed: ${err.message}`
-          : "Email send failed.",
+      error: `Email provider rejected the message: ${detail}`,
     };
   }
 
   return { ok: true, userId };
+}
+
+function extractSendGridError(err: unknown): string {
+  const e = err as {
+    message?: string;
+    response?: { body?: { errors?: { message?: string }[] } };
+  };
+  const first = e?.response?.body?.errors?.[0]?.message;
+  if (first) return first;
+  return e?.message ?? "unknown error";
 }
 
 function buildVerificationEmailHtml(args: {

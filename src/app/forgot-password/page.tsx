@@ -83,7 +83,7 @@ export default function ForgotPasswordPage() {
                 <ol className="mt-1 list-decimal space-y-1 pl-4">
                   <li>Check <strong>Spam</strong> / <strong>Promotions</strong>.</li>
                   <li>If it&apos;s there, mark <strong>Not spam</strong> so the next one reaches your inbox.</li>
-                  <li>Sender is <code>amsertdam@resend.dev</code>.</li>
+                  <li>Sender is <code>amsertdamrealtrack@gmail.com</code>.</li>
                 </ol>
               </div>
               <Link

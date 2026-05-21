@@ -69,7 +69,7 @@ function Shell({ email }: { email?: string }) {
                   emails from RealTrack will arrive in your inbox.
                 </li>
                 <li>Wait 1–2 minutes — delivery can be slow.</li>
-                <li>The sender is <code>amsertdam@resend.dev</code>.</li>
+                <li>The sender is <code>amsertdamrealtrack@gmail.com</code>.</li>
               </ol>
             </div>
           </div>
