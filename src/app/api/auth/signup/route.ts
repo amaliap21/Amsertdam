@@ -1,10 +1,52 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase/admin";
+import { createServerClient } from "@supabase/ssr";
+
+// Disposable / temporary inbox providers. Sign-ups from these domains were
+// being shown a success toast even though confirmation mail never reached
+// the recipient (mailticking.com, etc.) — block them at the boundary so the
+// UI no longer lies about delivery.
+const DISPOSABLE_EMAIL_DOMAINS = new Set<string>([
+  "mailticking.com",
+  "mailinator.com",
+  "guerrillamail.com",
+  "guerrillamail.info",
+  "guerrillamail.net",
+  "guerrillamail.org",
+  "guerrillamailblock.com",
+  "sharklasers.com",
+  "grr.la",
+  "10minutemail.com",
+  "10minutemail.net",
+  "tempmail.com",
+  "temp-mail.org",
+  "temp-mail.io",
+  "tempmailo.com",
+  "tmpmail.org",
+  "tmpmail.net",
+  "yopmail.com",
+  "yopmail.fr",
+  "trashmail.com",
+  "trashmail.net",
+  "throwawaymail.com",
+  "getnada.com",
+  "nada.email",
+  "dispostable.com",
+  "fakeinbox.com",
+  "maildrop.cc",
+  "mintemail.com",
+  "moakt.com",
+  "mohmal.com",
+  "emailondeck.com",
+  "anonbox.net",
+  "mytemp.email",
+]);
 
 /**
- * Server-side sign-up that creates the user WITHOUT auto-confirming.
- * Supabase Auth then sends a confirmation email; the user follows the
- * link to `/auth/callback`, which establishes the session.
+ * Server-side sign-up. Creates the user via the public `auth.signUp`
+ * endpoint so Supabase's mail provider actually delivers the confirmation
+ * link — the previous flow used `admin.createUser` + `admin.generateLink`,
+ * which generates a link but does NOT send mail, so the UI was reporting
+ * success even though no email was ever delivered.
  *
  * The client also passes `agreedToTerms: true`; we reject sign-ups that
  * haven't accepted the Terms, so a bypass of the UI checkbox can't
@@ -48,6 +90,17 @@ export async function POST(req: Request) {
       );
     }
 
+    const domain = email.split("@")[1] ?? "";
+    if (DISPOSABLE_EMAIL_DOMAINS.has(domain)) {
+      return NextResponse.json(
+        {
+          error:
+            "Disposable email addresses aren't supported. Please use a permanent email.",
+        },
+        { status: 400 },
+      );
+    }
+
     // The browser passes its own origin so the redirect link in the
     // verification email points back at the right host (works for both
     // localhost and the Vercel deployment without a hard-coded URL).
@@ -57,19 +110,32 @@ export async function POST(req: Request) {
         ? body.origin
         : reqUrl.origin;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const admin = supabaseAdmin as any;
+    // Use the anon client with a no-op cookie store. signUp() through the
+    // public endpoint triggers Supabase's standard verification email
+    // (controlled by the project's "Confirm email" setting and SMTP
+    // configuration). The admin / generateLink path did NOT send mail.
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return [];
+          },
+          setAll() {
+            /* no-op: this request must NOT establish a session */
+          },
+        },
+      },
+    );
 
-    // Use generateLink so we control the redirectTo and Supabase emails
-    // the confirmation link automatically.
-    const { data, error } = await admin.auth.admin.createUser({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      // Email NOT auto-confirmed; Supabase sends the confirmation email
-      // (provided "Confirm email" is enabled in the Auth dashboard, which
-      // is the default).
-      email_confirm: false,
-      user_metadata: fullName ? { full_name: fullName } : undefined,
+      options: {
+        emailRedirectTo: `${origin}/auth/callback?next=%2Fdashboard`,
+        data: fullName ? { full_name: fullName } : undefined,
+      },
     });
 
     if (error) {
@@ -83,20 +149,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: msg || "Sign-up failed." }, { status: 400 });
     }
 
-    // Trigger the confirmation email via Supabase's signup-link generator,
-    // so the link points to our /auth/callback?next=/dashboard.
-    const { error: linkError } = await admin.auth.admin.generateLink({
-      type: "signup",
-      email,
-      password,
-      options: {
-        redirectTo: `${origin}/auth/callback?next=%2Fdashboard`,
-      },
-    });
-    if (linkError) {
-      // Non-fatal: the account exists, the user can use "Forgot password"
-      // or request a resend. Just log it for visibility.
-      console.error("signup: generateLink failed", linkError);
+    // Supabase returns a user with `identities: []` when the email is
+    // already taken on a project that has "Confirm email" enabled — no
+    // mail is sent in that case either. Surface it instead of pretending
+    // the verification email is on its way.
+    const identities = (data.user as { identities?: unknown[] } | null)
+      ?.identities;
+    if (Array.isArray(identities) && identities.length === 0) {
+      return NextResponse.json(
+        { error: "An account with this email already exists. Try signing in." },
+        { status: 409 },
+      );
     }
 
     return NextResponse.json({

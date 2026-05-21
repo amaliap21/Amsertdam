@@ -1,6 +1,31 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
+// Paths that don't require an authenticated session. Everything else under the
+// app root is treated as protected and redirected to /sign-in for anonymous
+// visitors. Keep in sync with the PUBLIC_PATHS list in src/app/layout.tsx.
+const PUBLIC_PATHS = new Set<string>([
+  "/",
+  "/sign-in",
+  "/sign-up",
+  "/check-email",
+  "/forgot-password",
+  "/reset-password",
+  "/terms",
+  "/privacy",
+]);
+
+// Path prefixes that the gate must let through unauthenticated: the OAuth /
+// magic-link landing route, and any API routes (those enforce auth themselves
+// via requireUserId, and returning a 307 redirect for an XHR would break
+// clients that expect JSON).
+const PUBLIC_PREFIXES = ["/auth/", "/api/"];
+
+function isPublicPath(pathname: string): boolean {
+  if (PUBLIC_PATHS.has(pathname)) return true;
+  return PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));
+}
+
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
 
@@ -45,8 +70,10 @@ export async function middleware(request: NextRequest) {
   // "Invalid Refresh Token: Refresh Token Not Found". Treat that as
   // signed-out: swallow the throw and clear the stale cookies so the
   // client doesn't keep re-attempting the refresh on every navigation.
+  let userId: string | null = null;
   try {
-    await supabase.auth.getSession();
+    const { data } = await supabase.auth.getSession();
+    userId = data.session?.user?.id ?? null;
   } catch (err) {
     const msg = String((err as Error)?.message ?? err);
     if (/refresh token|invalid|jwt/i.test(msg)) {
@@ -61,6 +88,17 @@ export async function middleware(request: NextRequest) {
       // render as signed-out; the user can sign in again.
       console.error("middleware: getSession failed", err);
     }
+  }
+
+  // Auth gate: anonymous visitors hitting a protected page get bounced to
+  // /sign-in. Without this, internal pages (/dashboard, /priority-planner,
+  // etc.) were reachable directly via the address bar and their chrome
+  // would render before client-side data calls 401'd — a Broken Access
+  // Control finding.
+  if (!userId && !isPublicPath(pathname)) {
+    const signInUrl = new URL("/sign-in", request.url);
+    signInUrl.searchParams.set("next", pathname + request.nextUrl.search);
+    return NextResponse.redirect(signInUrl);
   }
 
   return response;

@@ -7,6 +7,7 @@ import Navbar from "@/components/navbar";
 import Sidebar from "@/components/sidebar";
 import AuthSync from "@/components/auth-sync";
 import TourBootstrap from "@/components/tour-bootstrap";
+import { useCurrentUser } from "@/lib/use-current-user";
 import { Inter } from "next/font/google";
 import { Toaster } from "react-hot-toast";
 
@@ -33,7 +34,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   const pathname = usePathname();
-  const isPublicRoute = PUBLIC_PATHS.has(pathname);
+  const { user, loading: authLoading } = useCurrentUser();
+  // Strip dashboard chrome (sidebar/navbar) when the visitor is anonymous,
+  // even if they land on an unknown URL that 404s. The middleware already
+  // redirects unauthed users away from protected paths, but this is a
+  // defense-in-depth so a logged-out viewer never sees app shell.
+  const isPublicRoute =
+    PUBLIC_PATHS.has(pathname) || (!authLoading && !user);
 
   // Sidebar state lifted here so the navbar can toggle it on mobile.
   // Keep the first render deterministic for SSR, then reconcile after mount.

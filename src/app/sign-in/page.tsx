@@ -2,14 +2,26 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Chrome, Eye, EyeOff, X } from "lucide-react";
 import Image from "next/image";
 import toast from "react-hot-toast";
 import { createClient } from "@/lib/supabase/client";
 
+// Whitelist for the post-login redirect. We only follow a relative path that
+// starts with a single "/" — never "//" (protocol-relative) or "http(s)://".
+// Without this an attacker could craft /sign-in?next=https://evil.example
+// and trick the user into landing off-site after sign-in.
+function safeNext(raw: string | null): string {
+  if (!raw) return "/dashboard";
+  if (!raw.startsWith("/") || raw.startsWith("//")) return "/dashboard";
+  return raw;
+}
+
 export default function SignInPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextPath = safeNext(searchParams.get("next"));
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -34,7 +46,7 @@ export default function SignInPage() {
       } catch {
         /* ignore */
       }
-      router.push("/dashboard");
+      router.push(nextPath);
       router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Sign in failed");
