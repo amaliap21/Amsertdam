@@ -371,16 +371,38 @@ export default function PassingTarget() {
   };
 
   useEffect(() => {
+    let aborted = false;
     (async () => {
       try {
         const c = await fetch("/api/courses");
-        if (!c.ok) return;
+        if (aborted || !c.ok) return;
         const courses = await c.json();
-        if (!Array.isArray(courses)) return;
-        setCourseItems(courses.map(normalizeCourse));
+        if (aborted || !Array.isArray(courses)) return;
+        // Don't clobber locally-added courses. If the user POST'd a new
+        // course while this on-mount GET was in flight, the fetched
+        // payload predates the insert and would wipe the just-added row,
+        // including its scheduleEntries — that was the "Schedule not set"
+        // report after a fresh save. Merge by id and keep any local-only
+        // entries the server hasn't echoed back yet.
+        setCourseItems((prev) => {
+          const fetched = courses.map(normalizeCourse);
+          const fetchedIds = new Set(
+            fetched.map((c: Courses) => c.id).filter(Boolean),
+          );
+          const localOnly = prev.filter(
+            (c) => c.id && !fetchedIds.has(c.id),
+          );
+          // Also keep "client-only" rows that don't have an id yet (offline
+          // fallback path) — they'll get an id on a future refresh.
+          const localWithoutId = prev.filter((c) => !c.id);
+          return [...fetched, ...localOnly, ...localWithoutId];
+        });
         setCoursesCache(courses); // keep the shared cache fresh for the dashboard
       } catch {}
     })();
+    return () => {
+      aborted = true;
+    };
   }, [setCoursesCache]);
 
   // Auto-compute target scores on load. triggerCompute always sets
@@ -573,6 +595,14 @@ export default function PassingTarget() {
       );
       return;
     }
+    // Carry the form-supplied scheduleEntries forward as the source of truth.
+    // The bug we were chasing: the POST round-trip could echo back course_payload
+    // missing scheduleEntries (older rows, or a race with the on-mount GET that
+    // overwrites courseItems with pre-insert data), so prefer the user's input
+    // and only fall back to the API echo if it's somehow richer.
+    const formSchedule = Array.isArray(newCourse.scheduleEntries)
+      ? newCourse.scheduleEntries
+      : [];
     setIsAddingCourse(true);
     (async () => {
       try {
@@ -583,7 +613,7 @@ export default function PassingTarget() {
             title: newCourse.courseName,
             credits: newCourse.credits,
             threshold: newCourse.threshold ?? null,
-            scheduleEntries: newCourse.scheduleEntries ?? [],
+            scheduleEntries: formSchedule,
             assessments: newCourse.assessments ?? [],
           }),
         });
@@ -593,8 +623,14 @@ export default function PassingTarget() {
           const merged = normalizeCourse(body);
           merged.threshold = newCourse.threshold ?? merged.threshold ?? null;
           merged.passingGrade = newCourse.threshold ?? merged.passingGrade;
-          const updated = [...courseItems, merged];
-          setCourseItems(updated);
+          // Trust the form-supplied schedule over the round-trip echo. If
+          // the echo dropped scheduleEntries (encoding / race / older row),
+          // the user would otherwise see "Schedule not set" right after
+          // saving a fully-filled schedule.
+          if (!merged.scheduleEntries?.length && formSchedule.length) {
+            merged.scheduleEntries = formSchedule;
+          }
+          setCourseItems((prev) => [...prev, merged]);
           setShowForm(false);
           return;
         }
@@ -602,8 +638,11 @@ export default function PassingTarget() {
       } finally {
         setIsAddingCourse(false);
       }
-      const updated = [...courseItems, normalizeCourse({ ...newCourse })];
-      setCourseItems(updated);
+      const fallback = normalizeCourse({ ...newCourse });
+      if (!fallback.scheduleEntries?.length && formSchedule.length) {
+        fallback.scheduleEntries = formSchedule;
+      }
+      setCourseItems((prev) => [...prev, fallback]);
       setShowForm(false);
     })();
   };

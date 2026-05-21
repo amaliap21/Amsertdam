@@ -114,8 +114,13 @@ export default function AuthSync() {
       ) {
         localStorage.removeItem(STORAGE_KEY);
         localStorage.setItem(LAST_USER_KEY, currentId);
-        // Reload so the new user starts from a clean store. Throttled.
-        if (canReload()) {
+        // Only reload when SWITCHING accounts (lastId was a different
+        // real user). On a fresh sign-in (lastId === null) there's no
+        // stale data to wipe, and reloading here races with the
+        // /sign-in page's `router.push("/dashboard")` — the reload
+        // kills the in-flight navigation and the user lands back on
+        // /sign-in, having to click "Sign In" a second time.
+        if (lastId !== null && canReload()) {
           markReloaded();
           window.location.reload();
         }
