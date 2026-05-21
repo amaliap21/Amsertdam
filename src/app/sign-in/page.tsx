@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Chrome, Eye, EyeOff, X } from "lucide-react";
 import Image from "next/image";
@@ -19,6 +19,16 @@ function safeNext(raw: string | null): string {
 }
 
 export default function SignInPage() {
+  // useSearchParams forces dynamic rendering; wrap in Suspense so the static
+  // export step doesn't bail with a prerender error.
+  return (
+    <Suspense fallback={null}>
+      <SignInPageInner />
+    </Suspense>
+  );
+}
+
+function SignInPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextPath = safeNext(searchParams.get("next"));
