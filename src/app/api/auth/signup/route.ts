@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { Resend } from "resend";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 // Disposable / temporary inbox providers. Sign-ups from these domains were
 // being shown a success toast even though confirmation mail never reached
@@ -129,11 +131,12 @@ export async function POST(req: Request) {
       },
     );
 
+    const redirectTo = `${origin}/auth/callback?next=%2Fdashboard`;
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        emailRedirectTo: `${origin}/auth/callback?next=%2Fdashboard`,
+        emailRedirectTo: redirectTo,
         data: fullName ? { full_name: fullName } : undefined,
       },
     });
@@ -144,6 +147,32 @@ export async function POST(req: Request) {
         return NextResponse.json(
           { error: "An account with this email already exists. Try signing in." },
           { status: 409 },
+        );
+      }
+      // Supabase's built-in SMTP can fail or be rate-limited (free tier
+      // caps signup emails very aggressively). When the failure is
+      // specifically about delivery, fall back to creating the user via
+      // the admin API and sending the confirmation link through Resend
+      // directly. The account still ends up in Supabase — the user is
+      // simply not relying on Supabase's SMTP relay for the email.
+      if (/sending\s+(confirmation|signup)?\s*email|smtp|rate/i.test(msg)) {
+        const fallback = await sendSignupViaResend({
+          email,
+          password,
+          fullName,
+          redirectTo,
+        });
+        if (fallback.ok) {
+          return NextResponse.json({
+            id: fallback.userId,
+            email,
+            needsEmailConfirmation: true,
+            via: "resend-fallback",
+          });
+        }
+        return NextResponse.json(
+          { error: fallback.error },
+          { status: fallback.status },
         );
       }
       return NextResponse.json({ error: msg || "Sign-up failed." }, { status: 400 });
@@ -173,4 +202,127 @@ export async function POST(req: Request) {
       { status: 500 },
     );
   }
+}
+
+type ResendFallbackResult =
+  | { ok: true; userId: string | undefined; error?: never; status?: never }
+  | { ok: false; userId?: never; error: string; status: number };
+
+/**
+ * Create the account via the admin API and send the verification link
+ * through Resend directly. Used when Supabase Auth's own SMTP relay can't
+ * deliver (rate limit, transient SMTP error). Requires `RESEND_API_KEY`
+ * to be set; without it we surface a clear error so the UI doesn't lie.
+ */
+async function sendSignupViaResend(args: {
+  email: string;
+  password: string;
+  fullName: string | undefined;
+  redirectTo: string;
+}): Promise<ResendFallbackResult> {
+  const { email, password, fullName, redirectTo } = args;
+  const resendKey = process.env.RESEND_API_KEY;
+  if (!resendKey) {
+    return {
+      ok: false,
+      status: 503,
+      error:
+        "Email delivery is temporarily unavailable. Please try again in a few minutes, or contact support if the problem persists.",
+    };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const admin = supabaseAdmin as any;
+
+  // Create the user without confirming. If it already exists with the same
+  // password the createUser call will error — that's fine, we treat it as
+  // a re-send by generating a fresh link below.
+  let userId: string | undefined;
+  const created = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: false,
+    user_metadata: fullName ? { full_name: fullName } : undefined,
+  });
+  if (created.error) {
+    const msg = String(created.error.message ?? "");
+    if (!/already\s+registered|exists/i.test(msg)) {
+      return { ok: false, status: 400, error: msg || "Sign-up failed." };
+    }
+    // Fall through: existing unconfirmed user, look up id below.
+  } else {
+    userId = created.data?.user?.id;
+  }
+
+  const { data: linkData, error: linkError } = await admin.auth.admin.generateLink({
+    type: "signup",
+    email,
+    password,
+    options: { redirectTo },
+  });
+  if (linkError || !linkData?.properties?.action_link) {
+    return {
+      ok: false,
+      status: 500,
+      error: linkError?.message ?? "Could not generate verification link.",
+    };
+  }
+  if (!userId) userId = linkData.user?.id;
+
+  const actionLink: string = linkData.properties.action_link;
+  const fromAddress =
+    process.env.RESEND_FROM_EMAIL ?? "amsertdam@resend.dev";
+
+  try {
+    const resend = new Resend(resendKey);
+    const send = await resend.emails.send({
+      from: `RealTrack <${fromAddress}>`,
+      to: [email],
+      subject: "Verify your RealTrack account",
+      html: buildVerificationEmailHtml({ actionLink, fullName }),
+    });
+    if (send.error) {
+      return {
+        ok: false,
+        status: 502,
+        error: `Email provider rejected the message: ${send.error.message ?? "unknown error"}`,
+      };
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      status: 502,
+      error:
+        err instanceof Error
+          ? `Email send failed: ${err.message}`
+          : "Email send failed.",
+    };
+  }
+
+  return { ok: true, userId };
+}
+
+function buildVerificationEmailHtml(args: {
+  actionLink: string;
+  fullName: string | undefined;
+}): string {
+  const greeting = args.fullName ? `Hi ${escapeHtml(args.fullName)},` : "Hi,";
+  const link = escapeHtml(args.actionLink);
+  return `<!doctype html>
+<html><body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#111;line-height:1.5">
+  <p>${greeting}</p>
+  <p>Thanks for signing up for RealTrack. Click the button below to verify your email and finish setting up your account.</p>
+  <p><a href="${link}" style="display:inline-block;padding:10px 18px;background:#4f46e5;color:#fff;border-radius:9999px;text-decoration:none;font-weight:500">Verify email</a></p>
+  <p>Or paste this link into your browser:<br><a href="${link}">${link}</a></p>
+  <p style="color:#666;font-size:12px">If you didn't sign up for RealTrack, you can ignore this email.</p>
+</body></html>`;
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }

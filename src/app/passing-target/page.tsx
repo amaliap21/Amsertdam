@@ -1114,10 +1114,20 @@ export default function PassingTarget() {
                                     assessment.isEditingWeight,
                                     (val) =>
                                       setCourseItems((prev) => {
-                                        const updated = [...prev];
-                                        updated[index].assessments![
-                                          assessIdx
-                                        ].weight = val;
+                                        const updated = prev.map((c, ci) =>
+                                          ci !== index
+                                            ? c
+                                            : {
+                                                ...c,
+                                                assessments: c.assessments?.map(
+                                                  (a, ai) =>
+                                                    ai !== assessIdx
+                                                      ? a
+                                                      : { ...a, weight: val },
+                                                ),
+                                              },
+                                        );
+                                        triggerCompute(index, updated);
                                         return updated;
                                       }),
                                     (editing) =>
@@ -1141,10 +1151,20 @@ export default function PassingTarget() {
                                     assessment.isEditing,
                                     (val) =>
                                       setCourseItems((prev) => {
-                                        const updated = [...prev];
-                                        updated[index].assessments![
-                                          assessIdx
-                                        ].score = val;
+                                        const updated = prev.map((c, ci) =>
+                                          ci !== index
+                                            ? c
+                                            : {
+                                                ...c,
+                                                assessments: c.assessments?.map(
+                                                  (a, ai) =>
+                                                    ai !== assessIdx
+                                                      ? a
+                                                      : { ...a, score: val },
+                                                ),
+                                              },
+                                        );
+                                        triggerCompute(index, updated);
                                         return updated;
                                       }),
                                     (editing) =>
@@ -1252,10 +1272,33 @@ export default function PassingTarget() {
                                       subItem.isEditingWeight,
                                       (val) =>
                                         setCourseItems((prev) => {
-                                          const updated = [...prev];
-                                          updated[index].assessments![
-                                            assessIdx
-                                          ].items![subIdx].weight = val;
+                                          const updated = prev.map((c, ci) =>
+                                            ci !== index
+                                              ? c
+                                              : {
+                                                  ...c,
+                                                  assessments:
+                                                    c.assessments?.map(
+                                                      (a, ai) =>
+                                                        ai !== assessIdx
+                                                          ? a
+                                                          : {
+                                                              ...a,
+                                                              items: a.items?.map(
+                                                                (it, ii) =>
+                                                                  ii !== subIdx
+                                                                    ? it
+                                                                    : {
+                                                                        ...it,
+                                                                        weight:
+                                                                          val,
+                                                                      },
+                                                              ),
+                                                            },
+                                                    ),
+                                                },
+                                          );
+                                          triggerCompute(index, updated);
                                           return updated;
                                         }),
                                       (editing) =>
@@ -1278,10 +1321,31 @@ export default function PassingTarget() {
                                     subItem.isEditing,
                                     (val) =>
                                       setCourseItems((prev) => {
-                                        const updated = [...prev];
-                                        updated[index].assessments![
-                                          assessIdx
-                                        ].items![subIdx].score = val;
+                                        const updated = prev.map((c, ci) =>
+                                          ci !== index
+                                            ? c
+                                            : {
+                                                ...c,
+                                                assessments: c.assessments?.map(
+                                                  (a, ai) =>
+                                                    ai !== assessIdx
+                                                      ? a
+                                                      : {
+                                                          ...a,
+                                                          items: a.items?.map(
+                                                            (it, ii) =>
+                                                              ii !== subIdx
+                                                                ? it
+                                                                : {
+                                                                    ...it,
+                                                                    score: val,
+                                                                  },
+                                                          ),
+                                                        },
+                                                ),
+                                              },
+                                        );
+                                        triggerCompute(index, updated);
                                         return updated;
                                       }),
                                     (editing) =>
