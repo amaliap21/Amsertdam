@@ -1,9 +1,18 @@
 "use client";
 
-import { Download, CirclePlus, Sparkles, Loader2, PencilLine, Trash2 } from "lucide-react";
+import {
+  Download,
+  CirclePlus,
+  Sparkles,
+  Loader2,
+  PencilLine,
+  Trash2,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import ExportModal from "@/components/ui/export-form";
-import AddScheduleModal, { type ScheduleInitial } from "@/components/ui/add-schedule-form";
+import AddScheduleModal, {
+  type ScheduleInitial,
+} from "@/components/ui/add-schedule-form";
 import toast from "react-hot-toast";
 import { useStore, type TaskItem } from "@/store/use-store";
 import {
@@ -117,15 +126,18 @@ export default function PriorityPlanner() {
     return result;
   }, [tasks]);
 
-  // Combine task-derived events + manually added events.
-  // Filter out old AI-generated ghost events (subject contains "· HIGH (" etc.).
+  // Priority Planner is a "when to work" view, not a "when things are
+  // due" view. Task Value already owns the deadline list — showing the
+  // same task-derived deadlines here was just noise.
+  //
+  // The planner therefore shows only:
+  //   - manual entries the user added via "Add Schedule"
+  //   - recommended work blocks from "Plan with AI"
+  // both of which live in extraEvents. We still filter out any extra
+  // event whose id happens to collide with a task id (legacy data).
   const events: ScheduleEvent[] = useMemo(() => {
-    const aiPattern = /·\s*(?:HIGH|MEDIUM|LOW)\s*\(\d/;
     const taskIds = new Set(taskEvents.map((e) => e.id));
-    const extra = extraEvents.filter(
-      (e) => !taskIds.has(e.id) && !aiPattern.test(e.subject),
-    );
-    return [...taskEvents, ...extra];
+    return extraEvents.filter((e) => !taskIds.has(e.id));
   }, [taskEvents, extraEvents]);
 
   // Add a new event, dropping any existing event that overlaps it on the same day.
@@ -148,11 +160,13 @@ export default function PriorityPlanner() {
     type: ScheduleType;
     date: string;
     time: string;
+    repeatFreq?: "none" | "daily" | "weekly" | "monthly";
+    repeatUntil?: string;
   }) => {
     const styles = TYPE_STYLES[data.type];
     if (editingEvent) {
-      // Update the existing manual event by id, preserving its id so any
-      // cross-page references (dashboard merging) stay stable.
+      // Editing a recurring schedule only touches the picked occurrence
+      // — other dates were saved as independent events at create time.
       setExtraEvents((prev) =>
         prev.map((e) =>
           e.id === editingEvent.id
@@ -169,6 +183,67 @@ export default function PriorityPlanner() {
         ),
       );
       setEditingEvent(null);
+      return;
+    }
+    // Recurring → expand into one event per interval.
+    if (data.repeatFreq && data.repeatFreq !== "none" && data.repeatUntil) {
+      const startDate = new Date(`${data.date}T00:00:00`);
+      const endDate = new Date(`${data.repeatUntil}T00:00:00`);
+      if (
+        Number.isNaN(startDate.getTime()) ||
+        Number.isNaN(endDate.getTime()) ||
+        endDate < startDate
+      ) {
+        return;
+      }
+      // Safety cap so a daily recurrence over a multi-year range can't
+      // accidentally explode into thousands of events.
+      const MAX_OCCURRENCES = 366;
+      const occurrences: ScheduleEvent[] = [];
+      const cursor = new Date(startDate);
+      const baseId = Date.now();
+      let i = 0;
+      while (cursor <= endDate && i < MAX_OCCURRENCES) {
+        const iso = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`;
+        occurrences.push({
+          id: baseId + i,
+          title: data.type,
+          date: iso,
+          time: data.time,
+          subject: data.title,
+          color: styles.color,
+          bgColor: styles.bgColor,
+        });
+        if (data.repeatFreq === "daily") {
+          cursor.setDate(cursor.getDate() + 1);
+        } else if (data.repeatFreq === "weekly") {
+          cursor.setDate(cursor.getDate() + 7);
+        } else {
+          // Monthly — preserve day-of-month. setMonth handles month-end
+          // overflow by rolling forward (e.g. Jan 31 + 1 month = Mar 3),
+          // which is fine for a study planner.
+          cursor.setMonth(cursor.getMonth() + 1);
+        }
+        i++;
+      }
+      if (occurrences.length === 0) return;
+      setExtraEvents((prev) => {
+        // Drop any pre-existing event that overlaps any new occurrence
+        // — same "replace overlaps" rule the single-event path uses.
+        const filtered = prev.filter(
+          (existing) => !occurrences.some((o) => eventsOverlap(existing, o)),
+        );
+        return [...filtered, ...occurrences];
+      });
+      const cadence =
+        data.repeatFreq === "daily"
+          ? "daily"
+          : data.repeatFreq === "weekly"
+            ? "weekly"
+            : "monthly";
+      toast.success(
+        `Added ${occurrences.length} ${cadence} occurrence${occurrences.length === 1 ? "" : "s"}`,
+      );
       return;
     }
     addEventReplacingOverlaps({
@@ -236,9 +311,21 @@ export default function PriorityPlanner() {
     const t = toast.loading("Building your study schedule…");
 
     try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const startDateIso = today.toISOString().slice(0, 10);
+      // Push the planning start to tomorrow when today's last session
+      // window has already passed — otherwise the algorithm allocates
+      // tasks into past slots that get filtered out client-side, and
+      // tight-deadline tasks lose so many slots they end up with zero
+      // recommended blocks ("assignment not determined").
+      const now = new Date();
+      const SESSIONS_END_HOUR = 17; // matches sessions: end_time 17:00
+      const planStart = new Date(now);
+      planStart.setHours(0, 0, 0, 0);
+      if (now.getHours() >= SESSIONS_END_HOUR) {
+        planStart.setDate(planStart.getDate() + 1);
+      }
+      const startDateIso = `${planStart.getFullYear()}-${String(
+        planStart.getMonth() + 1,
+      ).padStart(2, "0")}-${String(planStart.getDate()).padStart(2, "0")}`;
 
       const parseDeadlineDays = (dateStr: string): number => {
         const { isoDate } = parseTaskDate(dateStr);
@@ -246,10 +333,34 @@ export default function PriorityPlanner() {
         const candidate = new Date(`${isoDate}T00:00:00`);
         if (Number.isNaN(candidate.getTime())) return 7;
         const diff = Math.round(
-          (candidate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+          (candidate.getTime() - planStart.getTime()) /
+            (1000 * 60 * 60 * 24),
         );
         return Math.max(0, diff);
       };
+
+      // Translate user-chosen priority (Task Value bucket) into the
+      // grade_weight the Python scoring uses, plus a tier we can override
+      // client-side. Trusting the user's bucket beats letting the Python
+      // analyzer re-score from incomplete inputs (which made every task
+      // land in the MEDIUM band).
+      const tierFromPriority = (
+        priority: TaskItem["priority"],
+      ): "HIGH" | "MEDIUM" | "LOW" =>
+        priority === "Focus First"
+          ? "HIGH"
+          : priority === "If You Have Energy"
+            ? "MEDIUM"
+            : "LOW";
+
+      const gradeWeightFromPriority = (
+        priority: TaskItem["priority"],
+      ): number =>
+        priority === "Focus First"
+          ? 25
+          : priority === "If You Have Energy"
+            ? 12
+            : 5;
 
       const resp = await fetch("/api/python/scheduling", {
         method: "POST",
@@ -269,6 +380,9 @@ export default function PriorityPlanner() {
             task_name: task.title,
             course: task.course,
             priority: task.priority,
+            // Help the Python scorer pick the right tier band by feeding
+            // it a grade_weight derived from the user's bucket choice.
+            grade_weight: gradeWeightFromPriority(task.priority),
             estimated_hours: Number.parseFloat(task.timeEstimate) || 2,
             deadline_days: parseDeadlineDays(task.date),
             completion_pct: 0,
@@ -315,7 +429,7 @@ export default function PriorityPlanner() {
         };
       };
 
-      // Store schedule data for the Gantt chart only (no dummy events).
+      // Store schedule data for the Gantt chart.
       setGanttData(
         json.schedule.map((block) => ({
           task_name: block.task_name,
@@ -326,6 +440,113 @@ export default function PriorityPlanner() {
         })),
       );
 
+      // ALSO add the schedule blocks as planner events so the user sees
+      // "work on X — Tue 9-11 AM" in the day/week/month views, not just
+      // the task deadlines. This is the actual answer to "when should I
+      // work on each assignment".
+      const tierToStyle = (tier: "HIGH" | "MEDIUM" | "LOW") =>
+        tier === "HIGH"
+          ? PRIORITY_STYLES["Focus First"]
+          : tier === "MEDIUM"
+            ? PRIORITY_STYLES["If You Have Energy"]
+            : PRIORITY_STYLES["Safe to Minimize"];
+
+      const isoDate = (d: Date) =>
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+      // Any block before today is useless advice — defensive guard in
+      // addition to the planStart adjustment above.
+      const todayMidnight = new Date();
+      todayMidnight.setHours(0, 0, 0, 0);
+
+      // Look up the user's chosen priority per task so we can override
+      // whatever tier the Python analyzer guessed. The user's selection
+      // in Task Value is the source of truth for "how urgent is this".
+      const priorityByTaskId = new Map<string, TaskItem["priority"]>();
+      const priorityByName = new Map<string, TaskItem["priority"]>();
+      for (const t of tasks) {
+        priorityByTaskId.set(String(t.id), t.priority);
+        priorityByName.set(t.title, t.priority);
+      }
+      const resolveTier = (
+        block: { task_id?: string; task_name: string; tier: string },
+      ): "HIGH" | "MEDIUM" | "LOW" => {
+        const userPriority =
+          (block.task_id && priorityByTaskId.get(String(block.task_id))) ||
+          priorityByName.get(block.task_name);
+        if (userPriority === "Focus First") return "HIGH";
+        if (userPriority === "If You Have Energy") return "MEDIUM";
+        if (userPriority === "Safe to Minimize") return "LOW";
+        // Fall back to Python's tier if the user-side lookup misses
+        // (renamed task, stale id, etc.).
+        if (block.tier === "HIGH" || block.tier === "MEDIUM" || block.tier === "LOW") {
+          return block.tier;
+        }
+        return "MEDIUM";
+      };
+
+      const baseAiId = Date.now();
+      const aiEvents: ScheduleEvent[] = [];
+      const scheduledTaskNames = new Set<string>();
+      let droppedPast = 0;
+      json.schedule.forEach((block, i) => {
+        const start = new Date(block.start_time);
+        const end = new Date(block.end_time);
+        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return;
+        const blockDay = new Date(
+          start.getFullYear(),
+          start.getMonth(),
+          start.getDate(),
+        );
+        if (blockDay < todayMidnight) {
+          droppedPast++;
+          return;
+        }
+        const tier = resolveTier(block);
+        const style = tierToStyle(tier);
+        scheduledTaskNames.add(block.task_name);
+        aiEvents.push({
+          id: baseAiId + i + 1,
+          title: "Task",
+          label: `Work on ${block.task_name}`,
+          date: isoDate(start),
+          time: `${fmtClock(start.getHours(), start.getMinutes())} - ${fmtClock(end.getHours(), end.getMinutes())}`,
+          subject: `${block.task_name} · ${tier} (${block.hours_allocated}h)`,
+          color: style.color,
+          bgColor: style.bgColor,
+        });
+      });
+      if (droppedPast > 0) {
+        console.info(
+          `[plan-with-ai] dropped ${droppedPast} block(s) scheduled before today`,
+        );
+      }
+
+      // Surface tasks that ended up with zero scheduled blocks. Usually
+      // this means the deadline was too close to allocate hours within
+      // available sessions — the user needs to know rather than wonder
+      // why their assignment isn't on the plan.
+      const unscheduled = tasks.filter(
+        (t) => !scheduledTaskNames.has(t.title),
+      );
+      if (unscheduled.length > 0) {
+        toast.error(
+          `Couldn't fit ${unscheduled.length} task${unscheduled.length === 1 ? "" : "s"} into the plan: ${unscheduled
+            .map((t) => t.title)
+            .join(", ")}. Their deadlines may be too close, or estimated hours too high for the available sessions.`,
+          { duration: 8000 },
+        );
+      }
+
+      // Replace any AI events from a previous run so a re-plan doesn't
+      // stack new blocks on top of old ones. We detect them via the
+      // "· HIGH/MEDIUM/LOW (Xh)" subject suffix — the format above.
+      const aiPattern = /·\s*(?:HIGH|MEDIUM|LOW)\s*\(\d/;
+      setExtraEvents((prev) => [
+        ...prev.filter((e) => !aiPattern.test(e.subject)),
+        ...aiEvents,
+      ]);
+
       const taskWord = json.summary.total_tasks === 1 ? "task" : "tasks";
       const dayWord = json.summary.days_needed === 1 ? "day" : "days";
       const warningNote = json.deadline_warnings.length
@@ -334,11 +555,16 @@ export default function PriorityPlanner() {
           } may miss deadlines.`
         : "";
       setAiSummary(
-        `Scheduled ${json.summary.total_tasks} ${taskWord} across ${json.summary.days_needed} ${dayWord} ` +
-          `(${json.summary.total_hours_needed}h). ` +
+        `Recommended ${json.summary.total_tasks} ${taskWord} across ${json.summary.days_needed} ${dayWord} ` +
+          `(${json.summary.total_hours_needed}h working time). ` +
           `${json.summary.high_priority} HIGH, ${json.summary.medium_priority} MEDIUM, ${json.summary.low_priority} LOW.${warningNote}`,
       );
-      toast.success("Schedule generated", { id: t });
+      toast.success(
+        aiEvents.length > 0
+          ? `Added ${aiEvents.length} recommended work block${aiEvents.length === 1 ? "" : "s"}`
+          : "Schedule generated",
+        { id: t },
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed", { id: t });
     } finally {
@@ -613,7 +839,9 @@ export default function PriorityPlanner() {
             >
               <div className="flex flex-row justify-between items-start gap-3">
                 <div className="flex flex-row items-center gap-3 min-w-0">
-                  <div className={`w-3 h-3 rounded-full shrink-0 ${event.color}`}></div>
+                  <div
+                    className={`w-3 h-3 rounded-full shrink-0 ${event.color}`}
+                  ></div>
                   <p className="text-sm font-semibold text-black-primary">
                     {event.time}
                   </p>
@@ -805,7 +1033,6 @@ const MONTH_LABELS = [
 
 const BAR_COLORS = [
   "#ef4444",
-  "#3b82f6",
   "#22c55e",
   "#a855f7",
   "#f97316",
@@ -850,17 +1077,19 @@ function GanttChart({ data }: { data: GanttBlock[] }) {
 
   if (!taskOrder.length) return null;
 
-  // 2. Determine the full date range for the X-axis.
+  // 2. Determine the full date range for the X-axis. The user wants the
+  //    Gantt to always span a full year (Jan → Dec) so months without
+  //    activity still appear on the axis. Pick the year from the
+  //    earliest task; if data straddles multiple years, extend to cover
+  //    them all.
   const allStarts = Array.from(taskMap.values()).map((t) => t.start.getTime());
   const allEnds = Array.from(taskMap.values()).map((t) => t.end.getTime());
-  const rangeStart = new Date(Math.min(...allStarts));
+  const earliestYear = new Date(Math.min(...allStarts)).getFullYear();
+  const latestYear = new Date(Math.max(...allEnds)).getFullYear();
+  const rangeStart = new Date(earliestYear, 0, 1); // Jan 1 of first year
   rangeStart.setHours(0, 0, 0, 0);
-  // Snap to first of month
-  rangeStart.setDate(1);
-  const rangeEnd = new Date(Math.max(...allEnds));
-  rangeEnd.setHours(0, 0, 0, 0);
-  // Extend to end of month
-  rangeEnd.setMonth(rangeEnd.getMonth() + 1, 0);
+  // Dec 31 23:59:59.999 of last year, so the December tick has visible width.
+  const rangeEnd = new Date(latestYear, 11, 31, 23, 59, 59, 999);
 
   const totalMs = rangeEnd.getTime() - rangeStart.getTime();
   if (totalMs <= 0) return null;
@@ -881,11 +1110,17 @@ function GanttChart({ data }: { data: GanttBlock[] }) {
     cur.setMonth(cur.getMonth() + 1);
   }
 
-  // "Today" marker.
+  // "Now" marker — bottom-anchored label, shown beneath the dashed
+  // blue line. Displays "<Mon Day>" (e.g. "Nov 20") so the user sees
+  // exactly which date the line corresponds to.
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const todayPct = ((today.getTime() - rangeStart.getTime()) / totalMs) * 100;
   const showToday = todayPct >= 0 && todayPct <= 100;
+  const todayLabel = today.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
 
   const rowH = 36;
 
@@ -916,7 +1151,9 @@ function GanttChart({ data }: { data: GanttBlock[] }) {
               {name}
             </div>
           ))}
-          <div style={{ height: 24 }} /> {/* spacer for X-axis labels */}
+          {/* Spacer matching the "Now" date label row under the chart so
+              the task-name column aligns with the grid bottom edge. */}
+          {showToday && <div style={{ height: 20 }} />}
         </div>
 
         {/* Chart area */}
@@ -961,22 +1198,18 @@ function GanttChart({ data }: { data: GanttBlock[] }) {
               />
             ))}
 
-            {/* Today line */}
+            {/* "Now" line — dashed blue from top to bottom of the chart.
+                Just the line lives inside the overflow-hidden chart; the
+                label is rendered outside (below the chart) so it isn't
+                clipped. */}
             {showToday && (
               <div
-                className="absolute top-0 bottom-0 z-10"
+                className="absolute top-0 bottom-0 z-10 pointer-events-none"
                 style={{
                   left: `${todayPct}%`,
                   borderLeft: "2px dashed #3b82f6",
                 }}
-              >
-                <span
-                  className="absolute text-[10px] font-bold text-blue-500 whitespace-nowrap"
-                  style={{ top: -16, left: -14 }}
-                >
-                  Today
-                </span>
-              </div>
+              />
             )}
 
             {/* Task bars */}
@@ -1008,22 +1241,22 @@ function GanttChart({ data }: { data: GanttBlock[] }) {
             })}
           </div>
 
-          {/* X-axis month labels at bottom */}
-          <div className="relative" style={{ height: 24 }}>
-            {monthTicks.map((mt, i) => (
+          {/* "Now" date label — sits below the chart, horizontally aligned
+              with the dashed line by sharing the same left% position.
+              Rendered here (not inside the chart) so it isn't clipped. */}
+          {showToday && (
+            <div
+              className="relative pointer-events-none"
+              style={{ height: 20 }}
+            >
               <span
-                key={i}
-                className="absolute text-[10px] text-gray-500 text-center"
-                style={{
-                  left: `${mt.leftPct}%`,
-                  width: `${mt.widthPct}%`,
-                  top: 4,
-                }}
+                className="absolute -translate-x-1/2 text-[10px] font-bold text-blue-500 whitespace-nowrap leading-none px-1 py-0.5 bg-white rounded shadow-sm border border-blue-100"
+                style={{ left: `${todayPct}%`, top: 4 }}
               >
-                {mt.label}
+                Now · {todayLabel}
               </span>
-            ))}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

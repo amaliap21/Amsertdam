@@ -114,6 +114,25 @@ export async function createTour(router: Router): Promise<ShepherdTour> {
       this.back();
     },
   };
+  // Same shape as nextBtn but jumps backward through the tour. Used for
+  // steps where the previous step lives on a different route — calling
+  // `this.back()` directly fails because Shepherd can't find the prior
+  // step's attachTo target on the current page.
+  const navigateBack = (href: string, waitSelector: string) => ({
+    text: "Back",
+    classes: "shepherd-button-secondary",
+    action(this: StepCtx) {
+      router.push(href);
+      (async () => {
+        try {
+          await waitForElement(waitSelector);
+          this.back();
+        } catch {
+          this.cancel();
+        }
+      })();
+    },
+  });
   const skipBtn = {
     text: "Skip tutorial",
     classes: "shepherd-button-secondary",
@@ -212,7 +231,11 @@ export async function createTour(router: Router): Promise<ShepherdTour> {
       title: "Task Value",
       text: "Capture upcoming assignments, the app ranks them by impact vs. effort.",
       beforeShowPromise: waitFor('[data-tour="add-task"]'),
-      buttons: [backBtn, skipBtn, navigateNext("/priority-planner", '[data-tour="plan-with-ai"]')],
+      buttons: [
+        navigateBack("/passing-target", '[data-tour="add-course"]'),
+        skipBtn,
+        navigateNext("/priority-planner", '[data-tour="plan-with-ai"]'),
+      ],
     },
     {
       id: "plan-with-ai",
@@ -220,7 +243,11 @@ export async function createTour(router: Router): Promise<ShepherdTour> {
       title: "Priority Planner",
       text: "Once your tasks are in, this page builds a realistic study schedule across the week.",
       beforeShowPromise: waitFor('[data-tour="plan-with-ai"]'),
-      buttons: [backBtn, skipBtn, navigateNext("/flashcards", '[data-tour="create-deck"]')],
+      buttons: [
+        navigateBack("/task-value", '[data-tour="add-task"]'),
+        skipBtn,
+        navigateNext("/flashcards", '[data-tour="create-deck"]'),
+      ],
     },
     {
       id: "create-deck",
@@ -228,7 +255,11 @@ export async function createTour(router: Router): Promise<ShepherdTour> {
       title: "Flashcards",
       text: "Make flashcards from notes or even images, great for quick reviews.",
       beforeShowPromise: waitFor('[data-tour="create-deck"]'),
-      buttons: [backBtn, skipBtn, navigateNext("/quiz-lab", '[data-tour="create-quiz"]')],
+      buttons: [
+        navigateBack("/priority-planner", '[data-tour="plan-with-ai"]'),
+        skipBtn,
+        navigateNext("/quiz-lab", '[data-tour="create-quiz"]'),
+      ],
     },
     {
       id: "create-quiz",
@@ -236,14 +267,21 @@ export async function createTour(router: Router): Promise<ShepherdTour> {
       title: "Quiz Lab",
       text: "Upload a PDF and generate a multiple-choice quiz to practise with.",
       beforeShowPromise: waitFor('[data-tour="create-quiz"]'),
-      buttons: [backBtn, skipBtn, navigateNext("/dashboard", '[data-tour="dashboard-hero"]')],
+      buttons: [
+        navigateBack("/flashcards", '[data-tour="create-deck"]'),
+        skipBtn,
+        navigateNext("/dashboard", '[data-tour="dashboard-hero"]'),
+      ],
     },
     {
       id: "done",
       title: "You're set",
       text: "Restart this tour any time using the ? button in the top bar. Happy studying!",
       beforeShowPromise: waitFor('[data-tour="dashboard-hero"]'),
-      buttons: [backBtn, doneBtn],
+      buttons: [
+        navigateBack("/quiz-lab", '[data-tour="create-quiz"]'),
+        doneBtn,
+      ],
     },
   ]);
 

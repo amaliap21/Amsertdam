@@ -34,7 +34,9 @@ export default function CreateQuizModal({
     course: "",
     file: null as File | null,
   });
-  const [requestedQuestions, setRequestedQuestions] = useState(5);
+  // Stored as a string so the input can be momentarily empty without
+  // snapping back to "1". The number is parsed at submit time.
+  const [requestedQuestions, setRequestedQuestions] = useState<string>("5");
   const [language, setLanguage] = useState<Language>("en");
   const [recommendedMaxQuestions, setRecommendedMaxQuestions] = useState<number | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -83,7 +85,9 @@ export default function CreateQuizModal({
       if (resp.ok && Number.isFinite(Number(json.maxQuestions))) {
         const maxQuestions = Math.max(1, Math.round(Number(json.maxQuestions)));
         setRecommendedMaxQuestions(maxQuestions);
-        setRequestedQuestions((current) => Math.min(current, maxQuestions));
+        setRequestedQuestions((current) =>
+          String(Math.min(Number(current) || 1, maxQuestions)),
+        );
         return;
       }
       setRecommendedMaxQuestions(null);
@@ -108,7 +112,14 @@ export default function CreateQuizModal({
       setError("File exceeds the 50 MB limit.");
       return;
     }
-    if (recommendedMaxQuestions && requestedQuestions > recommendedMaxQuestions) {
+    const parsedQuestions = Math.max(
+      1,
+      Math.floor(Number(requestedQuestions) || 1),
+    );
+    if (
+      recommendedMaxQuestions &&
+      parsedQuestions > recommendedMaxQuestions
+    ) {
       setError(`This source supports up to ${recommendedMaxQuestions} questions.`);
       return;
     }
@@ -120,7 +131,7 @@ export default function CreateQuizModal({
       fd.append("file", formData.file);
       fd.append("title", formData.title);
       fd.append("course", formData.course);
-      fd.append("requestedQuestions", String(requestedQuestions));
+      fd.append("requestedQuestions", String(parsedQuestions));
       fd.append("language", language);
       const resp = await fetch("/api/ai/quiz/generate", {
         method: "POST",
@@ -249,7 +260,12 @@ export default function CreateQuizModal({
               min={1}
               max={recommendedMaxQuestions ?? undefined}
               value={requestedQuestions}
-              onChange={(e) => setRequestedQuestions(Number(e.target.value || 1))}
+              onChange={(e) => setRequestedQuestions(e.target.value)}
+              onBlur={() => {
+                if (requestedQuestions === "" || Number(requestedQuestions) < 1) {
+                  setRequestedQuestions("1");
+                }
+              }}
               disabled={loading || analyzing}
               className="w-full rounded-xl border border-gray-300 px-2.5 py-2 text-[13px] text-black-primary focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary sm:px-4 sm:py-3.5 sm:text-sm"
             />

@@ -316,7 +316,11 @@ export default function CourseForm({ onSubmit, onCancel }: CourseFormProps) {
                       onChange={(e) =>
                         updateScheduleEntry(index, "day", e.target.value)
                       }
-                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent appearance-none bg-white"
+                      // Once a date is picked the day is derived from it,
+                      // so lock the select but keep it on-screen so the
+                      // user can see which weekday they chose.
+                      disabled={!!entry.date}
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent appearance-none bg-white disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                     >
                       <option value="">Select day</option>
                       <option value="Monday">Monday</option>

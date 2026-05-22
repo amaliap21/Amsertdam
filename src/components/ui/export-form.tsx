@@ -10,7 +10,33 @@ type Event = {
   time: string;
   title: string;
   subject: string;
+  /** Optional urgency tag — Priority Planner passes "HIGH" / "MEDIUM" /
+   *  "LOW" via the underlying ScheduleEvent. Falls back to derived-from-
+   *  title when missing. */
+  urgency?: string;
 };
+
+// Derive an urgency level for any event. Priority Planner task events
+// already encode the priority in their styling; for everything else we
+// fall back to a sane default per type.
+function urgencyOf(ev: Event): "HIGH" | "MEDIUM" | "LOW" {
+  if (ev.urgency) {
+    const u = ev.urgency.toUpperCase();
+    if (u === "HIGH" || u === "MEDIUM" || u === "LOW") return u;
+  }
+  const t = (ev.title ?? "").toLowerCase();
+  if (t.includes("focus")) return "HIGH";
+  if (t.includes("class") || t.includes("task")) return "MEDIUM";
+  return "LOW";
+}
+
+// "2026-05-23" → "Saturday".
+function weekdayOf(iso: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-US", { weekday: "long" });
+}
 
 type Props = {
   isOpen: boolean;
@@ -28,15 +54,24 @@ export default function ExportModal({ isOpen, onClose, events }: Props) {
   const exportToExcel = (filtered: Event[]) => {
     const data = filtered.map((event) => ({
       Date: new Date(event.date).toLocaleDateString("en-US"),
+      Day: weekdayOf(event.date),
       Time: event.time,
       Type: event.title,
       Subject: event.subject,
+      Urgency: urgencyOf(event),
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(data);
 
-    // Styling column width
-    worksheet["!cols"] = [{ wch: 15 }, { wch: 20 }, { wch: 15 }, { wch: 40 }];
+    // Date, Day, Time, Type, Subject, Urgency
+    worksheet["!cols"] = [
+      { wch: 14 },
+      { wch: 12 },
+      { wch: 18 },
+      { wch: 14 },
+      { wch: 38 },
+      { wch: 10 },
+    ];
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Schedule");
@@ -82,14 +117,16 @@ export default function ExportModal({ isOpen, onClose, events }: Props) {
 
     doc.line(10, 25, 200, 25);
 
-    // TABLE
+    // TABLE — columns: Date | Day | Time | Type | Subject | Urgency
     let y = 35;
 
     doc.setFont("helvetica", "bold");
     doc.text("Date", 10, y);
-    doc.text("Time", 40, y);
-    doc.text("Type", 80, y);
-    doc.text("Subject", 120, y);
+    doc.text("Day", 38, y);
+    doc.text("Time", 60, y);
+    doc.text("Type", 90, y);
+    doc.text("Subject", 115, y);
+    doc.text("Urgency", 180, y);
 
     y += 5;
     doc.line(10, y, 200, y);
@@ -104,13 +141,16 @@ export default function ExportModal({ isOpen, onClose, events }: Props) {
       }
 
       const date = new Date(event.date).toLocaleDateString("en-US");
+      const day = weekdayOf(event.date);
 
       doc.text(date, 10, y);
-      doc.text(event.time, 40, y);
-      doc.text(event.title, 80, y);
+      doc.text(day, 38, y);
+      doc.text(event.time, 60, y);
+      doc.text(event.title, 90, y);
 
-      const split = doc.splitTextToSize(event.subject, 70);
-      doc.text(split, 120, y);
+      const split = doc.splitTextToSize(event.subject, 60);
+      doc.text(split, 115, y);
+      doc.text(urgencyOf(event), 180, y);
 
       y += Math.max(7, split.length * 5);
     });

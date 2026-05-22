@@ -147,6 +147,39 @@ export default function TaskValue() {
 
   const handleAiPrioritize = async () => {
     if (aiLoading) return;
+    // With a single task, TOPSIS has nothing to rank it against and the
+    // Python service always returns "LOW" (the safest default for a
+    // singleton). That makes the UI feel broken — the user sees their
+    // only task labelled "Safe to Minimize" even when it's clearly the
+    // one thing they're working on. Promote it to Focus First by default.
+    if (tasks.length === 1) {
+      const only = tasks[0];
+      const original = only.description ?? "";
+      const metaMatch = original.match(/^(Assessment:[^\n]*)/i);
+      const meta = metaMatch ? metaMatch[1] : "";
+      const advice =
+        "Only task on your plate — treat it as your top priority and finish on time.";
+      const newDescription = meta ? `${meta}\n${advice}` : advice;
+      setTasks([
+        { ...only, priority: "Focus First", description: newDescription },
+      ]);
+      try {
+        await fetch("/api/tasks", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            id: only.id,
+            priority: "Focus First",
+            description: newDescription,
+          }),
+        });
+      } catch {
+        /* persistence is best-effort; UI already updated */
+      }
+      setAiSummary("1 task — defaulted to Focus First.");
+      toast.success("Task prioritized");
+      return;
+    }
     setAiLoading(true);
     const t = toast.loading("Analyzing your tasks…");
     try {

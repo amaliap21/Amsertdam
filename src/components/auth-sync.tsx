@@ -51,6 +51,36 @@ export default function AuthSync() {
 
     const supabase = createClient();
 
+    // Supabase schedules background token refreshes on its own timer.
+    // When the refresh token is invalid (user deleted, project reset,
+    // session manually revoked) the rejection is "unhandled" from
+    // Node/Next's point of view and pops the dev error overlay.
+    // Swallow exactly that case; everything else falls through to the
+    // normal error path.
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason as { message?: string; name?: string } | null;
+      const msg = String(reason?.message ?? reason ?? "");
+      if (
+        reason?.name === "AuthApiError" &&
+        /refresh\s*token|invalid|jwt/i.test(msg)
+      ) {
+        event.preventDefault();
+        // Drop the bad local session so the next page load is clean.
+        supabase.auth
+          .signOut({ scope: "local" })
+          .catch(() => undefined)
+          .finally(() => {
+            try {
+              localStorage.removeItem(STORAGE_KEY);
+              localStorage.removeItem(LAST_USER_KEY);
+            } catch {
+              /* ignore */
+            }
+          });
+      }
+    };
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+
     // 1. Reconcile on mount: if the stored last-user-id doesn't match the
     //    current session, the previous user's persisted data is stale.
     (async () => {
@@ -129,6 +159,7 @@ export default function AuthSync() {
 
     return () => {
       sub.subscription.unsubscribe();
+      window.removeEventListener("unhandledrejection", onUnhandledRejection);
     };
   }, []);
 

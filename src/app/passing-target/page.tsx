@@ -117,17 +117,36 @@ function normalizeCourse(course: RawCourse): Courses {
     }
   }
 
+  // The `courses` table has its own top-level `assessments` /
+  // `schedule_entries` / `requirements` jsonb columns that default to []
+  // — but the API only writes data via the encoded title (course_payload).
+  // Reading the top-level columns first was masking real saves: every row
+  // came back with empty `[]` defaults, and `Array.isArray([])` is true,
+  // so the fallback to course_payload never fired and assessments
+  // appeared to "disappear" after a refresh.
+  //
+  // Prefer course_payload (where actual writes land); only fall back to
+  // the top-level columns when course_payload doesn't have data.
+  const pickArray = <T,>(
+    fromPayload: unknown,
+    fromTopLevel: unknown,
+  ): T[] => {
+    if (Array.isArray(fromPayload) && fromPayload.length > 0) {
+      return fromPayload as T[];
+    }
+    if (Array.isArray(fromTopLevel)) return fromTopLevel as T[];
+    if (Array.isArray(fromPayload)) return fromPayload as T[];
+    return [];
+  };
+
   return {
     id: course.id,
     courseName: course.title ?? course.courseName ?? "Untitled Course",
     credits: packedMeta.credits ?? course.credits ?? 0,
-    scheduleEntries: Array.isArray(course.schedule_entries)
-      ? course.schedule_entries
-      : Array.isArray(course.scheduleEntries)
-        ? course.scheduleEntries
-        : Array.isArray(packedMeta.scheduleEntries)
-          ? packedMeta.scheduleEntries
-          : [],
+    scheduleEntries: pickArray<NonNullable<Courses["scheduleEntries"]>[number]>(
+      packedMeta.scheduleEntries,
+      course.schedule_entries ?? course.scheduleEntries,
+    ),
     typeTracking: packedMeta.typeTracking ?? course.typeTracking ?? "On Track",
     threshold: packedMeta.threshold ?? course.threshold ?? null,
     passingGrade:
@@ -135,18 +154,16 @@ function normalizeCourse(course: RawCourse): Courses {
       course.passingGrade ??
       course.threshold ??
       undefined,
-    assessments: Array.isArray(course.assessments)
-      ? course.assessments
-      : Array.isArray(packedMeta.assessments)
-        ? packedMeta.assessments
-        : [],
+    assessments: pickArray<Assessment>(
+      packedMeta.assessments,
+      course.assessments,
+    ),
     passingRequirement:
       packedMeta.passingRequirement ?? course.passingRequirement ?? "",
-    requirements: Array.isArray(course.requirements)
-      ? course.requirements
-      : Array.isArray(packedMeta.requirements)
-        ? packedMeta.requirements
-        : [],
+    requirements: pickArray<NonNullable<Courses["requirements"]>[number]>(
+      packedMeta.requirements,
+      course.requirements,
+    ),
     thresholdResult: course.thresholdResult,
     isCalculating: course.isCalculating,
   };
@@ -340,6 +357,12 @@ export default function PassingTarget() {
     courseIndex: number;
     assessIdx: number;
   } | null>(null);
+  // Inline-edit state for the per-course pass threshold (clicking the
+  // pencil next to "Pass Threshold" enters edit mode for that course only).
+  const [editingThresholdIndex, setEditingThresholdIndex] = useState<
+    number | null
+  >(null);
+  const [thresholdDraft, setThresholdDraft] = useState<string>("");
   const coursesCache = useStore((s) => s.coursesCache);
   const setCoursesCache = useStore((s) => s.setCoursesCache);
   // Seed from the persisted cache so the list renders instantly on mount.
@@ -789,6 +812,9 @@ export default function PassingTarget() {
         <>
           <input
             type="number"
+            min={0}
+            max={100}
+            step="0.01"
             value={value ?? ""}
             onChange={(e) => {
               const parsed = parseFloat(e.target.value);
@@ -798,6 +824,23 @@ export default function PassingTarget() {
           />
           <button
             onClick={() => {
+              // Validate score is in 0-100 before saving. If outside, alert
+              // and let the user adjust. If they intentionally use a
+              // non-100-based scale, confirm before keeping the value.
+              if (value !== undefined) {
+                if (value < 0) {
+                  alert("Score cannot be negative.");
+                  return;
+                }
+                if (value > 100) {
+                  const ok = confirm(
+                    `Score ${value} is above 100. RealTrack assumes a 0–100 scale ` +
+                      `for the passing-target calculation. Are you sure you want ` +
+                      `to keep this value? (Click Cancel to fix it.)`,
+                  );
+                  if (!ok) return;
+                }
+              }
               onEditToggle(false);
               // Recompute after score is saved; use a tiny delay so state settles
               setTimeout(() => {
@@ -995,13 +1038,70 @@ export default function PassingTarget() {
                           </p>
                         </div>
                       )}
-                      <div>
+                      <div onClick={(e) => e.stopPropagation()}>
                         <p className="text-xs text-gray-primary text-right">
                           Pass Threshold
                         </p>
-                        <p className="text-right text-xl sm:text-2xl font-medium">
-                          {item.threshold ?? item.passingGrade ?? "AI pending"}
-                        </p>
+                        {editingThresholdIndex === index ? (
+                          <div className="flex items-center gap-1 justify-end">
+                            <input
+                              type="number"
+                              min={0}
+                              max={100}
+                              step="0.1"
+                              value={thresholdDraft}
+                              onChange={(e) => setThresholdDraft(e.target.value)}
+                              className="w-20 rounded border border-gray-300 px-2 py-1 text-right text-base"
+                              autoFocus
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const parsed = parseFloat(thresholdDraft);
+                                if (Number.isNaN(parsed) || parsed < 0 || parsed > 100) {
+                                  alert("Pass Threshold must be between 0 and 100.");
+                                  return;
+                                }
+                                setCourseItems((prev) => {
+                                  const next = [...prev];
+                                  next[index] = {
+                                    ...next[index],
+                                    threshold: parsed,
+                                    passingGrade: parsed,
+                                  };
+                                  void persistCourse(next[index]);
+                                  triggerCompute(index, next);
+                                  return next;
+                                });
+                                setEditingThresholdIndex(null);
+                              }}
+                              className="text-indigo-primary hover:text-indigo-500"
+                            >
+                              <Check size={18} />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1 justify-end">
+                            <p className="text-right text-xl sm:text-2xl font-medium">
+                              {item.threshold ?? item.passingGrade ?? "—"}
+                            </p>
+                            <button
+                              type="button"
+                              title="Edit pass threshold"
+                              onClick={() => {
+                                setEditingThresholdIndex(index);
+                                setThresholdDraft(
+                                  String(
+                                    item.threshold ?? item.passingGrade ?? "",
+                                  ),
+                                );
+                              }}
+                              className="text-indigo-primary hover:text-indigo-500"
+                            >
+                              <PencilLine size={16} />
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1100,6 +1200,7 @@ export default function PassingTarget() {
                       0,
                     );
                     const courseFull = courseAssessTotal >= 100;
+                    const hasAssessments = (item.assessments ?? []).length > 0;
                     return (
                       <div className="flex flex-col gap-3 lg:flex-row sm:justify-between sm:items-center">
                         <h3 className="text-base text-black-primary">
@@ -1108,19 +1209,42 @@ export default function PassingTarget() {
                             ({courseAssessTotal}% / 100%)
                           </span>
                         </h3>
-                        <button
-                          disabled={courseFull}
-                          title={
-                            courseFull
-                              ? "Total weight already at 100%"
-                              : "Add assessment"
-                          }
-                          className="flex items-center gap-3 text-indigo-primary text-base font-medium cursor-pointer hover:underline disabled:opacity-40 disabled:cursor-not-allowed disabled:no-underline"
-                          onClick={() => setAddingAssessmentToCourse(index)}
-                        >
-                          <CirclePlus size={20} />
-                          Add Assessment
-                        </button>
+                        <div className="flex flex-wrap items-center gap-3">
+                          {/* Explicit recalculation — auto-compute on
+                              mount can race with persistence right after
+                              edits, so let the user force a fresh run. */}
+                          <button
+                            type="button"
+                            disabled={!hasAssessments}
+                            title={
+                              hasAssessments
+                                ? "Recalculate current grade and target scores"
+                                : "Add an assessment first"
+                            }
+                            className="flex items-center gap-2 rounded-lg border border-indigo-primary px-3 py-1.5 text-sm font-medium text-indigo-primary transition-colors hover:bg-indigo-primary/5 disabled:opacity-40 disabled:cursor-not-allowed"
+                            onClick={() =>
+                              setCourseItems((prev) => {
+                                triggerCompute(index, prev);
+                                return prev;
+                              })
+                            }
+                          >
+                            Generate Current Grade
+                          </button>
+                          <button
+                            disabled={courseFull}
+                            title={
+                              courseFull
+                                ? "Total weight already at 100%"
+                                : "Add assessment"
+                            }
+                            className="flex items-center gap-2 text-indigo-primary text-sm font-medium cursor-pointer hover:underline disabled:opacity-40 disabled:cursor-not-allowed disabled:no-underline"
+                            onClick={() => setAddingAssessmentToCourse(index)}
+                          >
+                            <CirclePlus size={18} />
+                            Add Assessment
+                          </button>
+                        </div>
                       </div>
                     );
                   })()}

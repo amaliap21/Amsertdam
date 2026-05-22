@@ -171,7 +171,8 @@ export default function Dashboard() {
   // ghosts (their `subject` carries a "· HIGH (xh)" suffix) and entries
   // whose id collides with a real task to avoid duplicates.
   const plannerOnlyEvents = useMemo(() => {
-    const aiPattern = /·\s*(?:HIGH|MEDIUM|LOW)\s*\(\d/;
+    // AI-generated work blocks (subject ends with "· HIGH (3h)" etc.)
+    // are now shown — they're the recommended working time, not noise.
     const taskIds = new Set(storeTasks.map((t) => String(t.id)));
     const colorFor = (title: string) =>
       title === "Class"
@@ -180,7 +181,7 @@ export default function Dashboard() {
           ? "bg-teal-primary"
           : "bg-blue-primary";
     return plannerEvents
-      .filter((e) => !aiPattern.test(e.subject) && !taskIds.has(String(e.id)))
+      .filter((e) => !taskIds.has(String(e.id)))
       .map((e) => ({
         id: `planner-${e.id}`,
         isoDate: e.date,

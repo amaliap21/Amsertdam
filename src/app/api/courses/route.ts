@@ -72,17 +72,36 @@ export async function POST(req: Request) {
     const { userId } = auth
 
     const body = await req.json()
+    // Write to the top-level mirror columns too. The encoded title is
+    // still the source of truth (it carries fields the DB doesn't have
+    // dedicated columns for, like passingRequirement / typeTracking), but
+    // mirroring assessments / schedule_entries / credits / threshold also
+    // populates the legacy columns so a stale `normalizeCourse` that
+    // reads from there can't fall back to empty defaults.
+    const assessments = body.assessments ?? []
+    const scheduleEntries = body.scheduleEntries ?? []
+    const credits = body.credits ?? 0
+    const threshold = body.threshold ?? null
+
     const payload = {
       title: encodeCourseTitle(body.title, {
         courseDescription: body.description ?? null,
-        credits: body.credits ?? 0,
-        threshold: body.threshold ?? null,
-        scheduleEntries: body.scheduleEntries ?? [],
-        assessments: body.assessments ?? [],
+        credits,
+        threshold,
+        scheduleEntries,
+        assessments,
         typeTracking: body.typeTracking ?? 'On Track',
         passingRequirement: body.passingRequirement ?? '',
         requirements: body.requirements ?? [],
       }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      credits: credits as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      threshold: threshold as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      assessments: assessments as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      schedule_entries: scheduleEntries as any,
     }
     const { data, error } = await supabaseAdmin
       .from('courses')
@@ -109,16 +128,35 @@ export async function PATCH(req: Request) {
 
     const payload: CourseUpdate = {}
     if (body.title !== undefined) {
+      const assessments = body.assessments ?? []
+      const scheduleEntries = body.scheduleEntries ?? []
+      const credits = body.credits ?? 0
+      const threshold = body.threshold ?? null
+
       payload.title = encodeCourseTitle(body.title, {
         courseDescription: body.description ?? null,
-        credits: body.credits ?? 0,
-        threshold: body.threshold ?? null,
-        scheduleEntries: body.scheduleEntries ?? [],
-        assessments: body.assessments ?? [],
+        credits,
+        threshold,
+        scheduleEntries,
+        assessments,
         typeTracking: body.typeTracking ?? 'On Track',
         passingRequirement: body.passingRequirement ?? '',
         requirements: body.requirements ?? [],
       })
+      // Mirror to the top-level columns so a refresh path that reads
+      // them directly (instead of decoding the title) sees the latest
+      // values. Previously these stayed as the default '[]' / 0 / null
+      // forever, which made `normalizeCourse` pick them up and drop the
+      // real data from `course_payload` — the "assessments disappear
+      // after refresh" bug.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(payload as Record<string, unknown>).credits = credits
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(payload as Record<string, unknown>).threshold = threshold
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(payload as Record<string, unknown>).assessments = assessments
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(payload as Record<string, unknown>).schedule_entries = scheduleEntries
     }
 
     const { data, error } = await supabaseAdmin
