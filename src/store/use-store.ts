@@ -71,6 +71,14 @@ export type PlannerEvent = {
   bgColor: string;
 };
 
+export type GanttBlock = {
+  task_name: string;
+  start_time: string;
+  end_time: string;
+  hours_allocated: number;
+  tier: "HIGH" | "MEDIUM" | "LOW";
+};
+
 export type QuizAttempt = {
   id: string;
   quizId: string;
@@ -115,6 +123,14 @@ interface AppState {
   setPlannerEvents: (events: PlannerEvent[]) => void;
   hiddenTaskEventIds: number[];
   setHiddenTaskEventIds: (ids: number[]) => void;
+
+  // Gantt chart + AI summary live in the store so the "Plan with AI"
+  // results survive page refreshes. Without persistence the chart blanks
+  // out whenever the user navigates away and back.
+  ganttData: GanttBlock[] | null;
+  setGanttData: (data: GanttBlock[] | null) => void;
+  aiSummary: string | null;
+  setAiSummary: (summary: string | null) => void;
 
   // Cached courses for fast first paint on the dashboard. Persisted so the
   // courses overview doesn't blank out between navigations / refreshes.
@@ -370,6 +386,10 @@ export const useStore = create<AppState>()(
         setPlannerEvents: (plannerEvents) => set({ plannerEvents }),
         hiddenTaskEventIds: [],
         setHiddenTaskEventIds: (hiddenTaskEventIds) => set({ hiddenTaskEventIds }),
+        ganttData: null,
+        setGanttData: (ganttData) => set({ ganttData }),
+        aiSummary: null,
+        setAiSummary: (aiSummary) => set({ aiSummary }),
         coursesCache: [],
         setCoursesCache: (coursesCache) => set({ coursesCache }),
         fetchCourses: async () => {

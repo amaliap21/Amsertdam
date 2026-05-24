@@ -14,7 +14,7 @@ import AddScheduleModal, {
   type ScheduleInitial,
 } from "@/components/ui/add-schedule-form";
 import toast from "react-hot-toast";
-import { useStore, type TaskItem } from "@/store/use-store";
+import { useStore, type TaskItem, type GanttBlock } from "@/store/use-store";
 import {
   parseTaskDate as parseTaskDateShared,
   extractAssessmentName,
@@ -289,16 +289,12 @@ export default function PriorityPlanner() {
     : null;
 
   const [aiLoading, setAiLoading] = useState(false);
-  const [aiSummary, setAiSummary] = useState<string | null>(null);
-
-  type GanttBlock = {
-    task_name: string;
-    start_time: string;
-    end_time: string;
-    hours_allocated: number;
-    tier: "HIGH" | "MEDIUM" | "LOW";
-  };
-  const [ganttData, setGanttData] = useState<GanttBlock[] | null>(null);
+  // AI summary + Gantt data are persisted in the store so the chart
+  // doesn't vanish when the user refreshes the page.
+  const aiSummary = useStore((s) => s.aiSummary);
+  const setAiSummary = useStore((s) => s.setAiSummary);
+  const ganttData = useStore((s) => s.ganttData);
+  const setGanttData = useStore((s) => s.setGanttData);
 
   const handleAiSchedule = async () => {
     if (aiLoading) return;
@@ -982,6 +978,7 @@ export default function PriorityPlanner() {
         isOpen={isExportOpen}
         onClose={() => setIsExportOpen(false)}
         events={events}
+        tasks={tasks}
       />
 
       <AddScheduleModal
@@ -1007,14 +1004,6 @@ function hashStr(s: string): number {
 }
 
 // ─── Gantt Chart Component ───────────────────────────────────────────────────
-
-type GanttBlock = {
-  task_name: string;
-  start_time: string;
-  end_time: string;
-  hours_allocated: number;
-  tier: "HIGH" | "MEDIUM" | "LOW";
-};
 
 const MONTH_LABELS = [
   "January",

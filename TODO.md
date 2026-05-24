@@ -1,0 +1,4 @@
+- [x] Estimated Hours in Add New Task become editable like setting time in a stopwatch
+- [x] Header give white background and not transparent
+- [x] When exporting to pdf or excel in Priority Planner, class should not have urgency and task should have the right urgency based on task value
+- [x] Gantt chart disappear after refreshes

@@ -270,7 +270,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
 
   return (
     <nav
-      className={`sticky top-0 z-20 flex w-full items-center gap-2 bg-cyan-light px-3 pb-3 sm:px-4 md:px-7.25 ${className}`}
+      className={`sticky top-0 z-20 flex w-full items-center gap-2 bg-white px-3 pb-3 sm:px-4 md:px-7.25 ${className}`}
       style={{ paddingTop: "max(1rem, env(safe-area-inset-top))" }}
     >
       {/* Mobile hamburger, opens the sidebar drawer */}

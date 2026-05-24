@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { X } from "lucide-react";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
@@ -16,18 +16,68 @@ type Event = {
   urgency?: string;
 };
 
-// Derive an urgency level for any event. Priority Planner task events
-// already encode the priority in their styling; for everything else we
-// fall back to a sane default per type.
-function urgencyOf(ev: Event): "HIGH" | "MEDIUM" | "LOW" {
+// Lightweight slice of a TaskItem — only the fields the urgency lookup needs.
+type TaskRef = {
+  title: string;
+  priority: string;
+};
+
+type Urgency = "HIGH" | "MEDIUM" | "LOW";
+
+function priorityToUrgency(priority: string): Urgency | "" {
+  if (priority === "Focus First") return "HIGH";
+  if (priority === "If You Have Energy") return "MEDIUM";
+  if (priority === "Safe to Minimize") return "LOW";
+  return "";
+}
+
+// Decide what urgency label to show for an event in the export. The rules
+// follow the user's brief: Class entries don't carry an urgency, and Task
+// entries take their urgency from the underlying task's value bucket
+// (Focus First / If You Have Energy / Safe to Minimize → HIGH / MEDIUM /
+// LOW). AI-generated work blocks embed the tier directly in the subject
+// ("Essay · HIGH (3h)") so we read that first.
+function urgencyOf(
+  ev: Event,
+  taskPriorityByName?: Map<string, Urgency>,
+): string {
   if (ev.urgency) {
     const u = ev.urgency.toUpperCase();
     if (u === "HIGH" || u === "MEDIUM" || u === "LOW") return u;
   }
-  const t = (ev.title ?? "").toLowerCase();
-  if (t.includes("focus")) return "HIGH";
-  if (t.includes("class") || t.includes("task")) return "MEDIUM";
-  return "LOW";
+  const type = (ev.title ?? "").toLowerCase();
+
+  // Class events have no urgency, full stop.
+  if (type.includes("class")) return "";
+
+  if (type.includes("task")) {
+    // AI events: subject ends with "· HIGH/MEDIUM/LOW (Xh)".
+    const m = ev.subject?.match(/·\s*(HIGH|MEDIUM|LOW)\s*\(/i);
+    if (m) return m[1].toUpperCase();
+
+    // Manual Task entries — try matching the user-typed subject against a
+    // task by title so the right priority bucket carries over.
+    if (taskPriorityByName && ev.subject) {
+      const subject = ev.subject.trim();
+      const exact = taskPriorityByName.get(subject);
+      if (exact) return exact;
+      // AI-style subjects have "Name · Course" — try the part before "·".
+      const beforeBullet = subject.split("·")[0]?.trim();
+      if (beforeBullet) {
+        const partial = taskPriorityByName.get(beforeBullet);
+        if (partial) return partial;
+      }
+      // Final fallback: substring match on any task title.
+      const lower = subject.toLowerCase();
+      for (const [name, pri] of taskPriorityByName) {
+        if (name && lower.includes(name.toLowerCase())) return pri;
+      }
+    }
+    return "-";
+  }
+
+  // Self Study and anything else: no urgency.
+  return "";
 }
 
 // "2026-05-23" → "Saturday".
@@ -42,12 +92,28 @@ type Props = {
   isOpen: boolean;
   onClose: () => void;
   events: Event[];
+  /** Tasks from the Task Value store, used to look up urgency for manual
+   *  Task entries that don't already embed a tier in their subject. */
+  tasks?: TaskRef[];
 };
 
-export default function ExportModal({ isOpen, onClose, events }: Props) {
+export default function ExportModal({ isOpen, onClose, events, tasks }: Props) {
   const [startDate, setStartDate] = useState(new Date().toString());
   const [endDate, setEndDate] = useState("");
   const [format, setFormat] = useState("pdf");
+
+  // Index tasks by title once so urgencyOf can do constant-time lookups
+  // while iterating events.
+  const taskPriorityByName = useMemo(() => {
+    const map = new Map<string, Urgency>();
+    if (tasks) {
+      for (const t of tasks) {
+        const u = priorityToUrgency(t.priority);
+        if (u && t.title) map.set(t.title, u);
+      }
+    }
+    return map;
+  }, [tasks]);
 
   if (!isOpen) return null;
 
@@ -58,7 +124,7 @@ export default function ExportModal({ isOpen, onClose, events }: Props) {
       Time: event.time,
       Type: event.title,
       Subject: event.subject,
-      Urgency: urgencyOf(event),
+      Urgency: urgencyOf(event, taskPriorityByName),
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(data);
@@ -150,7 +216,7 @@ export default function ExportModal({ isOpen, onClose, events }: Props) {
 
       const split = doc.splitTextToSize(event.subject, 60);
       doc.text(split, 115, y);
-      doc.text(urgencyOf(event), 180, y);
+      doc.text(urgencyOf(event, taskPriorityByName), 180, y);
 
       y += Math.max(7, split.length * 5);
     });
