@@ -63,7 +63,7 @@ export default function Sidebar({ className, isOpen, onToggle }: SidebarProps) {
       className={`
         ${isOpen ? "translate-x-0" : "-translate-x-full"}
         lg:translate-x-0
-        fixed lg:static inset-y-0 left-0 z-40
+        fixed lg:sticky lg:top-0 inset-y-0 left-0 z-40
         w-[82vw] max-w-80 lg:w-64
         h-dvh bg-white border-r border-gray-200 shadow-xl lg:shadow-none
         shrink-0 transition-transform duration-300
