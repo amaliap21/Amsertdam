@@ -29,18 +29,35 @@ type ThresholdResult = {
   current_grade: number;
   passing_grade: number;
   gap: number;
-  requirements: { name: string; weight: number; min_score: number; is_feasible: boolean }[];
+  requirements: {
+    name: string;
+    weight: number;
+    min_score: number;
+    is_feasible: boolean;
+  }[];
   status: string;
   safety_margin: number;
   is_feasible: boolean;
   message: string;
+  // "ok" = pending leaves with equal target (joined with "and")
+  // "graded" = all graded + failing, per-leaf recovery (joined with "or")
+  // "incomplete" = weights don't sum to 100
+  // "passing" = already passing
+  kind?: "ok" | "graded" | "incomplete" | "passing";
 };
 
 type Courses = {
   id?: string;
   courseName: string;
   credits: number;
-  scheduleEntries?: { day: string; startTime: string; endTime: string }[];
+  scheduleEntries?: {
+    day: string;
+    /** Specific calendar date for this session (YYYY-MM-DD). Optional so
+     *  older rows without a date still load. */
+    date?: string;
+    startTime: string;
+    endTime: string;
+  }[];
   typeTracking: string;
   threshold?: number | null;
   passingGrade?: number;
@@ -84,41 +101,69 @@ type PackedCourseMeta = {
 };
 
 function normalizeCourse(course: RawCourse): Courses {
-  let packedMeta: PackedCourseMeta = (course.course_payload ?? {}) as PackedCourseMeta;
-  if (!Object.keys(packedMeta).length && typeof course.description === "string" && course.description.trim()) {
+  let packedMeta: PackedCourseMeta = (course.course_payload ??
+    {}) as PackedCourseMeta;
+  if (
+    !Object.keys(packedMeta).length &&
+    typeof course.description === "string" &&
+    course.description.trim()
+  ) {
     try {
       const parsed = JSON.parse(course.description);
-      if (parsed && typeof parsed === "object") packedMeta = parsed as PackedCourseMeta;
+      if (parsed && typeof parsed === "object")
+        packedMeta = parsed as PackedCourseMeta;
     } catch {
       packedMeta = {};
     }
   }
 
+  // The `courses` table has its own top-level `assessments` /
+  // `schedule_entries` / `requirements` jsonb columns that default to []
+  // — but the API only writes data via the encoded title (course_payload).
+  // Reading the top-level columns first was masking real saves: every row
+  // came back with empty `[]` defaults, and `Array.isArray([])` is true,
+  // so the fallback to course_payload never fired and assessments
+  // appeared to "disappear" after a refresh.
+  //
+  // Prefer course_payload (where actual writes land); only fall back to
+  // the top-level columns when course_payload doesn't have data.
+  const pickArray = <T,>(
+    fromPayload: unknown,
+    fromTopLevel: unknown,
+  ): T[] => {
+    if (Array.isArray(fromPayload) && fromPayload.length > 0) {
+      return fromPayload as T[];
+    }
+    if (Array.isArray(fromTopLevel)) return fromTopLevel as T[];
+    if (Array.isArray(fromPayload)) return fromPayload as T[];
+    return [];
+  };
+
   return {
     id: course.id,
     courseName: course.title ?? course.courseName ?? "Untitled Course",
     credits: packedMeta.credits ?? course.credits ?? 0,
-    scheduleEntries: Array.isArray(course.schedule_entries)
-      ? course.schedule_entries
-      : Array.isArray(course.scheduleEntries)
-      ? course.scheduleEntries
-      : Array.isArray(packedMeta.scheduleEntries)
-      ? packedMeta.scheduleEntries
-      : [],
+    scheduleEntries: pickArray<NonNullable<Courses["scheduleEntries"]>[number]>(
+      packedMeta.scheduleEntries,
+      course.schedule_entries ?? course.scheduleEntries,
+    ),
     typeTracking: packedMeta.typeTracking ?? course.typeTracking ?? "On Track",
     threshold: packedMeta.threshold ?? course.threshold ?? null,
-    passingGrade: packedMeta.threshold ?? course.passingGrade ?? course.threshold ?? undefined,
-    assessments: Array.isArray(course.assessments)
-      ? course.assessments
-      : Array.isArray(packedMeta.assessments)
-      ? packedMeta.assessments
-      : [],
-    passingRequirement: packedMeta.passingRequirement ?? course.passingRequirement ?? "",
-    requirements: Array.isArray(course.requirements)
-      ? course.requirements
-      : Array.isArray(packedMeta.requirements)
-      ? packedMeta.requirements
-      : [],
+    passingGrade:
+      packedMeta.threshold ??
+      course.passingGrade ??
+      course.threshold ??
+      undefined,
+    assessments: pickArray<Assessment>(
+      packedMeta.assessments,
+      course.assessments,
+    ),
+    passingRequirement:
+      packedMeta.passingRequirement ?? course.passingRequirement ?? "",
+    requirements: pickArray<NonNullable<Courses["requirements"]>[number]>(
+      packedMeta.requirements,
+      course.requirements,
+    ),
     thresholdResult: course.thresholdResult,
     isCalculating: course.isCalculating,
   };
@@ -130,76 +175,209 @@ function effectiveScore(a: Assessment): number | undefined {
     const totalWeight = a.items.reduce((s, i) => s + i.weight, 0);
     const allGraded = a.items.every((i) => i.score !== undefined);
     if (!allGraded || totalWeight === 0) return undefined;
-    return a.items.reduce((s, i) => s + i.weight * (i.score ?? 0), 0) / totalWeight;
+    return (
+      a.items.reduce((s, i) => s + i.weight * (i.score ?? 0), 0) / totalWeight
+    );
   }
   return a.score;
 }
 
-async function callGraduationAPI(
+// Flatten an assessment tree into leaf rows (one per gradeable item).
+// An assessment with sub-items is replaced by its leaves; otherwise it IS a leaf.
+type Leaf = { name: string; weight: number; score?: number; parent?: string };
+
+function flattenToLeaves(assessments: Assessment[]): Leaf[] {
+  const leaves: Leaf[] = [];
+  for (const a of assessments) {
+    if (a.items && a.items.length > 0) {
+      for (const item of a.items) {
+        leaves.push({
+          name: item.name,
+          weight: item.weight,
+          score: item.score,
+          parent: a.name,
+        });
+      }
+    } else {
+      leaves.push({ name: a.name, weight: a.weight, score: a.score });
+    }
+  }
+  return leaves;
+}
+
+// Compute per-leaf required scores client-side. Runs synchronously, so the
+// suggestion always reflects the current state without waiting on a serverless
+// round-trip.
+function computeThreshold(
   assessments: Assessment[],
   passingGrade: number,
-  courseName: string,
-): Promise<ThresholdResult | null> {
-  const totalWeight = assessments.reduce((s, a) => s + a.weight, 0);
-  if (Math.abs(totalWeight - 100) > 0.5) return null;
+): ThresholdResult {
+  const leaves = flattenToLeaves(assessments);
+  const totalWeight = leaves.reduce((s, l) => s + l.weight, 0);
 
-  const aiPayload = {
-    course: courseName,
-    passingThreshold: passingGrade,
-    targetGrade: Math.max(passingGrade, 75),
-    assessments: assessments.map((a) => {
-      const score = effectiveScore(a);
-      return {
-        name: a.name,
-        weight: a.weight,
-        current: score ?? null,
-        done: score !== undefined,
-      };
-    }),
-  };
-
-  void aiPayload;
-  try {
-    const res = await fetch("/api/python/graduation_threshold", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        passing_grade: passingGrade,
-        assessments: assessments.map((a) => {
-          const score = effectiveScore(a);
-          return score !== undefined
-            ? { name: a.name, weight: a.weight, score }
-            : { name: a.name, weight: a.weight };
-        }),
-      }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data.error) return null;
-    return data as ThresholdResult;
-  } catch {
-    return null;
+  if (Math.abs(totalWeight - 100) > 0.5) {
+    const remaining = Math.max(0, 100 - totalWeight);
+    return {
+      kind: "incomplete",
+      current_grade: 0,
+      passing_grade: passingGrade,
+      gap: passingGrade,
+      requirements: [],
+      status: "Worth Reviewing",
+      safety_margin: 0,
+      is_feasible: false,
+      message: `Add ${remaining.toFixed(0)}% more assessment weight (currently ${totalWeight.toFixed(0)}%) to see your target scores.`,
+    };
   }
+
+  const achievedSum = leaves
+    .filter((l) => l.score !== undefined)
+    .reduce((s, l) => s + l.weight * (l.score ?? 0), 0);
+  const currentGrade = Math.round((achievedSum / 100) * 100) / 100;
+
+  const pending = leaves.filter((l) => l.score === undefined);
+  const pendingWeight = pending.reduce((s, l) => s + l.weight, 0);
+
+  // Everything is already graded
+  if (pendingWeight === 0) {
+    const passed = currentGrade >= passingGrade;
+    if (passed) {
+      return {
+        kind: "graded",
+        current_grade: currentGrade,
+        passing_grade: passingGrade,
+        gap: 0,
+        requirements: [],
+        status: "On Track",
+        safety_margin: 0,
+        is_feasible: true,
+        message: `All assessments graded. Final grade ${currentGrade} passes.`,
+      };
+    }
+
+    // Failing but all graded. Distribute the gap evenly across the leaves that
+    // are currently below the passing grade: each gets the same delta per
+    // weight unit, so following ALL targets lands at exactly the passing grade
+    //, no overshoot. Targets that would exceed 100 are flagged infeasible.
+    const requiredAdditional = passingGrade * 100 - achievedSum;
+    const underLeaves = leaves.filter((l) => (l.score ?? 0) < passingGrade);
+    const underWeight = underLeaves.reduce((s, l) => s + l.weight, 0);
+    // underWeight is always > 0 here: if every leaf were ≥ passing, the
+    // weighted average couldn't be below passing.
+    const delta = requiredAdditional / underWeight;
+
+    const recoveryReqs = underLeaves.map((l) => {
+      const target = (l.score ?? 0) + delta;
+      return {
+        name: l.parent ? `${l.parent} > ${l.name}` : l.name,
+        weight: l.weight,
+        min_score: Math.round(target * 10) / 10,
+        is_feasible: target <= 100,
+      };
+    });
+    const allFeasible = recoveryReqs.every((r) => r.is_feasible);
+
+    return {
+      kind: "graded",
+      current_grade: currentGrade,
+      passing_grade: passingGrade,
+      gap: Math.round((passingGrade - currentGrade) * 100) / 100,
+      requirements: recoveryReqs,
+      status: "At Risk",
+      safety_margin: 0,
+      is_feasible: allFeasible,
+      message: allFeasible
+        ? `Lift each under-performing assessment to reach the passing grade.`
+        : `Some required targets exceed 100, recovery isn't possible from these assessments alone.`,
+    };
+  }
+
+  const requiredAdditional = passingGrade * 100 - achievedSum;
+
+  // Already passing without needing the remaining items
+  if (requiredAdditional <= 0) {
+    return {
+      kind: "passing",
+      current_grade: currentGrade,
+      passing_grade: passingGrade,
+      gap: 0,
+      requirements: pending.map((l) => ({
+        name: l.parent ? `${l.parent} > ${l.name}` : l.name,
+        weight: l.weight,
+        min_score: 0,
+        is_feasible: true,
+      })),
+      status: "On Track",
+      safety_margin: 0,
+      is_feasible: true,
+      message: `Current grade ${currentGrade} already meets the passing threshold.`,
+    };
+  }
+
+  // Equal per-leaf target: same min score required on each remaining item to
+  // hit the passing grade. Each leaf is reviewed independently in the UI.
+  const target = requiredAdditional / pendingWeight;
+  const roundedTarget = Math.round(target * 10) / 10;
+  const feasible = target <= 100;
+
+  return {
+    kind: "ok",
+    current_grade: currentGrade,
+    passing_grade: passingGrade,
+    gap: Math.round(Math.max(0, passingGrade - currentGrade) * 100) / 100,
+    requirements: pending.map((l) => ({
+      name: l.parent ? `${l.parent} > ${l.name}` : l.name,
+      weight: l.weight,
+      min_score: roundedTarget,
+      is_feasible: feasible,
+    })),
+    status: !feasible
+      ? "At Risk"
+      : roundedTarget >= 85
+        ? "Worth Reviewing"
+        : "On Track",
+    safety_margin: 0,
+    is_feasible: feasible,
+    message: feasible
+      ? `Need at least ${roundedTarget} on each remaining assessment to pass.`
+      : `Target of ${roundedTarget} exceeds 100, may not be achievable.`,
+  };
 }
 
 export default function PassingTarget() {
   const [expandedCourses, setExpandedCourses] = useState<number[]>([]);
   const [showForm, setShowForm] = useState(false);
-  const [addingAssessmentToCourse, setAddingAssessmentToCourse] = useState<number | null>(null);
-  const [addingItemTo, setAddingItemTo] = useState<{ courseIndex: number; assessIdx: number } | null>(null);
+  // Prevents a second POST from a rapid double-click while the first request
+  // is still in flight (was producing 2-3 duplicate courses).
+  const [isAddingCourse, setIsAddingCourse] = useState(false);
+  const [addingAssessmentToCourse, setAddingAssessmentToCourse] = useState<
+    number | null
+  >(null);
+  const [addingItemTo, setAddingItemTo] = useState<{
+    courseIndex: number;
+    assessIdx: number;
+  } | null>(null);
+  // Inline-edit state for the per-course pass threshold (clicking the
+  // pencil next to "Pass Threshold" enters edit mode for that course only).
+  const [editingThresholdIndex, setEditingThresholdIndex] = useState<
+    number | null
+  >(null);
+  const [thresholdDraft, setThresholdDraft] = useState<string>("");
   const coursesCache = useStore((s) => s.coursesCache);
   const setCoursesCache = useStore((s) => s.setCoursesCache);
   // Seed from the persisted cache so the list renders instantly on mount.
   const [courseItems, setCourseItems] = useState<Courses[]>(() =>
-    Array.isArray(coursesCache) ? (coursesCache as RawCourse[]).map(normalizeCourse) : [],
+    Array.isArray(coursesCache)
+      ? (coursesCache as RawCourse[]).map(normalizeCourse)
+      : [],
   );
 
   const persistCourse = async (course: Courses) => {
     if (!course.id) return;
     try {
-      await fetch('/api/courses', {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+      await fetch("/api/courses", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({
           id: course.id,
           title: course.courseName,
@@ -208,7 +386,7 @@ export default function PassingTarget() {
           scheduleEntries: course.scheduleEntries ?? [],
           assessments: course.assessments ?? [],
           typeTracking: course.typeTracking,
-          passingRequirement: course.passingRequirement ?? '',
+          passingRequirement: course.passingRequirement ?? "",
           requirements: course.requirements ?? [],
         }),
       });
@@ -216,17 +394,51 @@ export default function PassingTarget() {
   };
 
   useEffect(() => {
+    let aborted = false;
     (async () => {
       try {
-        const c = await fetch('/api/courses');
-        if (!c.ok) return;
+        const c = await fetch("/api/courses");
+        if (aborted || !c.ok) return;
         const courses = await c.json();
-        if (!Array.isArray(courses)) return;
-        setCourseItems(courses.map(normalizeCourse));
+        if (aborted || !Array.isArray(courses)) return;
+        // Don't clobber locally-added courses. If the user POST'd a new
+        // course while this on-mount GET was in flight, the fetched
+        // payload predates the insert and would wipe the just-added row,
+        // including its scheduleEntries — that was the "Schedule not set"
+        // report after a fresh save. Merge by id and keep any local-only
+        // entries the server hasn't echoed back yet.
+        setCourseItems((prev) => {
+          const fetched = courses.map(normalizeCourse);
+          const fetchedIds = new Set(
+            fetched.map((c: Courses) => c.id).filter(Boolean),
+          );
+          const localOnly = prev.filter(
+            (c) => c.id && !fetchedIds.has(c.id),
+          );
+          // Also keep "client-only" rows that don't have an id yet (offline
+          // fallback path) — they'll get an id on a future refresh.
+          const localWithoutId = prev.filter((c) => !c.id);
+          return [...fetched, ...localOnly, ...localWithoutId];
+        });
         setCoursesCache(courses); // keep the shared cache fresh for the dashboard
       } catch {}
     })();
+    return () => {
+      aborted = true;
+    };
   }, [setCoursesCache]);
+
+  // Auto-compute target scores on load. triggerCompute always sets
+  // thresholdResult, so the guard below prevents re-firing once each course is
+  // computed.
+  useEffect(() => {
+    courseItems.forEach((course, index) => {
+      if (!course.assessments?.length) return;
+      if (course.thresholdResult) return;
+      triggerCompute(index, courseItems);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courseItems]);
 
   const _seedRemoved: Courses[] = [];
   void _seedRemoved;
@@ -353,26 +565,21 @@ export default function PassingTarget() {
   ];
   void _legacy;
 
-  // Call the Python API and update a course's threshold result
-  const triggerCompute = async (index: number, courses: Courses[]) => {
+  // Recompute target scores for a course from its current assessments. Runs
+  // synchronously client-side so the suggestion always matches the live state.
+  const triggerCompute = (index: number, courses: Courses[]) => {
     const course = courses[index];
     if (!course.assessments?.length) return;
 
-    setCourseItems((prev) =>
-      prev.map((c, i) => (i === index ? { ...c, isCalculating: true } : c)),
-    );
-
-    const result = await callGraduationAPI(
+    const result = computeThreshold(
       course.assessments,
       course.threshold ?? course.passingGrade ?? 75,
-      course.courseName,
     );
 
     setCourseItems((prev) =>
       prev.map((c, i) => {
         if (i !== index) return c;
-        if (!result) return { ...c, isCalculating: false };
-        const nextCourse = {
+        const nextCourse: Courses = {
           ...c,
           isCalculating: false,
           typeTracking: result.status,
@@ -396,7 +603,11 @@ export default function PassingTarget() {
   };
 
   const handleAddCourse = (newCourse: Courses) => {
-    const currentCredits = courseItems.reduce((s, c) => s + (c.credits || 0), 0);
+    if (isAddingCourse) return; // guard against rapid double-clicks creating duplicates
+    const currentCredits = courseItems.reduce(
+      (s, c) => s + (c.credits || 0),
+      0,
+    );
     const newCredits = newCourse.credits || 0;
     if (currentCredits + newCredits > 24) {
       const remaining = Math.max(0, 24 - currentCredits);
@@ -407,35 +618,56 @@ export default function PassingTarget() {
       );
       return;
     }
+    // Carry the form-supplied scheduleEntries forward as the source of truth.
+    // The bug we were chasing: the POST round-trip could echo back course_payload
+    // missing scheduleEntries (older rows, or a race with the on-mount GET that
+    // overwrites courseItems with pre-insert data), so prefer the user's input
+    // and only fall back to the API echo if it's somehow richer.
+    const formSchedule = Array.isArray(newCourse.scheduleEntries)
+      ? newCourse.scheduleEntries
+      : [];
+    setIsAddingCourse(true);
     (async () => {
       try {
-        const resp = await fetch('/api/courses', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
+        const resp = await fetch("/api/courses", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
           body: JSON.stringify({
             title: newCourse.courseName,
             credits: newCourse.credits,
             threshold: newCourse.threshold ?? null,
-            scheduleEntries: newCourse.scheduleEntries ?? [],
+            scheduleEntries: formSchedule,
             assessments: newCourse.assessments ?? [],
           }),
-        })
+        });
         if (resp.ok) {
-          const body = await resp.json()
-          // Server may not echo threshold back through course_payload — preserve user input
+          const body = await resp.json();
+          // Server may not echo threshold back through course_payload, preserve user input
           const merged = normalizeCourse(body);
           merged.threshold = newCourse.threshold ?? merged.threshold ?? null;
           merged.passingGrade = newCourse.threshold ?? merged.passingGrade;
-          const updated = [...courseItems, merged];
-          setCourseItems(updated);
+          // Trust the form-supplied schedule over the round-trip echo. If
+          // the echo dropped scheduleEntries (encoding / race / older row),
+          // the user would otherwise see "Schedule not set" right after
+          // saving a fully-filled schedule.
+          if (!merged.scheduleEntries?.length && formSchedule.length) {
+            merged.scheduleEntries = formSchedule;
+          }
+          setCourseItems((prev) => [...prev, merged]);
           setShowForm(false);
-          return
+          return;
         }
-      } catch {}
-      const updated = [...courseItems, normalizeCourse({ ...newCourse })];
-      setCourseItems(updated);
+      } catch {
+      } finally {
+        setIsAddingCourse(false);
+      }
+      const fallback = normalizeCourse({ ...newCourse });
+      if (!fallback.scheduleEntries?.length && formSchedule.length) {
+        fallback.scheduleEntries = formSchedule;
+      }
+      setCourseItems((prev) => [...prev, fallback]);
       setShowForm(false);
-    })()
+    })();
   };
 
   const handleAddAssessment = (
@@ -527,19 +759,13 @@ export default function PassingTarget() {
     }
 
     const parts: React.ReactNode[] = [];
+    const isRecovery = course.thresholdResult?.kind === "graded";
 
-    if (details.every((req) => req.score === details[0].score)) {
-      parts.push("To pass this course, you need at least ");
-      parts.push(
-        <span key="overall-score" className="font-semibold text-indigo-primary">
-          {details[0].score}
-        </span>,
-      );
-      parts.push(" overall");
-      return <>{parts}</>;
-    }
-
-    parts.push("To pass this course, you need at least ");
+    parts.push(
+      isRecovery
+        ? "To recover, score at least "
+        : "To pass this course, you need at least ",
+    );
 
     details.forEach((req, index) => {
       parts.push(
@@ -586,6 +812,9 @@ export default function PassingTarget() {
         <>
           <input
             type="number"
+            min={0}
+            max={100}
+            step="0.01"
             value={value ?? ""}
             onChange={(e) => {
               const parsed = parseFloat(e.target.value);
@@ -595,6 +824,23 @@ export default function PassingTarget() {
           />
           <button
             onClick={() => {
+              // Validate score is in 0-100 before saving. If outside, alert
+              // and let the user adjust. If they intentionally use a
+              // non-100-based scale, confirm before keeping the value.
+              if (value !== undefined) {
+                if (value < 0) {
+                  alert("Score cannot be negative.");
+                  return;
+                }
+                if (value > 100) {
+                  const ok = confirm(
+                    `Score ${value} is above 100. RealTrack assumes a 0–100 scale ` +
+                      `for the passing-target calculation. Are you sure you want ` +
+                      `to keep this value? (Click Cancel to fix it.)`,
+                  );
+                  if (!ok) return;
+                }
+              }
               onEditToggle(false);
               // Recompute after score is saved; use a tiny delay so state settles
               setTimeout(() => {
@@ -697,10 +943,10 @@ export default function PassingTarget() {
   };
 
   return (
-    <div className="px-14.75 py-11.5 w-full">
+    <div className="w-full px-4 sm:px-6 md:px-10 lg:px-14.75 py-6 md:py-11.5">
       {/* Courses Overview */}
       <div className="flex flex-col gap-8">
-        <div className="flex flex-row justify-between items-center">
+        <div className="flex flex-col gap-4 lg:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-col">
             <h1 className="text-[20px] font-semibold text-black-primary">
               Passing Target
@@ -711,8 +957,9 @@ export default function PassingTarget() {
           </div>
 
           <button
+            data-tour="add-course"
             onClick={() => setShowForm(true)}
-            className="flex flex-row gap-2 px-3 py-2 rounded-lg bg-indigo-primary text-white items-center cursor-pointer hover:bg-indigo-500 transition-colors"
+            className="self-auto inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-primary px-4 py-2 text-white cursor-pointer transition-colors hover:bg-indigo-500"
           >
             <CirclePlus size={16} />
             Add Course
@@ -723,15 +970,15 @@ export default function PassingTarget() {
           {courseItems.map((item, index) => (
             <div
               key={index}
-              className="flex flex-col bg-white rounded-lg shadow-md overflow-hidden"
+              className="flex flex-col bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100"
             >
               {/* Course Header */}
               <div
-                className="flex flex-row justify-between items-center px-6 py-4 cursor-pointer hover:bg-gray-50 transition-colors"
+                className="flex gap-4 px-4 py-4 cursor-pointer hover:bg-gray-50 transition-colors md:px-5 flex-row items-center justify-between"
                 onClick={() => toggleCourse(index)}
               >
                 <div className="flex flex-col gap-1">
-                  <div className="flex flex-row gap-3 items-center text-black-primary font-medium">
+                  <div className="flex flex-wrap gap-2 items-center text-black-primary font-medium">
                     <h1>{item.courseName}</h1>
                     <div
                       className="py-1 px-3 text-xs font-semibold"
@@ -741,28 +988,29 @@ export default function PassingTarget() {
                           item.typeTracking === "On Track"
                             ? "1px solid rgba(115, 197, 143, 0.20)"
                             : item.typeTracking === "At Risk"
-                            ? "1px solid rgba(197, 115, 115, 0.20)"
-                            : "1px solid rgba(197, 178, 115, 0.20)",
+                              ? "1px solid rgba(197, 115, 115, 0.20)"
+                              : "1px solid rgba(197, 178, 115, 0.20)",
                         background:
                           item.typeTracking === "On Track"
                             ? "rgba(132, 224, 163, 0.20)"
                             : item.typeTracking === "At Risk"
-                            ? "rgba(224, 132, 132, 0.20)"
-                            : "rgba(224, 216, 132, 0.20)",
+                              ? "rgba(224, 132, 132, 0.20)"
+                              : "rgba(224, 216, 132, 0.20)",
                       }}
                     >
                       {item.typeTracking}
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap gap-2 text-sm text-gray-primary">
+                  <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm text-gray-primary">
                     <span>{item.credits} credits</span>
                     {(item.scheduleEntries ?? []).length > 0 ? (
                       item.scheduleEntries!.map((entry, scheduleIndex) => (
                         <span
                           key={`${entry.day}-${entry.startTime}-${scheduleIndex}`}
-                          className="rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-700"
+                          className="rounded-full bg-gray-100 px-2.5 py-1 text-[11px] sm:text-xs text-gray-700 whitespace-nowrap"
                         >
+                          {entry.date ? `${entry.date} · ` : ""}
                           {entry.day} {entry.startTime}–{entry.endTime}
                         </span>
                       ))
@@ -772,29 +1020,88 @@ export default function PassingTarget() {
                   </div>
                 </div>
 
-                <div className="flex flex-row gap-4 items-center">
+                <div className="flex flex-wrap justify-end gap-4 items-center w-full lg:w-auto">
                   {item.isCalculating ? (
                     <div className="flex flex-col items-end gap-1">
                       <p className="text-xs text-gray-primary">Calculating…</p>
                       <div className="w-6 h-6 border-2 border-indigo-primary border-t-transparent rounded-full animate-spin" />
                     </div>
                   ) : (
-                    <div className="flex flex-row gap-5 items-end">
+                    <div className="flex flex-wrap gap-4 sm:gap-5 items-end">
                       {item.thresholdResult && (
                         <div>
-                          <p className="text-xs text-gray-primary text-right">Current Grade</p>
-                          <p className="text-right text-2xl font-medium text-gray-500">
+                          <p className="text-xs text-gray-primary text-right">
+                            Current Grade
+                          </p>
+                          <p className="text-right text-xl sm:text-2xl font-medium text-gray-500">
                             {item.thresholdResult.current_grade}
                           </p>
                         </div>
                       )}
-                      <div>
+                      <div onClick={(e) => e.stopPropagation()}>
                         <p className="text-xs text-gray-primary text-right">
                           Pass Threshold
                         </p>
-                        <p className="text-right text-2xl font-medium">
-                          {item.threshold ?? item.passingGrade ?? "AI pending"}
-                        </p>
+                        {editingThresholdIndex === index ? (
+                          <div className="flex items-center gap-1 justify-end">
+                            <input
+                              type="number"
+                              min={0}
+                              max={100}
+                              step="0.1"
+                              value={thresholdDraft}
+                              onChange={(e) => setThresholdDraft(e.target.value)}
+                              className="w-20 rounded border border-gray-300 px-2 py-1 text-right text-base"
+                              autoFocus
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const parsed = parseFloat(thresholdDraft);
+                                if (Number.isNaN(parsed) || parsed < 0 || parsed > 100) {
+                                  alert("Pass Threshold must be between 0 and 100.");
+                                  return;
+                                }
+                                setCourseItems((prev) => {
+                                  const next = [...prev];
+                                  next[index] = {
+                                    ...next[index],
+                                    threshold: parsed,
+                                    passingGrade: parsed,
+                                  };
+                                  void persistCourse(next[index]);
+                                  triggerCompute(index, next);
+                                  return next;
+                                });
+                                setEditingThresholdIndex(null);
+                              }}
+                              className="text-indigo-primary hover:text-indigo-500"
+                            >
+                              <Check size={18} />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1 justify-end">
+                            <p className="text-right text-xl sm:text-2xl font-medium">
+                              {item.threshold ?? item.passingGrade ?? "—"}
+                            </p>
+                            <button
+                              type="button"
+                              title="Edit pass threshold"
+                              onClick={() => {
+                                setEditingThresholdIndex(index);
+                                setThresholdDraft(
+                                  String(
+                                    item.threshold ?? item.passingGrade ?? "",
+                                  ),
+                                );
+                              }}
+                              className="text-indigo-primary hover:text-indigo-500"
+                            >
+                              <PencilLine size={16} />
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -803,14 +1110,20 @@ export default function PassingTarget() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (!confirm('Delete this course?')) return;
+                        if (!confirm("Delete this course?")) return;
                         // perform server delete when possible
                         (async () => {
                           const maybeId = item.id;
                           if (maybeId) {
-                            try { await fetch(`/api/courses?id=${maybeId}`, { method: 'DELETE' }) } catch {}
+                            try {
+                              await fetch(`/api/courses?id=${maybeId}`, {
+                                method: "DELETE",
+                              });
+                            } catch {}
                           }
-                          setCourseItems((prev) => prev.filter((_, i) => i !== index));
+                          setCourseItems((prev) =>
+                            prev.filter((_, i) => i !== index),
+                          );
                         })();
                       }}
                       className="text-red-500 hover:text-red-600"
@@ -842,15 +1155,16 @@ export default function PassingTarget() {
 
               {/* Expanded Content */}
               {expandedCourses.includes(index) && (
-                <div className="flex flex-col gap-5 px-6 pt-1 pb-5">
+                <div className="w-full overflow-x-hidden flex flex-col gap-5 px-4 md:px-5 pt-1 pb-5">
                   {/* Passing requirement banner */}
                   {item.passingRequirement && (
                     <div
                       className="text-sm text-[#5D5D5D] px-6 py-4 rounded-xl flex flex-col gap-1"
                       style={{
-                        background: item.thresholdResult?.is_feasible === false
-                          ? "rgba(229, 61, 61, 0.08)"
-                          : "rgba(61, 66, 229, 0.10)",
+                        background:
+                          item.thresholdResult?.is_feasible === false
+                            ? "rgba(229, 61, 61, 0.08)"
+                            : "rgba(61, 66, 229, 0.10)",
                       }}
                     >
                       <p>{renderPassingRequirement(item)}</p>
@@ -861,7 +1175,8 @@ export default function PassingTarget() {
                             {item.thresholdResult.current_grade}
                           </span>
                           {item.thresholdResult.gap > 0 && (
-                            <> — gap of{" "}
+                            <>
+                              , gap of{" "}
                               <span className="font-semibold text-black-primary">
                                 {item.thresholdResult.gap}
                               </span>{" "}
@@ -885,27 +1200,51 @@ export default function PassingTarget() {
                       0,
                     );
                     const courseFull = courseAssessTotal >= 100;
+                    const hasAssessments = (item.assessments ?? []).length > 0;
                     return (
-                      <div className="flex flex-row justify-between items-center">
+                      <div className="flex flex-col gap-3 lg:flex-row sm:justify-between sm:items-center">
                         <h3 className="text-base text-black-primary">
                           Assessment Breakdown
                           <span className="ml-2 text-xs text-gray-primary">
                             ({courseAssessTotal}% / 100%)
                           </span>
                         </h3>
-                        <button
-                          disabled={courseFull}
-                          title={
-                            courseFull
-                              ? "Total weight already at 100%"
-                              : "Add assessment"
-                          }
-                          className="flex items-center gap-3 text-indigo-primary text-base font-medium cursor-pointer hover:underline disabled:opacity-40 disabled:cursor-not-allowed disabled:no-underline"
-                          onClick={() => setAddingAssessmentToCourse(index)}
-                        >
-                          <CirclePlus size={20} />
-                          Add Assessment
-                        </button>
+                        <div className="flex flex-wrap items-center gap-3">
+                          {/* Explicit recalculation — auto-compute on
+                              mount can race with persistence right after
+                              edits, so let the user force a fresh run. */}
+                          <button
+                            type="button"
+                            disabled={!hasAssessments}
+                            title={
+                              hasAssessments
+                                ? "Recalculate current grade and target scores"
+                                : "Add an assessment first"
+                            }
+                            className="flex items-center gap-2 rounded-lg border border-indigo-primary px-3 py-1.5 text-sm font-medium text-indigo-primary transition-colors hover:bg-indigo-primary/5 disabled:opacity-40 disabled:cursor-not-allowed"
+                            onClick={() =>
+                              setCourseItems((prev) => {
+                                triggerCompute(index, prev);
+                                return prev;
+                              })
+                            }
+                          >
+                            Generate Current Grade
+                          </button>
+                          <button
+                            disabled={courseFull}
+                            title={
+                              courseFull
+                                ? "Total weight already at 100%"
+                                : "Add assessment"
+                            }
+                            className="flex items-center gap-2 text-indigo-primary text-sm font-medium cursor-pointer hover:underline disabled:opacity-40 disabled:cursor-not-allowed disabled:no-underline"
+                            onClick={() => setAddingAssessmentToCourse(index)}
+                          >
+                            <CirclePlus size={18} />
+                            Add Assessment
+                          </button>
+                        </div>
                       </div>
                     );
                   })()}
@@ -919,11 +1258,11 @@ export default function PassingTarget() {
                       return (
                         <div key={assessIdx} className="flex flex-col gap-5">
                           {/* Assessment row */}
-                          <div className="flex flex-row justify-between items-center">
+                          <div className="flex gap-4 flex-row justify-between items-start">
                             <div className="flex flex-col gap-2">
                               {/* Name + weight */}
                               <div className="flex flex-row gap-1 items-end">
-                                <p className="font-medium text-base text-black-primary">
+                                <p className="font-medium text-sm sm:text-base text-black-primary wrap-break-word">
                                   {assessment.name}
                                 </p>
                                 {(() => {
@@ -938,8 +1277,20 @@ export default function PassingTarget() {
                                     assessment.isEditingWeight,
                                     (val) =>
                                       setCourseItems((prev) => {
-                                        const updated = [...prev];
-                                        updated[index].assessments![assessIdx].weight = val;
+                                        const updated = prev.map((c, ci) =>
+                                          ci !== index
+                                            ? c
+                                            : {
+                                                ...c,
+                                                assessments: c.assessments?.map(
+                                                  (a, ai) =>
+                                                    ai !== assessIdx
+                                                      ? a
+                                                      : { ...a, weight: val },
+                                                ),
+                                              },
+                                        );
+                                        triggerCompute(index, updated);
                                         return updated;
                                       }),
                                     (editing) =>
@@ -955,7 +1306,7 @@ export default function PassingTarget() {
                                 })()}
                               </div>
 
-                              {/* Score — only when no sub-items */}
+                              {/* Score, only when no sub-items */}
                               {!hasSubItems && (
                                 <div className="flex flex-row gap-1 items-center">
                                   {renderScoreField(
@@ -963,10 +1314,20 @@ export default function PassingTarget() {
                                     assessment.isEditing,
                                     (val) =>
                                       setCourseItems((prev) => {
-                                        const updated = [...prev];
-                                        updated[index].assessments![
-                                          assessIdx
-                                        ].score = val;
+                                        const updated = prev.map((c, ci) =>
+                                          ci !== index
+                                            ? c
+                                            : {
+                                                ...c,
+                                                assessments: c.assessments?.map(
+                                                  (a, ai) =>
+                                                    ai !== assessIdx
+                                                      ? a
+                                                      : { ...a, score: val },
+                                                ),
+                                              },
+                                        );
+                                        triggerCompute(index, updated);
                                         return updated;
                                       }),
                                     (editing) =>
@@ -984,14 +1345,14 @@ export default function PassingTarget() {
                             </div>
 
                             {/* Right: Add Item + date (when no sub-items) */}
-                            <div className="flex flex-col items-end gap-1">
+                            <div className="flex flex-col md:items-end gap-2">
                               <div className="flex items-center gap-3">
                                 {(() => {
-                                  const itemTotal = (assessment.items ?? []).reduce(
-                                    (s, it) => s + (it.weight || 0),
-                                    0,
-                                  );
-                                  const itemFull = itemTotal >= assessment.weight;
+                                  const itemTotal = (
+                                    assessment.items ?? []
+                                  ).reduce((s, it) => s + (it.weight || 0), 0);
+                                  const itemFull =
+                                    itemTotal >= assessment.weight;
                                   return (
                                     <button
                                       disabled={itemFull}
@@ -1000,8 +1361,13 @@ export default function PassingTarget() {
                                           ? `Items already total ${assessment.weight}%`
                                           : "Add item"
                                       }
-                                      className="flex items-center gap-3 text-indigo-primary text-base font-medium cursor-pointer hover:underline disabled:opacity-40 disabled:cursor-not-allowed disabled:no-underline"
-                                      onClick={() => setAddingItemTo({ courseIndex: index, assessIdx })}
+                                      className="flex items-center gap-2 text-indigo-primary text-sm sm:text-base font-medium cursor-pointer hover:underline disabled:opacity-40 disabled:cursor-not-allowed disabled:no-underline"
+                                      onClick={() =>
+                                        setAddingItemTo({
+                                          courseIndex: index,
+                                          assessIdx,
+                                        })
+                                      }
                                     >
                                       <CirclePlus size={20} />
                                       Add Item
@@ -1011,14 +1377,18 @@ export default function PassingTarget() {
                                 <button
                                   title="Delete assessment"
                                   onClick={() => {
-                                    if (!confirm('Delete this assessment?')) return;
+                                    if (!confirm("Delete this assessment?"))
+                                      return;
                                     setCourseItems((prev) => {
                                       const updated = prev.map((c, ci) =>
                                         ci !== index
                                           ? c
                                           : {
                                               ...c,
-                                              assessments: c.assessments?.filter((_, ai) => ai !== assessIdx),
+                                              assessments:
+                                                c.assessments?.filter(
+                                                  (_, ai) => ai !== assessIdx,
+                                                ),
                                             },
                                       );
                                       triggerCompute(index, updated);
@@ -1042,7 +1412,7 @@ export default function PassingTarget() {
                           {assessment.items?.map((subItem, subIdx) => (
                             <div
                               key={subIdx}
-                              className="flex flex-row justify-between items-center ml-6"
+                              className="flex gap-4 flex-row justify-between items-start ml-3 sm:ml-6"
                             >
                               <div className="flex flex-col gap-2">
                                 <div className="flex flex-row gap-1 items-end">
@@ -1053,16 +1423,45 @@ export default function PassingTarget() {
                                     // Max for this item = parent's weight - other items
                                     const otherItems = (assessment.items ?? [])
                                       .filter((_, i) => i !== subIdx)
-                                      .reduce((s, it) => s + (it.weight || 0), 0);
-                                    const maxWeight = assessment.weight - otherItems;
+                                      .reduce(
+                                        (s, it) => s + (it.weight || 0),
+                                        0,
+                                      );
+                                    const maxWeight =
+                                      assessment.weight - otherItems;
                                     return renderWeightField(
                                       subItem.weight,
                                       maxWeight,
                                       subItem.isEditingWeight,
                                       (val) =>
                                         setCourseItems((prev) => {
-                                          const updated = [...prev];
-                                          updated[index].assessments![assessIdx].items![subIdx].weight = val;
+                                          const updated = prev.map((c, ci) =>
+                                            ci !== index
+                                              ? c
+                                              : {
+                                                  ...c,
+                                                  assessments:
+                                                    c.assessments?.map(
+                                                      (a, ai) =>
+                                                        ai !== assessIdx
+                                                          ? a
+                                                          : {
+                                                              ...a,
+                                                              items: a.items?.map(
+                                                                (it, ii) =>
+                                                                  ii !== subIdx
+                                                                    ? it
+                                                                    : {
+                                                                        ...it,
+                                                                        weight:
+                                                                          val,
+                                                                      },
+                                                              ),
+                                                            },
+                                                    ),
+                                                },
+                                          );
+                                          triggerCompute(index, updated);
                                           return updated;
                                         }),
                                       (editing) =>
@@ -1070,7 +1469,8 @@ export default function PassingTarget() {
                                           const updated = [...prev];
                                           updated[index].assessments![
                                             assessIdx
-                                          ].items![subIdx].isEditingWeight = editing;
+                                          ].items![subIdx].isEditingWeight =
+                                            editing;
                                           return updated;
                                         }),
                                       index,
@@ -1084,10 +1484,31 @@ export default function PassingTarget() {
                                     subItem.isEditing,
                                     (val) =>
                                       setCourseItems((prev) => {
-                                        const updated = [...prev];
-                                        updated[index].assessments![
-                                          assessIdx
-                                        ].items![subIdx].score = val;
+                                        const updated = prev.map((c, ci) =>
+                                          ci !== index
+                                            ? c
+                                            : {
+                                                ...c,
+                                                assessments: c.assessments?.map(
+                                                  (a, ai) =>
+                                                    ai !== assessIdx
+                                                      ? a
+                                                      : {
+                                                          ...a,
+                                                          items: a.items?.map(
+                                                            (it, ii) =>
+                                                              ii !== subIdx
+                                                                ? it
+                                                                : {
+                                                                    ...it,
+                                                                    score: val,
+                                                                  },
+                                                          ),
+                                                        },
+                                                ),
+                                              },
+                                        );
+                                        triggerCompute(index, updated);
                                         return updated;
                                       }),
                                     (editing) =>
@@ -1103,7 +1524,7 @@ export default function PassingTarget() {
                                 </div>
                               </div>
 
-                              <div className="flex items-center gap-3">
+                              <div className="flex flex-wrap items-center gap-2">
                                 {subItem.date && (
                                   <p className="text-sm text-gray-primary text-right">
                                     {subItem.date}
@@ -1112,20 +1533,24 @@ export default function PassingTarget() {
                                 <button
                                   title="Delete item"
                                   onClick={() => {
-                                    if (!confirm('Delete this item?')) return;
+                                    if (!confirm("Delete this item?")) return;
                                     setCourseItems((prev) => {
                                       const updated = prev.map((c, ci) =>
                                         ci !== index
                                           ? c
                                           : {
                                               ...c,
-                                              assessments: c.assessments?.map((a, ai) =>
-                                                ai !== assessIdx
-                                                  ? a
-                                                  : {
-                                                      ...a,
-                                                      items: a.items?.filter((_, si) => si !== subIdx),
-                                                    },
+                                              assessments: c.assessments?.map(
+                                                (a, ai) =>
+                                                  ai !== assessIdx
+                                                    ? a
+                                                    : {
+                                                        ...a,
+                                                        items: a.items?.filter(
+                                                          (_, si) =>
+                                                            si !== subIdx,
+                                                        ),
+                                                      },
                                               ),
                                             },
                                       );
@@ -1160,45 +1585,53 @@ export default function PassingTarget() {
       )}
 
       {/* Add Assessment Modal */}
-      {addingAssessmentToCourse !== null && (() => {
-        const course = courseItems[addingAssessmentToCourse];
-        const used = (course?.assessments ?? []).reduce(
-          (s, a) => s + (a.weight || 0),
-          0,
-        );
-        const remaining = Math.max(0, 100 - used);
-        return (
-          <AssessmentForm
-            maxWeight={remaining}
-            onSubmit={(assessment) =>
-              handleAddAssessment(addingAssessmentToCourse, assessment)
-            }
-            onCancel={() => setAddingAssessmentToCourse(null)}
-          />
-        );
-      })()}
+      {addingAssessmentToCourse !== null &&
+        (() => {
+          const course = courseItems[addingAssessmentToCourse];
+          const used = (course?.assessments ?? []).reduce(
+            (s, a) => s + (a.weight || 0),
+            0,
+          );
+          const remaining = Math.max(0, 100 - used);
+          return (
+            <AssessmentForm
+              maxWeight={remaining}
+              onSubmit={(assessment) =>
+                handleAddAssessment(addingAssessmentToCourse, assessment)
+              }
+              onCancel={() => setAddingAssessmentToCourse(null)}
+            />
+          );
+        })()}
 
       {/* Add Item Modal */}
-      {addingItemTo !== null && (() => {
-        const assessment =
-          courseItems[addingItemTo.courseIndex]?.assessments?.[addingItemTo.assessIdx];
-        if (!assessment) return null;
-        const usedItems = (assessment.items ?? []).reduce(
-          (s, it) => s + (it.weight || 0),
-          0,
-        );
-        const remaining = Math.max(0, assessment.weight - usedItems);
-        return (
-          <ItemForm
-            assessmentName={assessment.name}
-            assessmentWeight={remaining}
-            onSubmit={(item) =>
-              handleAddItem(addingItemTo.courseIndex, addingItemTo.assessIdx, item)
-            }
-            onCancel={() => setAddingItemTo(null)}
-          />
-        );
-      })()}
+      {addingItemTo !== null &&
+        (() => {
+          const assessment =
+            courseItems[addingItemTo.courseIndex]?.assessments?.[
+              addingItemTo.assessIdx
+            ];
+          if (!assessment) return null;
+          const usedItems = (assessment.items ?? []).reduce(
+            (s, it) => s + (it.weight || 0),
+            0,
+          );
+          const remaining = Math.max(0, assessment.weight - usedItems);
+          return (
+            <ItemForm
+              assessmentName={assessment.name}
+              assessmentWeight={remaining}
+              onSubmit={(item) =>
+                handleAddItem(
+                  addingItemTo.courseIndex,
+                  addingItemTo.assessIdx,
+                  item,
+                )
+              }
+              onCancel={() => setAddingItemTo(null)}
+            />
+          );
+        })()}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 "use client";
 import Image from "next/image";
+import Link from "next/link";
 import React, {
   useCallback,
   useEffect,
@@ -17,6 +18,8 @@ import {
   Sparkles,
   NotebookText,
   CheckSquare,
+  HelpCircle,
+  Menu,
 } from "lucide-react";
 import { useCurrentUser } from "@/lib/use-current-user";
 import { useStore } from "@/store/use-store";
@@ -24,6 +27,8 @@ import toast from "react-hot-toast";
 
 interface NavbarProps {
   className?: string;
+  /** Toggles the layout-level sidebar drawer. Used by the mobile hamburger. */
+  onToggleSidebar?: () => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -61,7 +66,7 @@ function includesQ(value: string | undefined | null, q: string) {
 
 /* ================================================================== */
 
-const Navbar: React.FC<NavbarProps> = ({ className = "" }) => {
+const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
   const router = useRouter();
   const { user } = useCurrentUser();
 
@@ -156,7 +161,13 @@ const Navbar: React.FC<NavbarProps> = ({ className = "" }) => {
   /* ---------- instant search ---------- */
   const [searchValue, setSearchValue] = useState("");
   const [showResults, setShowResults] = useState(false);
-  const searchRef = useRef<HTMLDivElement>(null);
+  // Two refs: desktop and mobile search render side-by-side (each hidden
+  // at the other breakpoint). Sharing one ref made `searchRef.current`
+  // point to whichever rendered last (mobile), so the outside-click
+  // handler thought the desktop dropdown's anchors were "outside" and
+  // closed it on mousedown — before the click could navigate.
+  const desktopSearchRef = useRef<HTMLDivElement>(null);
+  const mobileSearchRef = useRef<HTMLDivElement>(null);
 
   const tasks = useStore((s) => s.tasks);
   const decks = useStore((s) => s.decks);
@@ -236,7 +247,10 @@ const Navbar: React.FC<NavbarProps> = ({ className = "" }) => {
   // Close search dropdown on outside click.
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const insideDesktop = desktopSearchRef.current?.contains(target) ?? false;
+      const insideMobile = mobileSearchRef.current?.contains(target) ?? false;
+      if (!insideDesktop && !insideMobile) {
         setShowResults(false);
       }
     };
@@ -251,28 +265,39 @@ const Navbar: React.FC<NavbarProps> = ({ className = "" }) => {
       const next = searchValue.trim();
       router.push(next ? `/search?q=${encodeURIComponent(next)}` : "/search");
     },
-    [searchValue, router]
+    [searchValue, router],
   );
 
   return (
     <nav
-      className={`flex w-full items-center justify-between bg-cyan-light pt-5 px-7.25 ${className}`}
+      className={`sticky top-0 z-20 flex w-full items-center gap-2 bg-white px-3 pb-3 sm:px-4 md:px-7.25 ${className}`}
+      style={{ paddingTop: "max(1rem, env(safe-area-inset-top))" }}
     >
-      <section>
+      {/* Mobile hamburger, opens the sidebar drawer */}
+      <button
+        type="button"
+        onClick={onToggleSidebar}
+        aria-label="Open menu"
+        className="lg:hidden flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-black-primary hover:bg-gray-100"
+      >
+        <Menu size={22} />
+      </button>
+
+      <section className="hidden shrink-0 items-center justify-center lg:flex">
         <Image
           src="/logo.svg"
           alt="RealTrack Logo"
           width={187}
           height={64}
-          className="w-full"
+          className="h-10 w-auto md:h-16"
           loading="eager"
         />
       </section>
 
       {/* ---- Search bar with instant dropdown ---- */}
-      <div ref={searchRef} className="relative">
+      <div ref={desktopSearchRef} className="relative hidden min-w-0 flex-1 max-w-126.25 sm:block">
         <form
-          className="flex h-14 w-126.25 items-center gap-4 rounded-[100px] bg-[#F5F5F5] px-4"
+          className="flex h-11 md:h-14 items-center gap-3 rounded-[100px] bg-[#F5F5F5] px-4"
           onSubmit={handleSearch}
         >
           <Search size={20} />
@@ -296,12 +321,12 @@ const Navbar: React.FC<NavbarProps> = ({ className = "" }) => {
           <div className="absolute top-full left-0 right-0 mt-2 z-50 rounded-2xl border border-gray-200 bg-white shadow-lg max-h-96 overflow-y-auto">
             {quickResults.length === 0 ? (
               <div className="p-4 text-sm text-gray-primary text-center">
-                No matches — press Enter for full search
+                No matches, press Enter for full search
               </div>
             ) : (
               <div className="py-2">
                 {quickResults.map((r) => (
-                  <a
+                  <Link
                     key={`${r.type}-${r.id}`}
                     href={r.href}
                     onClick={() => setShowResults(false)}
@@ -321,7 +346,74 @@ const Navbar: React.FC<NavbarProps> = ({ className = "" }) => {
                     <span className="text-[10px] uppercase tracking-wider text-gray-400 shrink-0">
                       {r.type}
                     </span>
-                  </a>
+                  </Link>
+                ))}
+                <button
+                  type="button"
+                  onClick={handleSearch as unknown as React.MouseEventHandler}
+                  className="w-full px-4 py-2 text-xs text-indigo-primary hover:bg-indigo-primary/5 border-t border-gray-100"
+                >
+                  View all results
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Mobile search, compact so it can sit between the hamburger and the help/profile area */}
+      <div ref={mobileSearchRef} className="relative flex min-w-0 flex-1 sm:hidden">
+        <form
+          className="flex h-10 w-full items-center gap-2 rounded-full bg-[#F5F5F5] px-3"
+          onSubmit={handleSearch}
+        >
+          <Search size={16} className="shrink-0" />
+          <input
+            type="text"
+            id="search-input-mobile"
+            name="search-mobile"
+            value={searchValue}
+            onChange={(e) => {
+              setSearchValue(e.target.value);
+              setShowResults(true);
+            }}
+            onFocus={() => searchValue.trim() && setShowResults(true)}
+            placeholder="Search"
+            className="w-full bg-transparent text-sm outline-none placeholder:text-gray-primary"
+            autoComplete="off"
+          />
+        </form>
+
+        {showResults && searchValue.trim() && (
+          <div className="absolute top-full left-0 right-0 mt-2 z-50 rounded-2xl border border-gray-200 bg-white shadow-lg max-h-96 overflow-y-auto">
+            {quickResults.length === 0 ? (
+              <div className="p-4 text-sm text-gray-primary text-center">
+                No matches, press Enter for full search
+              </div>
+            ) : (
+              <div className="py-2">
+                {quickResults.map((r) => (
+                  <Link
+                    key={`${r.type}-${r.id}`}
+                    href={r.href}
+                    onClick={() => setShowResults(false)}
+                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-indigo-primary/5 transition-colors"
+                  >
+                    <span className="text-indigo-primary">
+                      {TYPE_ICON[r.type]}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-black-primary truncate">
+                        {r.title}
+                      </p>
+                      <p className="text-xs text-gray-primary truncate">
+                        {r.subtitle}
+                      </p>
+                    </div>
+                    <span className="text-[10px] uppercase tracking-wider text-gray-400 shrink-0">
+                      {r.type}
+                    </span>
+                  </Link>
                 ))}
                 <button
                   type="button"
@@ -337,7 +429,19 @@ const Navbar: React.FC<NavbarProps> = ({ className = "" }) => {
       </div>
 
       {/* ---- Profile section ---- */}
-      <div ref={profileRef} className="relative flex items-center gap-4">
+      <div ref={profileRef} className="relative ml-auto flex items-center gap-2 sm:gap-3 shrink-0">
+        <button
+          type="button"
+          title="Replay the onboarding tour"
+          aria-label="Replay the onboarding tour"
+          onClick={() => {
+            window.__startTour?.();
+          }}
+          className="flex h-10 w-10 items-center justify-center rounded-full text-gray-primary transition hover:bg-gray-100 hover:text-indigo-primary"
+        >
+          <HelpCircle size={20} />
+        </button>
+
         <button
           type="button"
           onClick={() => {
@@ -346,13 +450,14 @@ const Navbar: React.FC<NavbarProps> = ({ className = "" }) => {
               setEditName(profile.full_name ?? "");
               setEditMajor(profile.major ?? "");
               setEditSemester(
-                profile.semester != null ? String(profile.semester) : ""
+                profile.semester != null ? String(profile.semester) : "",
               );
             }
           }}
-          className="flex items-center gap-3 cursor-pointer"
+          className="flex items-center gap-2 sm:gap-3 cursor-pointer"
         >
-          <div className="flex flex-col text-right">
+          {/* Name + email, hide on mobile to save horizontal space */}
+          <div className="hidden md:flex flex-col text-right">
             <span className="font-medium text-black-primary">
               {displayName}
             </span>
@@ -360,7 +465,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "" }) => {
               {displayEmail}
             </span>
           </div>
-          <div className="relative flex h-13 w-13 shrink-0 items-center justify-center rounded-full border-2 border-gray-500 bg-indigo-primary text-sm font-semibold text-white overflow-hidden">
+          <div className="relative flex h-10 w-10 md:h-13 md:w-13 shrink-0 items-center justify-center rounded-full border-2 border-gray-500 bg-indigo-primary text-sm font-semibold text-white overflow-hidden">
             {avatarUrl ? (
               <Image
                 src={avatarUrl}
@@ -373,7 +478,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "" }) => {
               initials || "U"
             )}
           </div>
-          <span className="absolute bottom-0 right-0 flex h-4 w-4 items-center justify-center rounded-full bg-white shadow">
+          <span className="absolute bottom-0 right-0 flex h-4 w-4 items-center justify-center rounded-full bg-white shadow border border-gray-300">
             <Pencil size={10} className="text-gray-600" />
           </span>
         </button>

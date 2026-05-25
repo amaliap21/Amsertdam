@@ -113,7 +113,7 @@ function renderMarkdown(content: string): React.ReactNode {
 }
 
 const WELCOME_FALLBACK =
-  "Hi! I'm your Study Companion. Tell me what you'd like to review — I can explain mistakes, walk through concepts, or quiz you on tricky parts. Where should we start?";
+  "Hi! I'm your Study Companion. Tell me what you'd like to review, I can explain mistakes, walk through concepts, or quiz you on tricky parts. Where should we start?";
 
 export default function StudyCompanionChat({
   params,
@@ -133,7 +133,7 @@ export default function StudyCompanionChat({
     );
   }, [attempts, quizId]);
 
-  // Study Companion is a live mirror of Quiz Lab — if the quiz no longer
+  // Study Companion is a live mirror of Quiz Lab, if the quiz no longer
   // exists, this entry shouldn't be reachable.
   const quiz = useMemo(() => {
     if (!liveQuiz) return null;
@@ -163,7 +163,7 @@ export default function StudyCompanionChat({
       return `Hi! Let's review **${quiz.title}** for ${quiz.course}. Once you've taken the quiz I'll be able to walk through each answer with you. For now, ask me anything about the material.`;
     }
     if (wrongQuestions.length === 0) {
-      return `Nice work on **${quiz.title}** — you got every question right (${attempt.correct}/${attempt.total}). Want me to push deeper on any concept or quiz you on related material?`;
+      return `Nice work on **${quiz.title}**, you got every question right (${attempt.correct}/${attempt.total}). Want me to push deeper on any concept or quiz you on related material?`;
     }
     const list = wrongQuestions
       .slice(0, 5)
@@ -293,7 +293,7 @@ export default function StudyCompanionChat({
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantId
-                    ? { ...m, content: `Sorry — ${parsed.error}` }
+                    ? { ...m, content: `Sorry, ${parsed.error}` }
                     : m,
                 ),
               );
@@ -308,7 +308,7 @@ export default function StudyCompanionChat({
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantId
-            ? { ...m, content: `Sorry — ${message}` }
+            ? { ...m, content: `Sorry, ${message}` }
             : m,
         ),
       );
@@ -318,8 +318,8 @@ export default function StudyCompanionChat({
   };
 
   return (
-    <div className="min-h-screen bg-white px-14.75 py-11.5 flex flex-col">
-      <div className="flex justify-between items-center mb-8">
+    <div className="min-h-dvh bg-white px-4 sm:px-6 md:px-10 lg:px-14.75 py-6 md:py-11.5 flex flex-col">
+      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center mb-6 sm:mb-8">
         <Link
           href="/study-companion"
           className="flex items-center gap-2 text-gray-primary hover:text-black-primary transition-colors"
@@ -327,7 +327,7 @@ export default function StudyCompanionChat({
           <ArrowLeft size={18} />
           <span className="text-sm">Back to Study Companion</span>
         </Link>
-        <span className="flex items-center gap-1 px-3 py-1 bg-indigo-50 text-indigo-primary text-xs font-medium rounded-full">
+        <span className="self-start sm:self-auto flex items-center gap-1 px-3 py-1 bg-indigo-50 text-indigo-primary text-xs font-medium rounded-full">
           <Sparkles size={12} />
           Powered by AI
         </span>
@@ -342,7 +342,7 @@ export default function StudyCompanionChat({
         </p>
       </div>
 
-      <div className="flex-1 space-y-4 mb-8 pb-24">
+      <div className="flex-1 space-y-4 mb-8 pb-28 sm:pb-24">
         {messages.map((message) => (
           <div
             key={message.id}
@@ -351,7 +351,7 @@ export default function StudyCompanionChat({
             }`}
           >
             <div
-              className={`max-w-2xl rounded-xl p-5 text-sm ${
+              className={`max-w-[85%] sm:max-w-2xl rounded-xl p-4 sm:p-5 text-sm break-words ${
                 message.role === "user"
                   ? "bg-indigo-primary text-white whitespace-pre-line"
                   : "bg-white border border-gray-200 text-black-primary"
@@ -378,7 +378,8 @@ export default function StudyCompanionChat({
 
       <form
         onSubmit={handleSubmit}
-        className="fixed bottom-6 left-[calc(25%+3.6875rem)] right-14.75 flex items-center gap-3 bg-white border border-gray-200 rounded-full px-5 py-2.5 shadow-sm"
+        className="fixed bottom-3 sm:bottom-6 left-3 right-3 sm:left-6 sm:right-6 lg:left-[calc(16rem+1rem)] lg:right-14.75 flex items-center gap-3 bg-white border border-gray-200 rounded-full px-4 sm:px-5 py-2.5 shadow-md"
+        style={{ paddingBottom: "max(0.625rem, env(safe-area-inset-bottom))" }}
       >
         <button
           type="button"

@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @config "../../tailwind.config.ts";
 @import "tw-animate-css";
+@import "shepherd.js/dist/css/shepherd.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -123,4 +124,135 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* ---------------------------------------------------------------- */
+/* Mobile + iOS Safari fixes                                        */
+/* ---------------------------------------------------------------- */
+
+/* Prevent iOS Safari from zooming when an input is focused.
+   iOS triggers the auto-zoom when the input's computed font-size is
+   < 16px, so we force 16px on small screens. */
+@media screen and (max-width: 640px) {
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="search"],
+  input[type="number"],
+  input[type="tel"],
+  input[type="url"],
+  input[type="date"],
+  input[type="datetime-local"],
+  input[type="time"],
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+/* Use the dynamic viewport on mobile so layouts respect the iOS
+   keyboard / URL bar instead of being pushed off-screen. Keep the
+   safe-area padding on the body only — putting it on both html and
+   body caused double-padding and made tap targets drift on iOS. */
+html {
+  min-height: 100dvh;
+  scroll-padding-bottom: 25vh;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  min-height: 100dvh;
+  /* Respect iOS landscape notch. Top/bottom safe-area is handled by the
+     individual sticky/fixed components (navbar, chat input) so modals
+     and overlays still align to the true viewport edge. */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Disable iOS tap highlight. */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ---------------------------------------------------------------- */
+/* Shepherd.js onboarding tour — responsive overrides               */
+/* ---------------------------------------------------------------- */
+
+/* Shepherd's default popover can blow past the viewport on small screens
+   and stack its buttons in a row that overflows. Constrain width and let
+   buttons wrap. */
+.shepherd-element {
+  max-width: min(22rem, calc(100vw - 1.5rem)) !important;
+  z-index: 60 !important;
+}
+
+.shepherd-element .shepherd-content {
+  border-radius: 0.875rem;
+}
+
+.shepherd-element .shepherd-header {
+  padding: 0.875rem 1rem 0.25rem !important;
+  background: transparent !important;
+}
+
+.shepherd-element .shepherd-title {
+  font-size: 1rem !important;
+  font-weight: 600 !important;
+}
+
+.shepherd-element .shepherd-text {
+  padding: 0.5rem 1rem 1rem !important;
+  font-size: 0.875rem !important;
+  line-height: 1.45 !important;
+}
+
+.shepherd-element .shepherd-footer {
+  padding: 0 1rem 1rem !important;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.shepherd-element .shepherd-button {
+  font-size: 0.8125rem !important;
+  padding: 0.5rem 0.875rem !important;
+  border-radius: 0.5rem !important;
+}
+
+/* The dark backdrop should clear the iOS safe areas so it visually
+   covers the whole viewport, including under the status bar / home
+   indicator with `viewport-fit=cover`. */
+.shepherd-modal-overlay-container {
+  z-index: 55 !important;
+}
+
+@media (max-width: 640px) {
+  /* On phones, center the popover near the bottom and stretch closer to
+     the screen edges. Floating UI still positions against the target
+     when possible, but the max-width keeps it from overflowing. */
+  .shepherd-element {
+    max-width: calc(100vw - 1rem) !important;
+  }
+
+  .shepherd-element .shepherd-button {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: center;
+  }
+
+  .shepherd-element .shepherd-footer {
+    justify-content: stretch;
+  }
+}
+
+/* Helper: full dynamic viewport height (use instead of h-screen on
+   chat/review pages where the iOS keyboard would otherwise shrink
+   the visible area). */
+.h-dscreen {
+  height: 100vh;
+  height: 100dvh;
+}
+.min-h-dscreen {
+  min-height: 100vh;
+  min-height: 100dvh;
 }

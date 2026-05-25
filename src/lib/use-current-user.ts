@@ -16,7 +16,7 @@ export function useCurrentUser() {
       try {
         // getSession() reads from local storage / cookies and resolves fast
         // (no network call). getUser() would round-trip to validate the JWT,
-        // adding 100-300ms — skip it on first paint and rely on onAuthStateChange
+        // adding 100-300ms, skip it on first paint and rely on onAuthStateChange
         // for any subsequent invalidation.
         const { data: sessionData } = await supabase.auth.getSession();
         if (active) setUser(sessionData.session?.user ?? null);

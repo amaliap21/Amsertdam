@@ -46,9 +46,9 @@ export default function TakeQuiz({
   };
 
   return (
-    <div className="min-h-screen bg-white px-14.75 py-11.5">
-      <div className="flex gap-8">
-        <div className="flex-1 max-w-[920px]">
+    <div className="min-h-dvh bg-white px-4 sm:px-6 md:px-10 lg:px-14.75 py-6 md:py-11.5">
+      <div className="flex flex-col-reverse lg:flex-row gap-6 lg:gap-8">
+        <div className="flex-1 min-w-0 max-w-[920px]">
           <div className="mb-6">
             <div className="flex items-center justify-between mb-3">
               <Link
@@ -123,7 +123,7 @@ export default function TakeQuiz({
           </div>
         </div>
 
-        <aside className="w-[214px] shrink-0">
+        <aside className="w-full lg:w-[214px] lg:shrink-0">
           <div className="rounded-xl border border-gray-200 bg-white p-4">
             <h3 className="text-sm font-semibold text-black-primary mb-4">
               Quiz Navigation

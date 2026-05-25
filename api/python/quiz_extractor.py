@@ -1,5 +1,5 @@
 """
-Quiz Extractor — generate multiple-choice questions from raw text without
+Quiz Extractor, generate multiple-choice questions from raw text without
 any AI. Uses cloze deletion: take an informative sentence, blank out the
 most-distinctive term, and offer 3 distractors drawn from the rest of the
 document.
@@ -197,7 +197,7 @@ def extract_quiz(text: str, num_questions: int = 5, seed: int = 0) -> list[dict]
         seen_terms.add(tl)
         term_pool.append(tok)
 
-    # Definition pool — both for definition-style questions and as a
+    # Definition pool, both for definition-style questions and as a
     # distractor reservoir when phrasing as "What best describes X?".
     definition_pairs = harvest_definitions(text)
     all_definitions = [defn for _, defn in definition_pairs]
@@ -219,7 +219,7 @@ def extract_quiz(text: str, num_questions: int = 5, seed: int = 0) -> list[dict]
         seen_prompts.add(key)
         questions.append(q)
 
-    # 1. Definition-style questions first — they tend to read more naturally
+    # 1. Definition-style questions first, they tend to read more naturally
     # than cloze questions.
     if len(all_definitions) >= DISTRACTORS_PER_QUESTION + 1:
         for term, defn in definition_pairs:

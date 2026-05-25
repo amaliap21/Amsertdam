@@ -19,6 +19,7 @@ import toast from "react-hot-toast";
 import { useStore, type TaskPriority, type TaskItem } from "@/store/use-store";
 import {
   parseTaskDate,
+  formatTaskDate,
   extractAssessmentName,
   extractItemName,
 } from "@/lib/task-date";
@@ -73,13 +74,10 @@ export default function TaskValue() {
     course: string;
   }) => {
     if (!editingTask) return;
+    // Persist the real ISO timestamp so the year is never lost. Display
+    // formatting happens at render time via formatTaskDate().
     const newDate = data.deadline
-      ? new Date(data.deadline).toLocaleString("en-US", {
-          month: "short",
-          day: "numeric",
-          hour: "numeric",
-          minute: "2-digit",
-        })
+      ? new Date(data.deadline).toISOString()
       : "—";
     const newTimeEstimate = data.estimatedHours
       ? `${data.estimatedHours}h`
@@ -122,7 +120,7 @@ export default function TaskValue() {
         }),
       });
     } catch {
-      toast.error("Couldn't save to server — change kept locally");
+      toast.error("Couldn't save to server, change kept locally");
     }
   };
 
@@ -136,14 +134,9 @@ export default function TaskValue() {
     await addTask({
       title: task.taskName,
       course: task.course || "General",
-      date: task.deadline
-        ? new Date(task.deadline).toLocaleString("en-US", {
-            month: "short",
-            day: "numeric",
-            hour: "numeric",
-            minute: "2-digit",
-          })
-        : "—",
+      // Store the real ISO timestamp; the year would otherwise be stripped
+      // by the short en-US format and have to be guessed at parse time.
+      date: task.deadline ? new Date(task.deadline).toISOString() : "—",
       timeEstimate: task.estimatedHours ? `${task.estimatedHours}h` : "—",
       priority: "If You Have Energy",
       description: task.description,
@@ -154,13 +147,46 @@ export default function TaskValue() {
 
   const handleAiPrioritize = async () => {
     if (aiLoading) return;
+    // With a single task, TOPSIS has nothing to rank it against and the
+    // Python service always returns "LOW" (the safest default for a
+    // singleton). That makes the UI feel broken — the user sees their
+    // only task labelled "Safe to Minimize" even when it's clearly the
+    // one thing they're working on. Promote it to Focus First by default.
+    if (tasks.length === 1) {
+      const only = tasks[0];
+      const original = only.description ?? "";
+      const metaMatch = original.match(/^(Assessment:[^\n]*)/i);
+      const meta = metaMatch ? metaMatch[1] : "";
+      const advice =
+        "Only task on your plate — treat it as your top priority and finish on time.";
+      const newDescription = meta ? `${meta}\n${advice}` : advice;
+      setTasks([
+        { ...only, priority: "Focus First", description: newDescription },
+      ]);
+      try {
+        await fetch("/api/tasks", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            id: only.id,
+            priority: "Focus First",
+            description: newDescription,
+          }),
+        });
+      } catch {
+        /* persistence is best-effort; UI already updated */
+      }
+      setAiSummary("1 task — defaulted to Focus First.");
+      toast.success("Task prioritized");
+      return;
+    }
     setAiLoading(true);
     const t = toast.loading("Analyzing your tasks…");
     try {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const parseDeadlineDays = (dateStr: string): number => {
-        // The stored display string ("May 28, 10:22 PM") has no year — and
+        // The stored display string ("May 28, 10:22 PM") has no year, and
         // V8 defaults to 2001 when parsing such strings. Use the shared
         // parser which injects the current year so the diff is correct.
         const { isoDate } = parseTaskDate(dateStr);
@@ -271,7 +297,7 @@ export default function TaskValue() {
         }),
       );
       setAiSummary(
-        `Analyzed ${json.tasks.length} tasks via ${json.method.toUpperCase()} — ` +
+        `Analyzed ${json.tasks.length} tasks via ${json.method.toUpperCase()}, ` +
           `${json.summary.high} high, ${json.summary.medium} medium, ${json.summary.low} low priority.`,
       );
       toast.success("Tasks reprioritized", { id: t });
@@ -349,9 +375,9 @@ export default function TaskValue() {
   };
 
   return (
-    <div className="min-h-screen bg-white px-14.75 py-11.5">
+    <div className="min-h-dvh bg-white px-4 sm:px-6 md:px-10 lg:px-14.75 py-6 md:py-11.5">
       {/* Header */}
-      <div className="flex justify-between items-start mb-8">
+      <div className="mb-8 flex flex-col lg:items-center gap-4 lg:flex-row lg:justify-between">
         <div>
           <h1 className="text-[28px] font-semibold text-black-primary mb-2">
             Task Value
@@ -361,11 +387,11 @@ export default function TaskValue() {
             wellbeing
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center self-auto">
           <button
             onClick={handleAiPrioritize}
             disabled={aiLoading || tasks.length === 0}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-indigo-primary text-indigo-primary hover:bg-indigo-primary/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center justify-center gap-2 rounded-lg border border-indigo-primary px-4 py-2.5 text-indigo-primary transition-colors hover:bg-indigo-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {aiLoading ? (
               <Loader2 size={18} className="animate-spin" />
@@ -375,8 +401,9 @@ export default function TaskValue() {
             Ask AI to Prioritize
           </button>
           <button
+            data-tour="add-task"
             onClick={() => setShowAddTaskModal(true)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-primary text-white rounded-lg hover:bg-indigo-600 transition-colors"
+            className="flex items-center justify-center gap-2 rounded-lg bg-indigo-primary px-4 py-2.5 text-white transition-colors hover:bg-indigo-600"
           >
             <CirclePlus size={18} />
             Add Task
@@ -398,38 +425,45 @@ export default function TaskValue() {
         <h2 className="text-[20px] font-semibold text-black-primary mb-5">
           What to Work on First?
         </h2>
-        <div className="flex flex-row gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           {priorityCards.map((card) => (
             <div
               key={card.priority}
-              className="flex-col gap-2.5 px-4 pt-4 rounded-lg w-1/3"
+              className="flex w-full min-w-0 flex-col gap-3 rounded-2xl px-4 py-4"
               style={{
                 background: card.gradient,
               }}
             >
+              {/* Header: title left, status icon right */}
               <div className="flex flex-row justify-between items-center">
-                <h1 className="text-sm text-black-primary font-medium">
+                <h1 className="text-sm font-semibold text-black-primary">
                   {card.priority}
                 </h1>
                 <div style={{ color: card.iconColor }}>{card.icon}</div>
               </div>
 
-              <div className="flex flex-row">
+              {/* Body: illustration on the left, metric + description on the right */}
+              <div className="flex flex-row items-center gap-3">
                 <Image
                   src={card.image}
                   alt={`${card.priority} Tasks`}
-                  width={185}
-                  height={87}
-                  className="w-46.25 h-21.75"
+                  width={88}
+                  height={73}
+                  className="shrink-0"
+                  style={{ width: "88px", height: "auto" }}
                 />
-                <div>
-                  <h1 className="text-sm">
-                    <span className="text-xl" style={{ color: card.textColor }}>
+                <div className="flex min-w-0 flex-1 flex-col gap-1">
+                  <p className="text-sm leading-tight text-black-primary">
+                    <span
+                      className="text-2xl font-semibold leading-none"
+                      style={{ color: card.textColor }}
+                    >
                       {getTasksByPriority(card.priority).length}
                     </span>{" "}
                     task
-                  </h1>
-                  <p className="text-xs text-gray-primary">
+                  </p>
+                  {/* Locked to two lines so all three cards line up. */}
+                  <p className="text-xs leading-snug text-gray-primary break-words line-clamp-2 min-h-[2rem]">
                     {card.description}
                   </p>
                 </div>
@@ -476,7 +510,7 @@ export default function TaskValue() {
                   </p>
                   <div className="flex items-center gap-1.5 text-sm text-gray-600">
                     <Calendar size={14} />
-                    <span>{task.date}</span>
+                    <span>{formatTaskDate(task.date)}</span>
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-1.5">
@@ -555,7 +589,7 @@ export default function TaskValue() {
                   </p>
                   <div className="flex items-center gap-1.5 text-sm text-gray-600">
                     <Calendar size={14} />
-                    <span>{task.date}</span>
+                    <span>{formatTaskDate(task.date)}</span>
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-1.5">
@@ -634,7 +668,7 @@ export default function TaskValue() {
                   </p>
                   <div className="flex items-center gap-1.5 text-sm text-gray-600">
                     <Calendar size={14} />
-                    <span>{task.date}</span>
+                    <span>{formatTaskDate(task.date)}</span>
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-1.5">
@@ -685,7 +719,7 @@ export default function TaskValue() {
         </div>
       </div>
 
-      {/* Add Task Modal — only mounted while open, so its useState
+      {/* Add Task Modal, only mounted while open, so its useState
           initializers run with fresh `initialTask` each time. */}
       {showAddTaskModal && (
         <AddTaskModal
@@ -694,7 +728,7 @@ export default function TaskValue() {
           onSubmit={handleAddTask}
         />
       )}
-      {/* Edit Task Modal — keyed by the task id so picking a different task
+      {/* Edit Task Modal, keyed by the task id so picking a different task
           remounts the form with the new pre-filled values. */}
       {editingTask && (
         <AddTaskModal

@@ -19,7 +19,7 @@ export async function GET() {
       .single()
 
     if (error && error.code === 'PGRST116') {
-      // No profile row yet — auto-create from auth metadata.
+      // No profile row yet, auto-create from auth metadata.
       const supabase = await createClient()
       const { data: { user } } = await supabase.auth.getUser()
       const meta = user?.user_metadata ?? {}

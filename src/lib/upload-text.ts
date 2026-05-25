@@ -24,6 +24,9 @@ export async function extractTextFromUpload(file: File): Promise<ExtractedUpload
   const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 
   if (isPdf) {
+    // Install DOMMatrix / Path2D / ImageData polyfills before pdfjs-dist loads,
+    // otherwise pdf-parse throws "ReferenceError: DOMMatrix is not defined".
+    await import("./pdf-globals");
     const mod = (await import("pdf-parse")) as unknown as {
       PDFParse?: (new (opts: { data: Uint8Array; disableWorker?: boolean }) => {
         getText: () => Promise<{ text?: string; total?: number }>;
@@ -41,7 +44,7 @@ export async function extractTextFromUpload(file: File): Promise<ExtractedUpload
         "pdf-parse: PDFParse class not found on module export.",
       );
     }
-    // Resolve the pdfjs worker path WITHOUT going through import.meta.url —
+    // Resolve the pdfjs worker path WITHOUT going through import.meta.url,
     // Turbopack rewrites it to a virtual id like "[project]/.../[app-route]
     // (ecmascript)" which makes createRequire / require.resolve fail.
     try {

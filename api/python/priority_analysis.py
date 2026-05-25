@@ -103,7 +103,7 @@ def _effort_score(
         return 0.0
 
     # Capacity-adjusted hours available before the deadline.
-    # Treat day 0 as "due now" — give at least one capacity-hour so we don't
+    # Treat day 0 as "due now", give at least one capacity-hour so we don't
     # divide by zero and so a tiny task on the same day isn't reported as
     # infinitely costly.
     daily_capacity = weekly_capacity_hours / 7.0

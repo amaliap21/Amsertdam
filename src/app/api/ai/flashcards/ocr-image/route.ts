@@ -10,7 +10,7 @@ export async function POST() {
   return NextResponse.json(
     {
       error:
-        "OCR is handled client-side. The flashcard form runs Tesseract.js in the browser — no server call needed.",
+        "OCR is handled client-side. The flashcard form runs Tesseract.js in the browser, no server call needed.",
     },
     { status: 410 },
   );

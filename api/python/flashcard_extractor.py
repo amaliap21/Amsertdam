@@ -1,10 +1,10 @@
 """
-Flashcard Extractor — turn raw text into front/back flashcards without any AI.
+Flashcard Extractor, turn raw text into front/back flashcards without any AI.
 
 Strategies, applied in order until we have enough cards:
     1. Definition patterns:  "X is Y" / "X are Y" / "X means Y" /
                              "X refers to Y" / "X is defined as Y"
-    2. Colon/dash patterns:  "X: Y" / "X — Y" / "X – Y"
+    2. Colon/dash patterns:  "X: Y" / "X, Y" / "X – Y"
     3. Parenthetical:        "X (also known as Y) ..."
     4. Cloze fallback:       pick informative sentences and blank out the
                              most-distinctive noun-phrase as the answer.
@@ -13,7 +13,7 @@ Each strategy is deterministic and keeps the original wording. Cards are
 deduplicated by their front string (case-insensitive) so we never repeat
 the same question.
 
-Quality knobs at the top of the file — tune length thresholds, stop-words,
+Quality knobs at the top of the file, tune length thresholds, stop-words,
 and term-extraction patterns there.
 """
 
@@ -242,7 +242,7 @@ def extract_flashcards(text: str, max_cards: int = 10) -> list[dict]:
         seen_fronts.add(key)
         cards.append({"front": front, "back": back})
 
-    # Strategy 1 + 2 — definition patterns.
+    # Strategy 1 + 2, definition patterns.
     for sent in sentences:
         if len(cards) >= max_cards:
             break
@@ -255,7 +255,7 @@ def extract_flashcards(text: str, max_cards: int = 10) -> list[dict]:
             if len(cards) >= max_cards:
                 break
 
-    # Strategy 3 — cloze fallback for whatever's missing.
+    # Strategy 3, cloze fallback for whatever's missing.
     if len(cards) < max_cards:
         # Build a frequency table once so cloze picks rare terms.
         term_freq: Counter = Counter()

@@ -7,10 +7,10 @@ We deliberately avoid PyTorch / TensorFlow / Keras so the deployed Python
 function stays small (Vercel's 50 MB limit). A small dense network in
 pure NumPy trains in a couple minutes on CPU and hits ~92-95% on the
 Standard OCR Dataset. If you want to swap in a real CNN later, this file
-is the only thing that needs to change — the runtime in ocr_image.py
+is the only thing that needs to change, the runtime in ocr_image.py
 just loads `char_classifier.npz`.
 
-DATASET — pick ONE of these (CSV mode is easiest)
+DATASET, pick ONE of these (CSV mode is easiest)
 -------------------------------------------------
 
 Option A (recommended, most reliable URLs):
@@ -29,7 +29,7 @@ Option B (single file, more classes):
      File: emnist-byclass-train.csv, emnist-byclass-test.csv
   Place under api/python/dataset/csv/ and pass --mode emnist.
 
-Option C (image folder layout — slower):
+Option C (image folder layout, slower):
   English Handwritten Characters Dataset:
      https://www.kaggle.com/datasets/dhruvildave/english-handwritten-characters-dataset
   Expected layout:
@@ -63,7 +63,7 @@ except ImportError:
 
 SCRIPT_DIR = Path(__file__).parent
 DATA_ROOT = SCRIPT_DIR / "dataset" / "data"
-# Primary dataset location — matches where the user dropped the Kaggle files.
+# Primary dataset location, matches where the user dropped the Kaggle files.
 # Kaggle ZIPs extract into <name>/<name> doubly-nested folders, so we look in
 # both `api/data/<file>` and `api/data/<file>/<file>`.
 EXTERNAL_DATA_ROOT = SCRIPT_DIR.parent / "data"
@@ -140,7 +140,7 @@ def load_split(split_dir: Path) -> tuple[np.ndarray, np.ndarray]:
             continue
         name = class_dir.name
         # Standard OCR Dataset uses class names like "0", "1", ..., "A", "B"
-        # — but the Kaggle version sometimes uppercases lowercase letters.
+        #, but the Kaggle version sometimes uppercases lowercase letters.
         # Treat folder name as case-sensitive when possible, otherwise fall
         # back to uppercase.
         label = LABEL_TO_IDX.get(name) or LABEL_TO_IDX.get(name.upper())
@@ -163,7 +163,7 @@ def load_split(split_dir: Path) -> tuple[np.ndarray, np.ndarray]:
 
 
 # ---------------------------------------------------------------------------
-# Tiny 3-layer MLP — manual forward/backward in NumPy
+# Tiny 3-layer MLP, manual forward/backward in NumPy
 # ---------------------------------------------------------------------------
 
 def init_weights(rng: np.random.Generator) -> dict:
@@ -327,7 +327,7 @@ def _try_load_mnist() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] |
         X_te, y_te = _load_csv_pixels(te_csv, has_header=True)
         return X_tr, y_tr, X_te, y_te
 
-    # IDX path — many possible filename variants
+    # IDX path, many possible filename variants
     tr_img = _resolve_dataset_file("train-images.idx3-ubyte") or _resolve_dataset_file("train-images-idx3-ubyte")
     tr_lab = _resolve_dataset_file("train-labels.idx1-ubyte") or _resolve_dataset_file("train-labels-idx1-ubyte")
     te_img = _resolve_dataset_file("t10k-images.idx3-ubyte") or _resolve_dataset_file("t10k-images-idx3-ubyte")
@@ -346,7 +346,7 @@ def load_az_plus_mnist() -> tuple[tuple[np.ndarray, np.ndarray], tuple[np.ndarra
     """
     Combine A-Z Handwritten (uppercase letters) + MNIST (digits) into one
     36-class set. If only A-Z is available, train on just A-Z (26 classes
-    mapped to indices 10..35 — the digit indices stay unused).
+    mapped to indices 10..35, the digit indices stay unused).
     """
     az_path = _resolve_dataset_file("A_Z Handwritten Data.csv")
     if not az_path:
@@ -370,7 +370,7 @@ def load_az_plus_mnist() -> tuple[tuple[np.ndarray, np.ndarray], tuple[np.ndarra
     mnist = _try_load_mnist()
     if mnist is None:
         print(
-            "  MNIST not found (missing labels file?). Training on A-Z only — "
+            "  MNIST not found (missing labels file?). Training on A-Z only, "
             "digits will be unsupported until you drop in mnist_train.csv / "
             "mnist_test.csv (or the four IDX files) under api/data/."
         )
@@ -391,7 +391,7 @@ def load_az_plus_mnist() -> tuple[tuple[np.ndarray, np.ndarray], tuple[np.ndarra
 
 
 def load_emnist_byclass() -> tuple[tuple[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]]:
-    """EMNIST ByClass — full 62-class digit + upper + lower set."""
+    """EMNIST ByClass, full 62-class digit + upper + lower set."""
     train_path = _resolve_dataset_file("emnist-byclass-train.csv")
     test_path = _resolve_dataset_file("emnist-byclass-test.csv")
     if not train_path or not test_path:

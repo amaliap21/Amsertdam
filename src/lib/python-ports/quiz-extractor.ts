@@ -1,6 +1,6 @@
 // TypeScript port of api/python/quiz_extractor.py. Runs in the Next runtime
 // so `next dev` works without deploying Python. Algorithm matches Python
-// 1:1 — definition-style MCQs first, then cloze fill-in-the-blank.
+// 1:1, definition-style MCQs first, then cloze fill-in-the-blank.
 
 import {
   DEFINITION_VERB_PATTERN,

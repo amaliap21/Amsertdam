@@ -1,4 +1,4 @@
-# Datasets and trained models — tracked via Git LFS so the repo stays small.
+# Datasets and trained models, tracked via Git LFS so the repo stays small.
 # Run `git lfs install` once on each clone before pulling.
 api/data/** filter=lfs diff=lfs merge=lfs -text
 *.csv filter=lfs diff=lfs merge=lfs -text

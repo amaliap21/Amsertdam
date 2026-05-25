@@ -9,7 +9,7 @@ export default function StudyCompanion() {
   const liveQuizzes = useStore((s) => s.quizzes);
 
   // Only show attempts whose quiz still exists in Quiz Lab. When a quiz is
-  // deleted there, its Study Companion entry vanishes too — Study Companion
+  // deleted there, its Study Companion entry vanishes too, Study Companion
   // is a live mirror of takeable quizzes, not a history archive.
   const liveQuizIds = new Set(liveQuizzes.map((q) => q.id));
 
@@ -28,7 +28,7 @@ export default function StudyCompanion() {
   );
 
   return (
-    <div className="min-h-screen bg-white px-14.75 py-11.5">
+    <div className="min-h-dvh bg-white px-4 sm:px-6 md:px-10 lg:px-14.75 py-6 md:py-11.5">
       {/* Header */}
       <div className="mb-12">
         <h1 className="text-[28px] font-semibold text-black-primary mb-2">
@@ -73,18 +73,18 @@ export default function StudyCompanion() {
                 key={quiz.id}
                 className="bg-white border border-gray-200 rounded-xl p-5 hover:shadow-md transition-shadow"
               >
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex-1">
-                    <h3 className="text-base font-semibold text-black-primary mb-1">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-base font-semibold text-black-primary mb-1 break-words">
                       {quiz.quizTitle}
                     </h3>
-                    <p className="text-sm text-gray-primary mb-3">{quiz.course}</p>
+                    <p className="text-sm text-gray-primary mb-3 break-words">{quiz.course}</p>
                     <span className="inline-block px-3 py-1 bg-indigo-50 text-indigo-primary text-xs font-medium rounded-full">
                       {quiz.correct}/{quiz.total} correct
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3 sm:shrink-0">
                     <Link
                       href={`/study-companion/${quiz.quizId}/review`}
                       className="flex items-center gap-2 px-4 py-2 border border-gray-200 text-black-primary rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium"

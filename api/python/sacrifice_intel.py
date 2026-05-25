@@ -111,7 +111,7 @@ def sacrifice_analysis(data: dict) -> dict:
         # Already mostly done tasks: always FOCUS regardless of budget
         if item["completion_pct"] >= 80:
             tier = "FOCUS"
-            advice = "Almost done — finish it to lock in the grade."
+            advice = "Almost done, finish it to lock in the grade."
         elif hours_used + h <= available_hours:
             # Fits in budget
             if item["efficiency"] >= 0.08:
@@ -127,7 +127,7 @@ def sacrifice_analysis(data: dict) -> dict:
             if item["efficiency"] >= 0.12 and remaining_budget >= h * 0.5:
                 # High efficiency + partial time available → do partial
                 tier = "MINIMAL"
-                advice = f"Time is tight — spend only {int(remaining_budget)}h on this."
+                advice = f"Time is tight, spend only {int(remaining_budget)}h on this."
                 hours_used = available_hours
             else:
                 tier = "SACRIFICE"
@@ -163,10 +163,10 @@ def sacrifice_analysis(data: dict) -> dict:
 
 def _focus_advice(item: dict) -> str:
     if item["deadline_days"] <= 3:
-        return f"Deadline in {int(item['deadline_days'])} day(s) — prioritise now."
+        return f"Deadline in {int(item['deadline_days'])} day(s), prioritise now."
     if item["grade_weight"] >= 30:
-        return f"Worth {item['grade_weight']}% of grade — invest time here."
-    return "Good return on effort — do it fully."
+        return f"Worth {item['grade_weight']}% of grade, invest time here."
+    return "Good return on effort, do it fully."
 
 
 def _minimal_advice(item: dict) -> str:
@@ -178,7 +178,7 @@ def _minimal_advice(item: dict) -> str:
 
 def _sacrifice_advice(item: dict) -> str:
     if item["grade_weight"] <= 5:
-        return "Very small grade contribution — safe to skip entirely."
+        return "Very small grade contribution, safe to skip entirely."
     if item["effective_hours"] >= 10:
         return (
             f"Too costly ({item['estimated_hours']}h) for a {item['grade_weight']}% task. "

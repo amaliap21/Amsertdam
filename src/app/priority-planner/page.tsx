@@ -1,11 +1,20 @@
 "use client";
 
-import { Download, CirclePlus, Sparkles, Loader2 } from "lucide-react";
+import {
+  Download,
+  CirclePlus,
+  Sparkles,
+  Loader2,
+  PencilLine,
+  Trash2,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import ExportModal from "@/components/ui/export-form";
-import AddScheduleModal from "@/components/ui/add-schedule-form";
+import AddScheduleModal, {
+  type ScheduleInitial,
+} from "@/components/ui/add-schedule-form";
 import toast from "react-hot-toast";
-import { useStore, type TaskItem } from "@/store/use-store";
+import { useStore, type TaskItem, type GanttBlock } from "@/store/use-store";
 import {
   parseTaskDate as parseTaskDateShared,
   extractAssessmentName,
@@ -48,7 +57,7 @@ function fmtClock(h: number, m: number): string {
 function parseTimeRange(raw: string): { start: number; end: number } | null {
   if (!raw) return null;
   const match = raw.match(
-    /^\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*[-–]\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*$/i
+    /^\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*[-–]\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*$/i,
   );
   if (!match) return null;
   const start = parseClock(match[1]);
@@ -84,7 +93,7 @@ export default function PriorityPlanner() {
 
   const extraEvents = plannerEvents as ScheduleEvent[];
   const setExtraEvents = (
-    updater: ScheduleEvent[] | ((prev: ScheduleEvent[]) => ScheduleEvent[])
+    updater: ScheduleEvent[] | ((prev: ScheduleEvent[]) => ScheduleEvent[]),
   ) => {
     const next = typeof updater === "function" ? updater(extraEvents) : updater;
     setPlannerEvents(next);
@@ -117,34 +126,126 @@ export default function PriorityPlanner() {
     return result;
   }, [tasks]);
 
-  // Combine task-derived events + manually added events.
-  // Filter out old AI-generated ghost events (subject contains "· HIGH (" etc.).
+  // Priority Planner is a "when to work" view, not a "when things are
+  // due" view. Task Value already owns the deadline list — showing the
+  // same task-derived deadlines here was just noise.
+  //
+  // The planner therefore shows only:
+  //   - manual entries the user added via "Add Schedule"
+  //   - recommended work blocks from "Plan with AI"
+  // both of which live in extraEvents. We still filter out any extra
+  // event whose id happens to collide with a task id (legacy data).
   const events: ScheduleEvent[] = useMemo(() => {
-    const aiPattern = /·\s*(?:HIGH|MEDIUM|LOW)\s*\(\d/;
     const taskIds = new Set(taskEvents.map((e) => e.id));
-    const extra = extraEvents.filter(
-      (e) => !taskIds.has(e.id) && !aiPattern.test(e.subject)
-    );
-    return [...taskEvents, ...extra];
+    return extraEvents.filter((e) => !taskIds.has(e.id));
   }, [taskEvents, extraEvents]);
 
   // Add a new event, dropping any existing event that overlaps it on the same day.
   const addEventReplacingOverlaps = (incoming: ScheduleEvent) => {
     setExtraEvents((prev) => {
       const filtered = prev.filter(
-        (existing) => !eventsOverlap(existing, incoming)
+        (existing) => !eventsOverlap(existing, incoming),
       );
       return [...filtered, incoming];
     });
   };
+
+  // The event being edited (if any). When set, the AddScheduleModal opens
+  // pre-filled with this event's values and the submit path updates it in
+  // place rather than adding a new entry.
+  const [editingEvent, setEditingEvent] = useState<ScheduleEvent | null>(null);
 
   const handleAddSchedule = (data: {
     title: string;
     type: ScheduleType;
     date: string;
     time: string;
+    repeatFreq?: "none" | "daily" | "weekly" | "monthly";
+    repeatUntil?: string;
   }) => {
     const styles = TYPE_STYLES[data.type];
+    if (editingEvent) {
+      // Editing a recurring schedule only touches the picked occurrence
+      // — other dates were saved as independent events at create time.
+      setExtraEvents((prev) =>
+        prev.map((e) =>
+          e.id === editingEvent.id
+            ? {
+                ...e,
+                title: data.type,
+                date: data.date,
+                time: data.time,
+                subject: data.title,
+                color: styles.color,
+                bgColor: styles.bgColor,
+              }
+            : e,
+        ),
+      );
+      setEditingEvent(null);
+      return;
+    }
+    // Recurring → expand into one event per interval.
+    if (data.repeatFreq && data.repeatFreq !== "none" && data.repeatUntil) {
+      const startDate = new Date(`${data.date}T00:00:00`);
+      const endDate = new Date(`${data.repeatUntil}T00:00:00`);
+      if (
+        Number.isNaN(startDate.getTime()) ||
+        Number.isNaN(endDate.getTime()) ||
+        endDate < startDate
+      ) {
+        return;
+      }
+      // Safety cap so a daily recurrence over a multi-year range can't
+      // accidentally explode into thousands of events.
+      const MAX_OCCURRENCES = 366;
+      const occurrences: ScheduleEvent[] = [];
+      const cursor = new Date(startDate);
+      const baseId = Date.now();
+      let i = 0;
+      while (cursor <= endDate && i < MAX_OCCURRENCES) {
+        const iso = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`;
+        occurrences.push({
+          id: baseId + i,
+          title: data.type,
+          date: iso,
+          time: data.time,
+          subject: data.title,
+          color: styles.color,
+          bgColor: styles.bgColor,
+        });
+        if (data.repeatFreq === "daily") {
+          cursor.setDate(cursor.getDate() + 1);
+        } else if (data.repeatFreq === "weekly") {
+          cursor.setDate(cursor.getDate() + 7);
+        } else {
+          // Monthly — preserve day-of-month. setMonth handles month-end
+          // overflow by rolling forward (e.g. Jan 31 + 1 month = Mar 3),
+          // which is fine for a study planner.
+          cursor.setMonth(cursor.getMonth() + 1);
+        }
+        i++;
+      }
+      if (occurrences.length === 0) return;
+      setExtraEvents((prev) => {
+        // Drop any pre-existing event that overlaps any new occurrence
+        // — same "replace overlaps" rule the single-event path uses.
+        const filtered = prev.filter(
+          (existing) => !occurrences.some((o) => eventsOverlap(existing, o)),
+        );
+        return [...filtered, ...occurrences];
+      });
+      const cadence =
+        data.repeatFreq === "daily"
+          ? "daily"
+          : data.repeatFreq === "weekly"
+            ? "weekly"
+            : "monthly";
+      toast.success(
+        `Added ${occurrences.length} ${cadence} occurrence${occurrences.length === 1 ? "" : "s"}`,
+      );
+      return;
+    }
     addEventReplacingOverlaps({
       id: Date.now(),
       title: data.type,
@@ -156,17 +257,44 @@ export default function PriorityPlanner() {
     });
   };
 
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  // Is this event one the user added manually (vs derived from a Task Value
+  // task)? Manual events live in `extraEvents` and are editable / deletable
+  // from here; task-derived events must be managed from Task Value.
+  const taskEventIds = useMemo(
+    () => new Set(taskEvents.map((e) => e.id)),
+    [taskEvents],
+  );
+  const isManualEvent = (e: ScheduleEvent) => !taskEventIds.has(e.id);
 
-  type GanttBlock = {
-    task_name: string;
-    start_time: string;
-    end_time: string;
-    hours_allocated: number;
-    tier: "HIGH" | "MEDIUM" | "LOW";
+  const handleDeleteEvent = (event: ScheduleEvent) => {
+    if (!isManualEvent(event)) return;
+    if (!confirm("Delete this schedule?")) return;
+    setExtraEvents((prev) => prev.filter((e) => e.id !== event.id));
+    toast.success("Schedule deleted");
   };
-  const [ganttData, setGanttData] = useState<GanttBlock[] | null>(null);
+
+  const handleEditEvent = (event: ScheduleEvent) => {
+    if (!isManualEvent(event)) return;
+    setEditingEvent(event);
+    setIsAddScheduleOpen(true);
+  };
+
+  const editingInitial: ScheduleInitial | null = editingEvent
+    ? {
+        title: editingEvent.subject,
+        type: editingEvent.title,
+        date: editingEvent.date,
+        time: editingEvent.time,
+      }
+    : null;
+
+  const [aiLoading, setAiLoading] = useState(false);
+  // AI summary + Gantt data are persisted in the store so the chart
+  // doesn't vanish when the user refreshes the page.
+  const aiSummary = useStore((s) => s.aiSummary);
+  const setAiSummary = useStore((s) => s.setAiSummary);
+  const ganttData = useStore((s) => s.ganttData);
+  const setGanttData = useStore((s) => s.setGanttData);
 
   const handleAiSchedule = async () => {
     if (aiLoading) return;
@@ -179,9 +307,21 @@ export default function PriorityPlanner() {
     const t = toast.loading("Building your study schedule…");
 
     try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const startDateIso = today.toISOString().slice(0, 10);
+      // Push the planning start to tomorrow when today's last session
+      // window has already passed — otherwise the algorithm allocates
+      // tasks into past slots that get filtered out client-side, and
+      // tight-deadline tasks lose so many slots they end up with zero
+      // recommended blocks ("assignment not determined").
+      const now = new Date();
+      const SESSIONS_END_HOUR = 17; // matches sessions: end_time 17:00
+      const planStart = new Date(now);
+      planStart.setHours(0, 0, 0, 0);
+      if (now.getHours() >= SESSIONS_END_HOUR) {
+        planStart.setDate(planStart.getDate() + 1);
+      }
+      const startDateIso = `${planStart.getFullYear()}-${String(
+        planStart.getMonth() + 1,
+      ).padStart(2, "0")}-${String(planStart.getDate()).padStart(2, "0")}`;
 
       const parseDeadlineDays = (dateStr: string): number => {
         const { isoDate } = parseTaskDate(dateStr);
@@ -189,10 +329,34 @@ export default function PriorityPlanner() {
         const candidate = new Date(`${isoDate}T00:00:00`);
         if (Number.isNaN(candidate.getTime())) return 7;
         const diff = Math.round(
-          (candidate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+          (candidate.getTime() - planStart.getTime()) /
+            (1000 * 60 * 60 * 24),
         );
         return Math.max(0, diff);
       };
+
+      // Translate user-chosen priority (Task Value bucket) into the
+      // grade_weight the Python scoring uses, plus a tier we can override
+      // client-side. Trusting the user's bucket beats letting the Python
+      // analyzer re-score from incomplete inputs (which made every task
+      // land in the MEDIUM band).
+      const tierFromPriority = (
+        priority: TaskItem["priority"],
+      ): "HIGH" | "MEDIUM" | "LOW" =>
+        priority === "Focus First"
+          ? "HIGH"
+          : priority === "If You Have Energy"
+            ? "MEDIUM"
+            : "LOW";
+
+      const gradeWeightFromPriority = (
+        priority: TaskItem["priority"],
+      ): number =>
+        priority === "Focus First"
+          ? 25
+          : priority === "If You Have Energy"
+            ? 12
+            : 5;
 
       const resp = await fetch("/api/python/scheduling", {
         method: "POST",
@@ -212,6 +376,9 @@ export default function PriorityPlanner() {
             task_name: task.title,
             course: task.course,
             priority: task.priority,
+            // Help the Python scorer pick the right tier band by feeding
+            // it a grade_weight derived from the user's bucket choice.
+            grade_weight: gradeWeightFromPriority(task.priority),
             estimated_hours: Number.parseFloat(task.timeEstimate) || 2,
             deadline_days: parseDeadlineDays(task.date),
             completion_pct: 0,
@@ -258,7 +425,7 @@ export default function PriorityPlanner() {
         };
       };
 
-      // Store schedule data for the Gantt chart only (no dummy events).
+      // Store schedule data for the Gantt chart.
       setGanttData(
         json.schedule.map((block) => ({
           task_name: block.task_name,
@@ -266,8 +433,115 @@ export default function PriorityPlanner() {
           end_time: block.end_time,
           hours_allocated: block.hours_allocated,
           tier: block.tier,
-        }))
+        })),
       );
+
+      // ALSO add the schedule blocks as planner events so the user sees
+      // "work on X — Tue 9-11 AM" in the day/week/month views, not just
+      // the task deadlines. This is the actual answer to "when should I
+      // work on each assignment".
+      const tierToStyle = (tier: "HIGH" | "MEDIUM" | "LOW") =>
+        tier === "HIGH"
+          ? PRIORITY_STYLES["Focus First"]
+          : tier === "MEDIUM"
+            ? PRIORITY_STYLES["If You Have Energy"]
+            : PRIORITY_STYLES["Safe to Minimize"];
+
+      const isoDate = (d: Date) =>
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+      // Any block before today is useless advice — defensive guard in
+      // addition to the planStart adjustment above.
+      const todayMidnight = new Date();
+      todayMidnight.setHours(0, 0, 0, 0);
+
+      // Look up the user's chosen priority per task so we can override
+      // whatever tier the Python analyzer guessed. The user's selection
+      // in Task Value is the source of truth for "how urgent is this".
+      const priorityByTaskId = new Map<string, TaskItem["priority"]>();
+      const priorityByName = new Map<string, TaskItem["priority"]>();
+      for (const t of tasks) {
+        priorityByTaskId.set(String(t.id), t.priority);
+        priorityByName.set(t.title, t.priority);
+      }
+      const resolveTier = (
+        block: { task_id?: string; task_name: string; tier: string },
+      ): "HIGH" | "MEDIUM" | "LOW" => {
+        const userPriority =
+          (block.task_id && priorityByTaskId.get(String(block.task_id))) ||
+          priorityByName.get(block.task_name);
+        if (userPriority === "Focus First") return "HIGH";
+        if (userPriority === "If You Have Energy") return "MEDIUM";
+        if (userPriority === "Safe to Minimize") return "LOW";
+        // Fall back to Python's tier if the user-side lookup misses
+        // (renamed task, stale id, etc.).
+        if (block.tier === "HIGH" || block.tier === "MEDIUM" || block.tier === "LOW") {
+          return block.tier;
+        }
+        return "MEDIUM";
+      };
+
+      const baseAiId = Date.now();
+      const aiEvents: ScheduleEvent[] = [];
+      const scheduledTaskNames = new Set<string>();
+      let droppedPast = 0;
+      json.schedule.forEach((block, i) => {
+        const start = new Date(block.start_time);
+        const end = new Date(block.end_time);
+        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return;
+        const blockDay = new Date(
+          start.getFullYear(),
+          start.getMonth(),
+          start.getDate(),
+        );
+        if (blockDay < todayMidnight) {
+          droppedPast++;
+          return;
+        }
+        const tier = resolveTier(block);
+        const style = tierToStyle(tier);
+        scheduledTaskNames.add(block.task_name);
+        aiEvents.push({
+          id: baseAiId + i + 1,
+          title: "Task",
+          label: `Work on ${block.task_name}`,
+          date: isoDate(start),
+          time: `${fmtClock(start.getHours(), start.getMinutes())} - ${fmtClock(end.getHours(), end.getMinutes())}`,
+          subject: `${block.task_name} · ${tier} (${block.hours_allocated}h)`,
+          color: style.color,
+          bgColor: style.bgColor,
+        });
+      });
+      if (droppedPast > 0) {
+        console.info(
+          `[plan-with-ai] dropped ${droppedPast} block(s) scheduled before today`,
+        );
+      }
+
+      // Surface tasks that ended up with zero scheduled blocks. Usually
+      // this means the deadline was too close to allocate hours within
+      // available sessions — the user needs to know rather than wonder
+      // why their assignment isn't on the plan.
+      const unscheduled = tasks.filter(
+        (t) => !scheduledTaskNames.has(t.title),
+      );
+      if (unscheduled.length > 0) {
+        toast.error(
+          `Couldn't fit ${unscheduled.length} task${unscheduled.length === 1 ? "" : "s"} into the plan: ${unscheduled
+            .map((t) => t.title)
+            .join(", ")}. Their deadlines may be too close, or estimated hours too high for the available sessions.`,
+          { duration: 8000 },
+        );
+      }
+
+      // Replace any AI events from a previous run so a re-plan doesn't
+      // stack new blocks on top of old ones. We detect them via the
+      // "· HIGH/MEDIUM/LOW (Xh)" subject suffix — the format above.
+      const aiPattern = /·\s*(?:HIGH|MEDIUM|LOW)\s*\(\d/;
+      setExtraEvents((prev) => [
+        ...prev.filter((e) => !aiPattern.test(e.subject)),
+        ...aiEvents,
+      ]);
 
       const taskWord = json.summary.total_tasks === 1 ? "task" : "tasks";
       const dayWord = json.summary.days_needed === 1 ? "day" : "days";
@@ -277,11 +551,16 @@ export default function PriorityPlanner() {
           } may miss deadlines.`
         : "";
       setAiSummary(
-        `Scheduled ${json.summary.total_tasks} ${taskWord} across ${json.summary.days_needed} ${dayWord} ` +
-          `(${json.summary.total_hours_needed}h). ` +
-          `${json.summary.high_priority} HIGH, ${json.summary.medium_priority} MEDIUM, ${json.summary.low_priority} LOW.${warningNote}`
+        `Recommended ${json.summary.total_tasks} ${taskWord} across ${json.summary.days_needed} ${dayWord} ` +
+          `(${json.summary.total_hours_needed}h working time). ` +
+          `${json.summary.high_priority} HIGH, ${json.summary.medium_priority} MEDIUM, ${json.summary.low_priority} LOW.${warningNote}`,
       );
-      toast.success("Schedule generated", { id: t });
+      toast.success(
+        aiEvents.length > 0
+          ? `Added ${aiEvents.length} recommended work block${aiEvents.length === 1 ? "" : "s"}`
+          : "Schedule generated",
+        { id: t },
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed", { id: t });
     } finally {
@@ -292,7 +571,9 @@ export default function PriorityPlanner() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState<number>(new Date().getDate());
 
-  const [selected, setSelected] = useState<"Day" | "Week" | "Month">("Day");
+  // Default to "Week" so a newly-added task with a future deadline is
+  // visible immediately instead of being hidden behind today's empty Day view.
+  const [selected, setSelected] = useState<"Day" | "Week" | "Month">("Week");
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -388,18 +669,18 @@ export default function PriorityPlanner() {
     selected.toLowerCase() === "day"
       ? currentDate.toLocaleDateString("en-US", { weekday: "long" })
       : selected.toLowerCase() === "week"
-      ? currentDate.toLocaleDateString("en-US", { weekday: "long" })
-      : selected.toLowerCase() === "month"
-      ? currentDate.toLocaleDateString("en-US", { weekday: "long" })
-      : "";
+        ? currentDate.toLocaleDateString("en-US", { weekday: "long" })
+        : selected.toLowerCase() === "month"
+          ? currentDate.toLocaleDateString("en-US", { weekday: "long" })
+          : "";
 
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isAddScheduleOpen, setIsAddScheduleOpen] = useState(false);
 
   return (
-    <div className="flex flex-col gap-9 px-14.75 py-11.5 w-full">
+    <div className="flex w-full flex-col gap-9 px-4 sm:px-6 md:px-10 lg:px-14.75 py-6 md:py-11.5">
       {/* Header */}
-      <div className="flex flex-row justify-between items-center">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-col">
           <h1 className="text-[28px] font-semibold text-black-primary">
             Priority Planner
@@ -409,11 +690,12 @@ export default function PriorityPlanner() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center self-auto">
           <button
+            data-tour="plan-with-ai"
             onClick={handleAiSchedule}
             disabled={aiLoading || !tasks.length}
-            className="flex flex-row gap-2 px-3 py-2 rounded-lg border border-indigo-primary text-indigo-primary items-center cursor-pointer hover:bg-indigo-primary/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex flex-row items-center justify-center gap-2 rounded-lg border border-indigo-primary px-3 py-2 text-indigo-primary cursor-pointer transition-colors hover:bg-indigo-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {aiLoading ? (
               <Loader2 size={16} className="animate-spin" />
@@ -424,7 +706,7 @@ export default function PriorityPlanner() {
           </button>
           <button
             onClick={() => setIsAddScheduleOpen(true)}
-            className="flex flex-row gap-2 px-3 py-2 rounded-lg bg-indigo-primary text-white items-center cursor-pointer hover:bg-indigo-500 transition-colors"
+            className="flex flex-row items-center justify-center gap-2 rounded-lg bg-indigo-primary px-3 py-2 text-white cursor-pointer transition-colors hover:bg-indigo-500"
           >
             <CirclePlus size={16} />
             Add Schedule
@@ -441,9 +723,9 @@ export default function PriorityPlanner() {
 
       {/* Content */}
       <div className="flex flex-col gap-6">
-        <div className="flex flex-row justify-between items-end">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           {/* repetition day/week/month */}
-          <div className="flex flex-row gap-18 p-2 bg-[#3D42E51A] rounded-xl">
+          <div className="flex flex-wrap gap-3 p-2 bg-[#3D42E51A] rounded-xl">
             {["Day", "Week", "Month"].map((label) => (
               <button
                 key={label}
@@ -458,7 +740,7 @@ export default function PriorityPlanner() {
           </div>
 
           {/* types */}
-          <div className="flex flex-row gap-9">
+          <div className="flex flex-wrap gap-4 xl:gap-9">
             {getFilteredEvents().map((event) => (
               <div key={event.id} className="flex flex-row items-center gap-3">
                 <div className={`w-2 h-2 rounded-full ${event.color}`}></div>
@@ -479,8 +761,8 @@ export default function PriorityPlanner() {
                 selected === "Day"
                   ? previousDay
                   : selected === "Week"
-                  ? previousWeek
-                  : previousMonth
+                    ? previousWeek
+                    : previousMonth
               }
               className="px-2 py-1 hover:bg-gray-100 rounded-lg transition-colors"
               aria-label="Previous"
@@ -505,8 +787,8 @@ export default function PriorityPlanner() {
                 selected === "Day"
                   ? nextDay
                   : selected === "Week"
-                  ? nextWeek
-                  : nextMonth
+                    ? nextWeek
+                    : nextMonth
               }
               className="px-2 py-1 hover:bg-gray-100 rounded-lg transition-colors"
               aria-label="Next"
@@ -530,7 +812,7 @@ export default function PriorityPlanner() {
       </div>
 
       <div
-        className="flex flex-col p-7 items-start self-stretch gap-5"
+        className="flex flex-col p-4 sm:p-7 items-start self-stretch gap-5 overflow-x-hidden"
         style={{
           borderRadius: "16px",
           border: "1px solid rgba(204, 204, 204, 0.75)",
@@ -551,13 +833,37 @@ export default function PriorityPlanner() {
               key={event.id}
               className={`flex flex-col gap-2 px-5 py-3 w-full rounded-lg ${event.bgColor}`}
             >
-              <div className="flex flex-row justify-start items-center gap-3">
-                <div className={`w-3 h-3 rounded-full ${event.color}`}></div>
-                <p className="text-sm font-semibold text-black-primary">
-                  {event.time}
-                </p>
+              <div className="flex flex-row justify-between items-start gap-3">
+                <div className="flex flex-row items-center gap-3 min-w-0">
+                  <div
+                    className={`w-3 h-3 rounded-full shrink-0 ${event.color}`}
+                  ></div>
+                  <p className="text-sm font-semibold text-black-primary">
+                    {event.time}
+                  </p>
+                </div>
+                {isManualEvent(event) && (
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      title="Edit schedule"
+                      onClick={() => handleEditEvent(event)}
+                      className="text-indigo-primary hover:text-indigo-600"
+                    >
+                      <PencilLine size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      title="Delete schedule"
+                      onClick={() => handleDeleteEvent(event)}
+                      className="text-red-500 hover:text-red-600"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                )}
               </div>
-              <p className="text-sm font-medium text-gray-primary">
+              <p className="text-sm font-medium text-gray-primary break-words">
                 [{event.label ?? event.title}] {event.subject}
               </p>
             </div>
@@ -565,9 +871,9 @@ export default function PriorityPlanner() {
         )}
       </div>
 
-      {/* All upcoming events grouped by date — always visible regardless of the day filter above */}
+      {/* All upcoming events grouped by date, always visible regardless of the day filter above */}
       <div
-        className="flex flex-col p-7 items-start self-stretch gap-5"
+        className="flex flex-col p-4 sm:p-7 items-start self-stretch gap-5 overflow-x-hidden"
         style={{
           borderRadius: "16px",
           border: "1px solid rgba(204, 204, 204, 0.75)",
@@ -613,15 +919,37 @@ export default function PriorityPlanner() {
                       key={event.id}
                       className={`flex flex-col gap-2 px-5 py-3 w-full rounded-lg ${event.bgColor}`}
                     >
-                      <div className="flex flex-row justify-start items-center gap-3">
-                        <div
-                          className={`w-3 h-3 rounded-full ${event.color}`}
-                        ></div>
-                        <p className="text-sm font-semibold text-black-primary">
-                          {event.time}
-                        </p>
+                      <div className="flex flex-row justify-between items-start gap-3">
+                        <div className="flex flex-row items-center gap-3 min-w-0">
+                          <div
+                            className={`w-3 h-3 rounded-full shrink-0 ${event.color}`}
+                          ></div>
+                          <p className="text-sm font-semibold text-black-primary">
+                            {event.time}
+                          </p>
+                        </div>
+                        {isManualEvent(event) && (
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              type="button"
+                              title="Edit schedule"
+                              onClick={() => handleEditEvent(event)}
+                              className="text-indigo-primary hover:text-indigo-600"
+                            >
+                              <PencilLine size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              title="Delete schedule"
+                              onClick={() => handleDeleteEvent(event)}
+                              className="text-red-500 hover:text-red-600"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        )}
                       </div>
-                      <p className="text-sm font-medium text-gray-primary">
+                      <p className="text-sm font-medium text-gray-primary break-words">
                         [{event.label ?? event.title}] {event.subject}
                       </p>
                     </div>
@@ -633,7 +961,7 @@ export default function PriorityPlanner() {
         )}
       </div>
 
-      {/* Gantt chart — calendar-based, shown after AI schedule generation */}
+      {/* Gantt chart, calendar-based, shown after AI schedule generation */}
       {ganttData && ganttData.length > 0 && <GanttChart data={ganttData} />}
 
       <div className="flex justify-center">
@@ -650,12 +978,17 @@ export default function PriorityPlanner() {
         isOpen={isExportOpen}
         onClose={() => setIsExportOpen(false)}
         events={events}
+        tasks={tasks}
       />
 
       <AddScheduleModal
         isOpen={isAddScheduleOpen}
-        onClose={() => setIsAddScheduleOpen(false)}
+        onClose={() => {
+          setIsAddScheduleOpen(false);
+          setEditingEvent(null);
+        }}
         onAdd={handleAddSchedule}
+        initial={editingInitial}
       />
     </div>
   );
@@ -671,14 +1004,6 @@ function hashStr(s: string): number {
 }
 
 // ─── Gantt Chart Component ───────────────────────────────────────────────────
-
-type GanttBlock = {
-  task_name: string;
-  start_time: string;
-  end_time: string;
-  hours_allocated: number;
-  tier: "HIGH" | "MEDIUM" | "LOW";
-};
 
 const MONTH_LABELS = [
   "January",
@@ -697,7 +1022,6 @@ const MONTH_LABELS = [
 
 const BAR_COLORS = [
   "#ef4444",
-  "#3b82f6",
   "#22c55e",
   "#a855f7",
   "#f97316",
@@ -742,17 +1066,19 @@ function GanttChart({ data }: { data: GanttBlock[] }) {
 
   if (!taskOrder.length) return null;
 
-  // 2. Determine the full date range for the X-axis.
+  // 2. Determine the full date range for the X-axis. The user wants the
+  //    Gantt to always span a full year (Jan → Dec) so months without
+  //    activity still appear on the axis. Pick the year from the
+  //    earliest task; if data straddles multiple years, extend to cover
+  //    them all.
   const allStarts = Array.from(taskMap.values()).map((t) => t.start.getTime());
   const allEnds = Array.from(taskMap.values()).map((t) => t.end.getTime());
-  const rangeStart = new Date(Math.min(...allStarts));
+  const earliestYear = new Date(Math.min(...allStarts)).getFullYear();
+  const latestYear = new Date(Math.max(...allEnds)).getFullYear();
+  const rangeStart = new Date(earliestYear, 0, 1); // Jan 1 of first year
   rangeStart.setHours(0, 0, 0, 0);
-  // Snap to first of month
-  rangeStart.setDate(1);
-  const rangeEnd = new Date(Math.max(...allEnds));
-  rangeEnd.setHours(0, 0, 0, 0);
-  // Extend to end of month
-  rangeEnd.setMonth(rangeEnd.getMonth() + 1, 0);
+  // Dec 31 23:59:59.999 of last year, so the December tick has visible width.
+  const rangeEnd = new Date(latestYear, 11, 31, 23, 59, 59, 999);
 
   const totalMs = rangeEnd.getTime() - rangeStart.getTime();
   if (totalMs <= 0) return null;
@@ -773,11 +1099,17 @@ function GanttChart({ data }: { data: GanttBlock[] }) {
     cur.setMonth(cur.getMonth() + 1);
   }
 
-  // "Today" marker.
+  // "Now" marker — bottom-anchored label, shown beneath the dashed
+  // blue line. Displays "<Mon Day>" (e.g. "Nov 20") so the user sees
+  // exactly which date the line corresponds to.
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const todayPct = ((today.getTime() - rangeStart.getTime()) / totalMs) * 100;
   const showToday = todayPct >= 0 && todayPct <= 100;
+  const todayLabel = today.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
 
   const rowH = 36;
 
@@ -808,7 +1140,9 @@ function GanttChart({ data }: { data: GanttBlock[] }) {
               {name}
             </div>
           ))}
-          <div style={{ height: 24 }} /> {/* spacer for X-axis labels */}
+          {/* Spacer matching the "Now" date label row under the chart so
+              the task-name column aligns with the grid bottom edge. */}
+          {showToday && <div style={{ height: 20 }} />}
         </div>
 
         {/* Chart area */}
@@ -853,22 +1187,18 @@ function GanttChart({ data }: { data: GanttBlock[] }) {
               />
             ))}
 
-            {/* Today line */}
+            {/* "Now" line — dashed blue from top to bottom of the chart.
+                Just the line lives inside the overflow-hidden chart; the
+                label is rendered outside (below the chart) so it isn't
+                clipped. */}
             {showToday && (
               <div
-                className="absolute top-0 bottom-0 z-10"
+                className="absolute top-0 bottom-0 z-10 pointer-events-none"
                 style={{
                   left: `${todayPct}%`,
                   borderLeft: "2px dashed #3b82f6",
                 }}
-              >
-                <span
-                  className="absolute text-[10px] font-bold text-blue-500 whitespace-nowrap"
-                  style={{ top: -16, left: -14 }}
-                >
-                  Today
-                </span>
-              </div>
+              />
             )}
 
             {/* Task bars */}
@@ -900,22 +1230,22 @@ function GanttChart({ data }: { data: GanttBlock[] }) {
             })}
           </div>
 
-          {/* X-axis month labels at bottom */}
-          <div className="relative" style={{ height: 24 }}>
-            {monthTicks.map((mt, i) => (
+          {/* "Now" date label — sits below the chart, horizontally aligned
+              with the dashed line by sharing the same left% position.
+              Rendered here (not inside the chart) so it isn't clipped. */}
+          {showToday && (
+            <div
+              className="relative pointer-events-none"
+              style={{ height: 20 }}
+            >
               <span
-                key={i}
-                className="absolute text-[10px] text-gray-500 text-center"
-                style={{
-                  left: `${mt.leftPct}%`,
-                  width: `${mt.widthPct}%`,
-                  top: 4,
-                }}
+                className="absolute -translate-x-1/2 text-[10px] font-bold text-blue-500 whitespace-nowrap leading-none px-1 py-0.5 bg-white rounded shadow-sm border border-blue-100"
+                style={{ left: `${todayPct}%`, top: 4 }}
               >
-                {mt.label}
+                Now · {todayLabel}
               </span>
-            ))}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

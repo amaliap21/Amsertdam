@@ -8,6 +8,11 @@ import Image from "next/image";
 import toast from "react-hot-toast";
 import { createClient } from "@/lib/supabase/client";
 
+// Basic shape check (matches the server's regex). Real validation still
+// happens in the API route; this only stops obviously bad addresses from
+// triggering a network round-trip.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
 export default function SignUpPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -15,31 +20,58 @@ export default function SignUpPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [agreed, setAgreed] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (password !== confirmPassword) {
+    // Read from the form DOM (handles autofill that skips React's
+    // onChange). Falls back to React state if a name attribute is missing.
+    const fd = new FormData(e.currentTarget);
+    const submittedEmail = String(fd.get("email") ?? email).trim();
+    const submittedPassword = String(fd.get("password") ?? password);
+    const submittedConfirm = String(
+      fd.get("confirm-password") ?? confirmPassword,
+    );
+    if (!EMAIL_RE.test(submittedEmail)) {
+      toast.error("Please enter a valid email address");
+      return;
+    }
+    if (submittedPassword !== submittedConfirm) {
       toast.error("Passwords do not match");
       return;
     }
-    if (password.length < 6) {
-      toast.error("Password must be at least 6 characters");
+    if (submittedPassword.length < 8) {
+      toast.error("Password must be at least 8 characters");
+      return;
+    }
+    if (!agreed) {
+      toast.error("You must accept the Terms and Privacy Policy");
       return;
     }
     setLoading(true);
     try {
-      const supabase = createClient();
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/dashboard`,
-        },
+      // Email confirmation flow: the server creates the account WITHOUT
+      // auto-confirming and Supabase emails a verification link. We do NOT
+      // sign the user in here — they have to click the email link first,
+      // which lands them on /auth/callback and from there /dashboard.
+      const resp = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: submittedEmail,
+          password: submittedPassword,
+          agreedToTerms: true,
+          origin: window.location.origin,
+        }),
       });
-      if (error) throw error;
-      toast.success("Check your email to confirm — then sign in");
-      router.push("/sign-in");
+      const body = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(body.error || `Sign-up failed (${resp.status})`);
+      }
+
+      toast.success("Check your email to verify your account");
+      router.push(`/check-email?email=${encodeURIComponent(submittedEmail)}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Sign up failed");
     } finally {
@@ -50,6 +82,12 @@ export default function SignUpPage() {
   const handleGoogle = async () => {
     setLoading(true);
     try {
+      // Flag the onboarding tour before redirecting through Google.
+      try {
+        sessionStorage.setItem("realtrack-pending-tour", "1");
+      } catch {
+        /* ignore */
+      }
       const supabase = createClient();
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
@@ -65,13 +103,14 @@ export default function SignUpPage() {
   };
 
   return (
-    <div className="flex min-h-screen w-full bg-white">
+    <div className="flex min-h-dvh w-full bg-white">
       <div className="relative hidden w-1/2 overflow-hidden lg:block">
         <Image
           src="/laptop-sign.jpg"
           alt="RealTrack"
           fill
           className="object-cover"
+          sizes="(min-width: 1024px) 38vw, 100vw"
           priority
         />
       </div>
@@ -125,11 +164,17 @@ export default function SignUpPage() {
               </label>
               <input
                 id="email"
+                name="email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="Please enter your email"
-                className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-black-primary placeholder:text-gray-primary focus:border-indigo-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary/20"
+                autoComplete="email"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                inputMode="email"
+                className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-base text-black-primary placeholder:text-gray-primary focus:border-indigo-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary/20"
               />
             </div>
 
@@ -143,11 +188,16 @@ export default function SignUpPage() {
               <div className="relative">
                 <input
                   id="password"
+                  name="password"
                   type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Please enter your password"
-                  className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 pr-11 text-sm text-black-primary placeholder:text-gray-primary focus:border-indigo-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary/20"
+                  autoComplete="new-password"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 pr-11 text-base text-black-primary placeholder:text-gray-primary focus:border-indigo-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary/20"
                 />
                 <button
                   type="button"
@@ -170,11 +220,16 @@ export default function SignUpPage() {
               <div className="relative">
                 <input
                   id="confirm-password"
+                  name="confirm-password"
                   type={showConfirmPassword ? "text" : "password"}
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="Please confirm your password"
-                  className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 pr-11 text-sm text-black-primary placeholder:text-gray-primary focus:border-indigo-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary/20"
+                  autoComplete="new-password"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 pr-11 text-base text-black-primary placeholder:text-gray-primary focus:border-indigo-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary/20"
                 />
                 <button
                   type="button"
@@ -193,10 +248,43 @@ export default function SignUpPage() {
               </div>
             </div>
 
+            <p className="-mt-2 text-xs text-gray-primary">
+              At least 8 characters.
+            </p>
+
+            <label className="flex items-start gap-2 text-sm text-gray-primary">
+              <input
+                type="checkbox"
+                checked={agreed}
+                onChange={(e) => setAgreed(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-indigo-primary"
+              />
+              <span>
+                I have read and agree to the{" "}
+                <Link
+                  href="/terms"
+                  target="_blank"
+                  className="font-medium text-indigo-primary hover:underline"
+                >
+                  Terms of Service
+                </Link>{" "}
+                and{" "}
+                <Link
+                  href="/privacy"
+                  target="_blank"
+                  className="font-medium text-indigo-primary hover:underline"
+                >
+                  Privacy Policy
+                </Link>
+                . I understand my email is collected for account access and
+                will not be sold.
+              </span>
+            </label>
+
             <button
               type="submit"
-              disabled={loading}
-              className="mt-2 w-full rounded-full bg-indigo-primary px-5 py-3 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-60"
+              disabled={loading || !agreed}
+              className="mt-2 w-full rounded-full bg-indigo-primary px-5 py-3 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {loading ? "Signing up…" : "Sign Up"}
             </button>

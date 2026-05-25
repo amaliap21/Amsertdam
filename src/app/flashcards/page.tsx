@@ -29,9 +29,9 @@ export default function Flashcards() {
   };
 
   return (
-    <div className="min-h-screen bg-white px-14.75 py-11.5">
+    <div className="min-h-dvh bg-white px-4 sm:px-6 md:px-10 lg:px-14.75 py-6 md:py-11.5">
       {/* Header */}
-      <div className="flex justify-between items-start mb-12">
+      <div className="mb-12 flex flex-col lg:items-center gap-4 lg:flex-row lg:justify-between">
         <div>
           <h1 className="text-[28px] font-semibold text-black-primary mb-2">
             Flashcards
@@ -41,8 +41,9 @@ export default function Flashcards() {
           </p>
         </div>
         <button
+          data-tour="create-deck"
           onClick={() => setShowCreateModal(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-indigo-primary text-white rounded-lg hover:bg-indigo-600 transition-colors"
+          className="self-auto inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-primary px-4 py-2.5 text-white transition-colors hover:bg-indigo-600"
         >
           <CirclePlus size={18} />
           Create Flashcard
@@ -51,11 +52,13 @@ export default function Flashcards() {
 
       {/* Your Decks Section */}
       <div className="mb-6">
-        <div className="flex justify-between items-center mb-6">
+        <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-xl font-semibold text-black-primary">
             Your Decks
           </h2>
-          <span className="text-sm text-gray-primary">{decks.length} elements</span>
+          <span className="text-sm text-gray-primary">
+            {decks.length} elements
+          </span>
         </div>
 
         {/* Deck Cards */}
@@ -66,18 +69,22 @@ export default function Flashcards() {
               No flashcard decks yet
             </p>
             <p className="text-sm text-gray-primary">
-              Click <span className="font-medium text-indigo-primary">Create Flashcard</span> to upload a PDF or image — we&apos;ll extract a deck for you.
+              Click{" "}
+              <span className="font-medium text-indigo-primary">
+                Create Flashcard
+              </span>{" "}
+              to upload a PDF or image, we&apos;ll extract a deck for you.
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             {decks.map((deck) => (
               <div
                 key={deck.id}
                 className="bg-white border border-gray-200 rounded-xl p-5 hover:shadow-md transition-shadow"
               >
-                <div className="flex items-start gap-4">
-                  <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 bg-gradient-to-br from-indigo-primary/20 to-purple-300/30 flex items-center justify-center">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+                  <div className="w-16 h-16 shrink-0 rounded-lg bg-linear-to-br from-indigo-primary/20 to-purple-300/30 overflow-hidden flex items-center justify-center">
                     <Sparkles size={24} className="text-indigo-primary" />
                   </div>
 
@@ -105,7 +112,7 @@ export default function Flashcards() {
                     </p>
                   </div>
 
-                  <div className="flex flex-col items-center gap-3">
+                  <div className="flex flex-row items-center justify-between gap-3 sm:flex-col sm:items-center">
                     <div className="text-center">
                       <p className="text-2xl font-semibold text-black-primary">
                         {deck.cardCount}

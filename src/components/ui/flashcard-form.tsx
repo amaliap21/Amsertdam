@@ -41,7 +41,7 @@ async function validateImageFile(file: File): Promise<string | null> {
   const isImage =
     file.type.startsWith("image/") ||
     /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(file.name);
-  if (!isImage) return null; // PDF — skip image checks
+  if (!isImage) return null; // PDF, skip image checks
 
   if (!ACCEPTED_IMAGE_TYPES.has(file.type)) {
     return `Unsupported format (${file.type || "unknown"}). Use PNG, JPG, WebP, BMP, or GIF.`;
@@ -76,7 +76,7 @@ export default function CreateFlashcardModal({
     deckName: "",
     file: null as File | null,
   });
-  const [requestedCards, setRequestedCards] = useState(8);
+  const [requestedCards, setRequestedCards] = useState<number | "">(8);
   const [language, setLanguage] = useState<Language>("en");
   const [recommendedMaxCards, setRecommendedMaxCards] = useState<number | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -96,7 +96,7 @@ export default function CreateFlashcardModal({
   const analyzeFile = async (file: File, deckName: string) => {
     // The analyzer is a PDF-only flow that estimates the max number of
     // generatable cards. For images we do OCR instead, and the "card count"
-    // is whatever the OCR pipeline detects — no estimation needed.
+    // is whatever the OCR pipeline detects, no estimation needed.
     const isImage =
       file.type.startsWith("image/") ||
       /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(file.name);
@@ -120,7 +120,7 @@ export default function CreateFlashcardModal({
       if (resp.ok && Number.isFinite(Number(json.maxCards))) {
         const maxCards = Math.max(1, Math.round(Number(json.maxCards)));
         setRecommendedMaxCards(maxCards);
-        setRequestedCards((current) => Math.min(current, maxCards));
+        setRequestedCards((current) => Math.min(current === "" ? maxCards : current, maxCards));
         return;
       }
       setRecommendedMaxCards(null);
@@ -145,7 +145,9 @@ export default function CreateFlashcardModal({
       toast.error("Please enter a deck name");
       return;
     }
-    if (recommendedMaxCards && requestedCards > recommendedMaxCards) {
+    const finalRequestedCards =
+      requestedCards === "" || requestedCards < 1 ? 1 : requestedCards;
+    if (recommendedMaxCards && finalRequestedCards > recommendedMaxCards) {
       toast.error(`This source supports up to ${recommendedMaxCards} flashcards.`);
       return;
     }
@@ -161,7 +163,7 @@ export default function CreateFlashcardModal({
     );
     try {
       if (isImage) {
-        // Client-side OCR using Tesseract.js — no server/AI API call.
+        // Client-side OCR using Tesseract.js, no server/AI API call.
         const file = formData.file;
         const imageDataUrl = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
@@ -182,7 +184,7 @@ export default function CreateFlashcardModal({
         const imgDims = { w: imgEl.naturalWidth, h: imgEl.naturalHeight };
 
         // Upscale small images so Tesseract can read text clearly.
-        // No sharpening — it creates edge artifacts on coloured diagrams
+        // No sharpening, it creates edge artifacts on coloured diagrams
         // that Tesseract misreads as characters.
         const MIN_OCR_SIZE = 2000;
         const longest = Math.max(imgDims.w, imgDims.h);
@@ -311,7 +313,7 @@ export default function CreateFlashcardModal({
         }
 
         toast.success(
-          `Found ${regions.length} labels — cover and reveal!`,
+          `Found ${regions.length} labels, cover and reveal!`,
           { id: t },
         );
         onCreated?.({
@@ -324,11 +326,11 @@ export default function CreateFlashcardModal({
           modelLoaded: true,
         });
       } else {
-        // PDF path — server-side extraction.
+        // PDF path, server-side extraction.
         const fd = new FormData();
         fd.append("file", formData.file);
         fd.append("deckName", formData.deckName);
-        fd.append("requestedCards", String(requestedCards));
+        fd.append("requestedCards", String(finalRequestedCards));
         fd.append("language", language);
         const resp = await fetch("/api/ai/flashcards/generate", {
           method: "POST",
@@ -405,28 +407,28 @@ export default function CreateFlashcardModal({
 
   return (
     <div
-      className="fixed inset-0 flex justify-center items-center z-50"
+      className="fixed inset-0 flex items-end justify-center p-2 sm:items-center sm:p-4 z-50"
       style={{ background: "rgba(0, 0, 0, 0.5)" }}
       onClick={loading ? undefined : onClose}
     >
       <div
-        className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-8 relative"
+        className="relative w-[calc(100vw-0.5rem)] max-w-[20.5rem] max-h-[90dvh] overflow-y-auto rounded-2xl bg-white px-2.5 pb-2.5 pt-9 shadow-xl sm:w-full sm:max-w-lg sm:px-6 sm:pb-6 sm:pt-6"
         onClick={(e) => e.stopPropagation()}
       >
         <button
           onClick={onClose}
           disabled={loading}
-          className="absolute top-6 right-6 text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50"
+          className="absolute right-4 top-4 text-gray-400 transition-colors hover:text-gray-600 disabled:opacity-50 sm:right-6 sm:top-6"
         >
           <X size={24} />
         </button>
 
-        <div className="mb-8">
-          <h2 className="text-2xl font-semibold text-black-primary mb-2">
+        <div className="mb-6 sm:mb-8">
+          <h2 className="mb-2 text-lg font-semibold text-black-primary sm:text-2xl">
             Create Flashcard
           </h2>
           <p className="text-sm text-gray-primary">
-            Upload an image or PDF — we&apos;ll turn it into flashcards
+            Upload an image or PDF, we&apos;ll turn it into flashcards
           </p>
         </div>
 
@@ -436,10 +438,10 @@ export default function CreateFlashcardModal({
             (formData.file.type.startsWith("image/") ||
               /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(formData.file.name));
           return (
-            <form onSubmit={handleSubmit} className="space-y-6">
+            <form onSubmit={handleSubmit} className="space-y-5 sm:space-y-6">
               {selectedIsImage ? (
-                <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-primary">
-                  Image upload detected — we&apos;ll run OCR to find text
+                <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-3.5 py-3 text-sm text-indigo-primary sm:px-4">
+                  Image upload detected, we&apos;ll run OCR to find text
                   labels, then cover them with colored boxes for
                   cover-and-reveal practice. No card count to set.
                 </div>
@@ -453,9 +455,18 @@ export default function CreateFlashcardModal({
                     min={1}
                     max={recommendedMaxCards ?? undefined}
                     value={requestedCards}
-                    onChange={(e) => setRequestedCards(Number(e.target.value || 1))}
+                    onChange={(e) =>
+                      setRequestedCards(
+                        e.target.value === "" ? "" : Number(e.target.value),
+                      )
+                    }
+                    onBlur={() => {
+                      if (requestedCards === "" || requestedCards < 1) {
+                        setRequestedCards(1);
+                      }
+                    }}
                     disabled={loading || analyzing}
-                    className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-black-primary"
+                    className="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-black-primary sm:px-4 sm:py-3.5"
                   />
                   <p className="mt-2 text-sm text-gray-primary">
                     {recommendedMaxCards
@@ -477,7 +488,7 @@ export default function CreateFlashcardModal({
           )}
 
           <div>
-            <label className="block text-sm font-medium text-black-primary mb-3">
+            <label className="mb-2 block text-sm font-medium text-black-primary sm:mb-3">
               Deck Name<span className="text-red-500">*</span>
             </label>
             <input
@@ -487,19 +498,19 @@ export default function CreateFlashcardModal({
               onChange={(e) =>
                 setFormData({ ...formData, deckName: e.target.value })
               }
-              className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-black-primary placeholder:text-gray-400"
+              className="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-black-primary placeholder:text-gray-400 sm:px-4 sm:py-3.5"
               required
               disabled={loading}
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-black-primary mb-3">
+            <label className="mb-2 block text-sm font-medium text-black-primary sm:mb-3">
               PDF / Image<span className="text-red-500">*</span>
             </label>
             <label
               htmlFor="file-upload"
-              className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${
+              className={`flex flex-col items-center justify-center w-full h-28 border-2 border-dashed rounded-xl cursor-pointer transition-colors sm:h-32 ${
                 isDragging
                   ? "border-indigo-primary bg-indigo-50"
                   : "border-gray-300 bg-white hover:bg-gray-50"
@@ -508,9 +519,9 @@ export default function CreateFlashcardModal({
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
             >
-              <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                <Upload size={24} className="text-gray-400 mb-2" />
-                <p className="text-sm text-gray-500">
+              <div className="flex flex-col items-center justify-center pt-4 pb-5 sm:pt-5 sm:pb-6">
+                <Upload size={22} className="mb-2 text-gray-400 sm:size-6" />
+                <p className="text-center text-sm text-gray-500">
                   {formData.file ? (
                     <span className="font-medium text-indigo-primary">
                       {formData.file.name}
@@ -520,7 +531,7 @@ export default function CreateFlashcardModal({
                   )}
                 </p>
                 {recommendedMaxCards ? (
-                  <p className="mt-2 text-xs text-indigo-primary">
+                  <p className="mt-2 text-[11px] text-indigo-primary sm:text-xs">
                     Estimated max: {recommendedMaxCards} cards
                   </p>
                 ) : null}
@@ -539,7 +550,7 @@ export default function CreateFlashcardModal({
           <button
             type="submit"
             disabled={loading}
-            className="w-full flex items-center justify-center gap-2 px-4 py-4 bg-indigo-primary text-white rounded-xl hover:bg-indigo-600 transition-colors font-medium disabled:opacity-70 disabled:cursor-not-allowed"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-primary px-4 py-3.5 font-medium text-white transition-colors hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-70 sm:py-4"
           >
             {loading ? (
               <>

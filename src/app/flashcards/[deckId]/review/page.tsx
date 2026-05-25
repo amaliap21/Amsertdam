@@ -194,7 +194,7 @@ function ImageCoverReveal({
   };
 
   return (
-    <div className="min-h-screen bg-white px-14.75 py-11.5">
+    <div className="min-h-dvh bg-white px-4 sm:px-6 md:px-10 lg:px-14.75 py-6 md:py-11.5">
       <div className="flex justify-between items-center mb-8">
         <Link
           href="/flashcards"
@@ -331,7 +331,7 @@ function ImageCoverReveal({
                     <Check size={16} className="text-green-600 shrink-0" />
                   )}
                   {wrong && (
-                    <span className="text-xs text-red-500 shrink-0 max-w-[120px] truncate">
+                    <span className="text-xs text-red-500 shrink-0 max-w-30 truncate">
                       {region.char}
                     </span>
                   )}
@@ -442,7 +442,7 @@ function CharacterModePanel({
           >
             {score.hits === score.total ? (
               <span className="text-green-600 font-medium">
-                Perfect — {score.hits} / {score.total} (jump to a card)
+                Perfect, {score.hits} / {score.total} (jump to a card)
               </span>
             ) : (
               <span>
@@ -652,7 +652,7 @@ export default function FlashcardReview({
   };
 
   return (
-    <div className="min-h-screen bg-white px-14.75 py-11.5">
+    <div className="min-h-dvh bg-white px-4 sm:px-6 md:px-10 lg:px-14.75 py-6 md:py-11.5">
       {/* Header */}
       <div className="flex justify-between items-center mb-8">
         <Link
@@ -677,7 +677,7 @@ export default function FlashcardReview({
 
       {/* Flashcard */}
       <div className="max-w-3xl mx-auto">
-        <div className="bg-white border border-gray-200 rounded-2xl p-12 mb-8 min-h-[280px] flex flex-col justify-center">
+        <div className="bg-white border border-gray-200 rounded-2xl p-6 sm:p-12 mb-8 min-h-70 flex flex-col justify-center">
           {/* Question */}
           <p className="text-lg text-black-primary text-center mb-8">
             {currentCard.question}
@@ -714,13 +714,13 @@ export default function FlashcardReview({
 
         {/* Mascot Message */}
         <div className="flex justify-center mb-8">
-          <div className="flex items-center gap-3 bg-indigo-50 rounded-2xl px-3 max-w-[300px]">
+          <div className="flex items-center gap-3 bg-indigo-50 rounded-2xl px-3 max-w-75">
             <Image
             src="/blue-girl.svg"
             alt="Mascot"
             width={64}
             height={64}
-            className="w-full h-full"
+            className="w-auto h-auto"
             />
             <p className="text-sm text-gray-primary py-0">
               Take your time. No scores, no streaks.

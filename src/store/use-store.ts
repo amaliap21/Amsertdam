@@ -71,6 +71,14 @@ export type PlannerEvent = {
   bgColor: string;
 };
 
+export type GanttBlock = {
+  task_name: string;
+  start_time: string;
+  end_time: string;
+  hours_allocated: number;
+  tier: "HIGH" | "MEDIUM" | "LOW";
+};
+
 export type QuizAttempt = {
   id: string;
   quizId: string;
@@ -115,6 +123,14 @@ interface AppState {
   setPlannerEvents: (events: PlannerEvent[]) => void;
   hiddenTaskEventIds: number[];
   setHiddenTaskEventIds: (ids: number[]) => void;
+
+  // Gantt chart + AI summary live in the store so the "Plan with AI"
+  // results survive page refreshes. Without persistence the chart blanks
+  // out whenever the user navigates away and back.
+  ganttData: GanttBlock[] | null;
+  setGanttData: (data: GanttBlock[] | null) => void;
+  aiSummary: string | null;
+  setAiSummary: (summary: string | null) => void;
 
   // Cached courses for fast first paint on the dashboard. Persisted so the
   // courses overview doesn't blank out between navigations / refreshes.
@@ -358,7 +374,7 @@ export const useStore = create<AppState>()(
           try { await fetch(`/api/quizzes?id=${id}`, { method: 'DELETE' }) } catch {}
           // Cascade-delete attempts that belong to this quiz so its Study
           // Companion entry disappears automatically. Study Companion is
-          // strictly a live mirror of "quizzes you can still take" — once
+          // strictly a live mirror of "quizzes you can still take", once
           // the quiz is gone, the review/chat for it should be gone too.
           set((state) => ({
             quizzes: state.quizzes.filter((q) => q.id !== id),
@@ -370,6 +386,10 @@ export const useStore = create<AppState>()(
         setPlannerEvents: (plannerEvents) => set({ plannerEvents }),
         hiddenTaskEventIds: [],
         setHiddenTaskEventIds: (hiddenTaskEventIds) => set({ hiddenTaskEventIds }),
+        ganttData: null,
+        setGanttData: (ganttData) => set({ ganttData }),
+        aiSummary: null,
+        setAiSummary: (aiSummary) => set({ aiSummary }),
         coursesCache: [],
         setCoursesCache: (coursesCache) => set({ coursesCache }),
         fetchCourses: async () => {
@@ -408,7 +428,7 @@ export const useStore = create<AppState>()(
                 qResp.ok ? qResp.json() : Promise.resolve(null),
                 cResp.ok ? cResp.json() : Promise.resolve(null),
               ])
-              // Never overwrite local data with empty API results — protects
+              // Never overwrite local data with empty API results, protects
               // against transient API failures, missing env vars, etc.
               const cur = get()
               const next: Partial<AppState> = {}

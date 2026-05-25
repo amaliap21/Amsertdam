@@ -1,15 +1,37 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Chrome, Eye, EyeOff, X } from "lucide-react";
 import Image from "next/image";
 import toast from "react-hot-toast";
 import { createClient } from "@/lib/supabase/client";
 
+// Whitelist for the post-login redirect. We only follow a relative path that
+// starts with a single "/" — never "//" (protocol-relative) or "http(s)://".
+// Without this an attacker could craft /sign-in?next=https://evil.example
+// and trick the user into landing off-site after sign-in.
+function safeNext(raw: string | null): string {
+  if (!raw) return "/dashboard";
+  if (!raw.startsWith("/") || raw.startsWith("//")) return "/dashboard";
+  return raw;
+}
+
 export default function SignInPage() {
+  // useSearchParams forces dynamic rendering; wrap in Suspense so the static
+  // export step doesn't bail with a prerender error.
+  return (
+    <Suspense fallback={null}>
+      <SignInPageInner />
+    </Suspense>
+  );
+}
+
+function SignInPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextPath = safeNext(searchParams.get("next"));
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -17,16 +39,37 @@ export default function SignInPage() {
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    // Read credentials from the form DOM, not from React state. Password
+    // managers and browser autofill commonly write the value into the
+    // <input> without firing onChange — so on the first click, React
+    // state was still empty and the request failed with "Invalid login
+    // credentials". The user could only succeed on the second click after
+    // blur synced state. Pulling from FormData makes the first click work.
+    const formData = new FormData(e.currentTarget);
+    const submittedEmail = String(formData.get("email") ?? email).trim();
+    const submittedPassword = String(formData.get("password") ?? password);
+    if (!submittedEmail || !submittedPassword) {
+      toast.error("Please enter your email and password");
+      return;
+    }
     setLoading(true);
     try {
       const supabase = createClient();
       const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+        email: submittedEmail,
+        password: submittedPassword,
       });
       if (error) throw error;
       toast.success("Welcome back");
-      router.push("/dashboard");
+      // Signal tour-bootstrap to launch the onboarding the moment the
+      // dashboard mounts — survives the AuthSync hard-reload because
+      // it's stored in sessionStorage, not React state.
+      try {
+        sessionStorage.setItem("realtrack-pending-tour", "1");
+      } catch {
+        /* ignore */
+      }
+      router.push(nextPath);
       router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Sign in failed");
@@ -38,6 +81,13 @@ export default function SignInPage() {
   const handleGoogle = async () => {
     setLoading(true);
     try {
+      // Set the pending-tour flag BEFORE the OAuth redirect so it's
+      // already in sessionStorage by the time we land back on /dashboard.
+      try {
+        sessionStorage.setItem("realtrack-pending-tour", "1");
+      } catch {
+        /* ignore */
+      }
       const supabase = createClient();
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
@@ -53,13 +103,14 @@ export default function SignInPage() {
   };
 
   return (
-    <div className="flex min-h-screen w-full bg-white">
+    <div className="flex min-h-dvh w-full bg-white">
       <div className="relative hidden w-1/2 overflow-hidden lg:block">
         <Image
           src="/laptop-sign.jpg"
           alt="RealTrack"
           fill
           className="object-cover"
+          sizes="(min-width: 1024px) 50vw, 100vw"
           priority
         />
       </div>
@@ -113,11 +164,17 @@ export default function SignInPage() {
               </label>
               <input
                 id="email"
+                name="email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="Please enter your email"
-                className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-black-primary placeholder:text-gray-primary focus:border-indigo-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary/20"
+                autoComplete="email"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                inputMode="email"
+                className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-base text-black-primary placeholder:text-gray-primary focus:border-indigo-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary/20"
               />
             </div>
 
@@ -131,11 +188,16 @@ export default function SignInPage() {
               <div className="relative">
                 <input
                   id="password"
+                  name="password"
                   type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Please enter your password"
-                  className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 pr-11 text-sm text-black-primary placeholder:text-gray-primary focus:border-indigo-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary/20"
+                  autoComplete="current-password"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 pr-11 text-base text-black-primary placeholder:text-gray-primary focus:border-indigo-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary/20"
                 />
                 <button
                   type="button"
@@ -148,10 +210,10 @@ export default function SignInPage() {
               </div>
               <div className="flex justify-end">
                 <Link
-                  href="#"
+                  href="/forgot-password"
                   className="text-xs font-medium text-indigo-primary hover:opacity-80"
                 >
-                  Forget Password?
+                  Forgot Password?
                 </Link>
               </div>
             </div>

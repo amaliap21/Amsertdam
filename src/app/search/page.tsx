@@ -72,7 +72,7 @@ export default function SearchPage() {
 
 function SearchFallback() {
   return (
-    <div className="min-h-screen bg-white px-14.75 py-11.5">
+    <div className="min-h-dvh bg-white px-4 sm:px-6 md:px-10 lg:px-14.75 py-6 md:py-11.5">
       <p className="text-sm text-gray-primary">Loading search…</p>
     </div>
   );
@@ -222,15 +222,15 @@ function SearchInner() {
   );
 
   return (
-    <div className="min-h-screen bg-white px-14.75 py-11.5">
-      <div className="mb-8 flex items-start justify-between gap-6">
-        <div>
-          <h1 className="text-[28px] font-semibold text-black-primary">Search</h1>
-          <p className="text-gray-primary">
+    <div className="min-h-dvh bg-white px-4 sm:px-6 md:px-10 lg:px-14.75 py-6 md:py-11.5">
+      <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+        <div className="min-w-0">
+          <h1 className="text-2xl sm:text-[28px] font-semibold text-black-primary">Search</h1>
+          <p className="text-sm sm:text-base text-gray-primary break-words">
             {query ? `Results for “${query}”` : "Search across your courses, tasks, flashcards, and quizzes."}
           </p>
         </div>
-        <div className="rounded-full bg-indigo-primary/10 px-4 py-2 text-sm font-medium text-indigo-primary">
+        <div className="self-start rounded-full bg-indigo-primary/10 px-4 py-2 text-sm font-medium text-indigo-primary whitespace-nowrap">
           {loading ? "Searching…" : `${totalResults} results`}
         </div>
       </div>

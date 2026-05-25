@@ -11,7 +11,7 @@ export const maxDuration = 60;
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
 
-// Flashcard generation — NO AI, NO external APIs. Runs the deterministic
+// Flashcard generation, NO AI, NO external APIs. Runs the deterministic
 // pattern + cloze extractor inline so it works in both `next dev` and on
 // Vercel without needing a Python function to be deployed.
 
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
     const cards = extractFlashcards(cleanedText, Math.max(1, effective), language);
 
     // The extractor has a guaranteed-output fallback now, so if cards is
-    // still empty it means the text really had nothing to work with — even
+    // still empty it means the text really had nothing to work with, even
     // then we return success with a single placeholder rather than 422,
     // because the user already saw text get accepted past the 40-char gate.
     if (cards.length === 0) {

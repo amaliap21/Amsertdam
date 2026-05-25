@@ -34,7 +34,9 @@ export default function CreateQuizModal({
     course: "",
     file: null as File | null,
   });
-  const [requestedQuestions, setRequestedQuestions] = useState(5);
+  // Stored as a string so the input can be momentarily empty without
+  // snapping back to "1". The number is parsed at submit time.
+  const [requestedQuestions, setRequestedQuestions] = useState<string>("5");
   const [language, setLanguage] = useState<Language>("en");
   const [recommendedMaxQuestions, setRecommendedMaxQuestions] = useState<number | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -83,7 +85,9 @@ export default function CreateQuizModal({
       if (resp.ok && Number.isFinite(Number(json.maxQuestions))) {
         const maxQuestions = Math.max(1, Math.round(Number(json.maxQuestions)));
         setRecommendedMaxQuestions(maxQuestions);
-        setRequestedQuestions((current) => Math.min(current, maxQuestions));
+        setRequestedQuestions((current) =>
+          String(Math.min(Number(current) || 1, maxQuestions)),
+        );
         return;
       }
       setRecommendedMaxQuestions(null);
@@ -108,7 +112,14 @@ export default function CreateQuizModal({
       setError("File exceeds the 50 MB limit.");
       return;
     }
-    if (recommendedMaxQuestions && requestedQuestions > recommendedMaxQuestions) {
+    const parsedQuestions = Math.max(
+      1,
+      Math.floor(Number(requestedQuestions) || 1),
+    );
+    if (
+      recommendedMaxQuestions &&
+      parsedQuestions > recommendedMaxQuestions
+    ) {
       setError(`This source supports up to ${recommendedMaxQuestions} questions.`);
       return;
     }
@@ -120,7 +131,7 @@ export default function CreateQuizModal({
       fd.append("file", formData.file);
       fd.append("title", formData.title);
       fd.append("course", formData.course);
-      fd.append("requestedQuestions", String(requestedQuestions));
+      fd.append("requestedQuestions", String(parsedQuestions));
       fd.append("language", language);
       const resp = await fetch("/api/ai/quiz/generate", {
         method: "POST",
@@ -195,35 +206,35 @@ export default function CreateQuizModal({
 
   return (
     <div
-      className="fixed inset-0 flex justify-center items-center z-50"
+      className="fixed inset-0 z-50 flex items-center justify-center p-1 sm:p-4"
       style={{ background: "rgba(0, 0, 0, 0.5)" }}
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-8 relative"
+        className="relative w-[calc(100vw-0.5rem)] max-w-[20.5rem] max-h-[90dvh] overflow-y-auto rounded-2xl bg-white px-2.5 pb-2.5 pt-9 shadow-xl sm:w-full sm:max-w-lg sm:px-6 sm:pb-6 sm:pt-6"
         onClick={(e) => e.stopPropagation()}
       >
         <button
           onClick={onClose}
-          className="absolute top-6 right-6 text-gray-400 hover:text-gray-600 transition-colors"
+          className="absolute right-2.5 top-2.5 text-gray-400 transition-colors hover:text-gray-600 sm:right-6 sm:top-6"
           aria-label="Close"
         >
-          <X size={24} />
+          <X size={18} />
         </button>
 
-        <header className="mb-8">
-          <h2 className="text-2xl font-semibold text-black-primary mb-2">
+        <header className="mb-3 sm:mb-8">
+          <h2 className="mb-1 text-xs font-semibold text-black-primary sm:text-2xl">
             Create New Quiz
           </h2>
-          <p className="text-sm text-gray-primary">
+          <p className="text-[11px] leading-tight text-gray-primary sm:text-sm">
             Generate a practice quiz from your course materials
           </p>
         </header>
 
         {coursesLoaded && courseOptions.length === 0 && (
-          <div className="mb-6 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <div className="mb-3 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-2.5 sm:mb-6 sm:p-4">
             <AlertCircle size={18} className="mt-0.5 shrink-0 text-amber-600" />
-            <div className="text-sm text-amber-800">
+            <div className="text-xs text-amber-800 sm:text-sm">
               <p className="font-medium">No courses yet.</p>
               <p className="mt-1">
                 Add a course in{" "}
@@ -233,15 +244,15 @@ export default function CreateQuizModal({
                 >
                   Passing Target
                 </Link>{" "}
-                first — quizzes must be tied to one of your courses.
+                first, quizzes must be tied to one of your courses.
               </p>
             </div>
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-6">
           <div>
-            <label className="block text-sm font-medium text-black-primary mb-3">
+            <label className="mb-1 block text-[11px] font-medium text-black-primary sm:mb-3 sm:text-sm">
               Questions to generate
             </label>
             <input
@@ -249,11 +260,16 @@ export default function CreateQuizModal({
               min={1}
               max={recommendedMaxQuestions ?? undefined}
               value={requestedQuestions}
-              onChange={(e) => setRequestedQuestions(Number(e.target.value || 1))}
+              onChange={(e) => setRequestedQuestions(e.target.value)}
+              onBlur={() => {
+                if (requestedQuestions === "" || Number(requestedQuestions) < 1) {
+                  setRequestedQuestions("1");
+                }
+              }}
               disabled={loading || analyzing}
-              className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-black-primary"
+              className="w-full rounded-xl border border-gray-300 px-2.5 py-2 text-[13px] text-black-primary focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary sm:px-4 sm:py-3.5 sm:text-sm"
             />
-            <p className="mt-2 text-sm text-gray-primary">
+            <p className="mt-1.5 text-[11px] leading-tight text-gray-primary sm:text-sm">
               {recommendedMaxQuestions
                 ? `This file supports up to ${recommendedMaxQuestions} questions. You can choose any value up to that limit.`
                 : analyzing
@@ -263,7 +279,7 @@ export default function CreateQuizModal({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-black-primary mb-3">
+            <label className="mb-1 block text-[11px] font-medium text-black-primary sm:mb-3 sm:text-sm">
               Title<span className="text-red-500">*</span>
             </label>
             <input
@@ -273,13 +289,13 @@ export default function CreateQuizModal({
               onChange={(e) =>
                 setFormData({ ...formData, title: e.target.value })
               }
-              className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent text-black-primary placeholder:text-gray-400"
+              className="w-full rounded-xl border border-gray-300 px-2.5 py-2 text-[13px] text-black-primary placeholder:text-gray-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary sm:px-4 sm:py-3.5 sm:text-sm"
               required
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-black-primary mb-3">
+            <label className="mb-1 block text-[11px] font-medium text-black-primary sm:mb-3 sm:text-sm">
               Course<span className="text-red-500">*</span>
             </label>
             <select
@@ -288,7 +304,7 @@ export default function CreateQuizModal({
                 setFormData({ ...formData, course: e.target.value })
               }
               disabled={courseOptions.length === 0}
-              className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-primary focus:border-transparent bg-white text-black-primary disabled:bg-gray-50 disabled:text-gray-400"
+              className="w-full rounded-xl border border-gray-300 bg-white px-2.5 py-2 text-[13px] text-black-primary focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary disabled:bg-gray-50 disabled:text-gray-400 sm:px-4 sm:py-3.5 sm:text-sm"
               required
             >
               <option value="">

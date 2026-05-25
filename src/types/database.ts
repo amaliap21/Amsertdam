@@ -1,5 +1,5 @@
 // Minimal Supabase schema definitions for the tables this app touches.
-// Each table only declares what we actually read/write — anything stored as
+// Each table only declares what we actually read/write, anything stored as
 // JSON inside the `title` column (see api/courses, api/tasks) is decoded on
 // the application layer, not at the DB layer.
 

@@ -11,19 +11,20 @@ import {
 
 export default function LandingPage() {
   return (
-    <div className="bg-white min-h-screen overflow-x-hidden">
-      <header className="pt-8 px-4">
-        <div className="mx-auto flex w-full max-w-[1240px] items-center justify-between rounded-full bg-indigo-primary/5 px-6 py-2">
-          <Link href="/" className="block">
+    <div className="bg-white min-h-dvh overflow-x-hidden">
+      <header className="pt-6 px-4 sm:px-6">
+        <div className="mx-auto flex w-full max-w-310 flex-col gap-4 rounded-3xl bg-indigo-primary/5 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:rounded-full sm:px-6 sm:py-2">
+          <Link href="/" className="block mx-auto sm:mx-0">
             <Image
               src="/logo.svg"
               alt="RealTrack"
-              width={151}
+              width={152}
               height={53}
+              className="w-auto md:h-10"
               priority
             />
           </Link>
-          <div className="flex items-center gap-8">
+          <div className="flex items-center justify-between gap-4 sm:gap-8">
             <Link
               href="/sign-in"
               className="text-sm font-medium text-indigo-primary hover:opacity-80"
@@ -40,13 +41,13 @@ export default function LandingPage() {
         </div>
       </header>
 
-      <section className="px-4 pt-32 pb-24">
-        <div className="mx-auto flex w-full max-w-[1024px] flex-col items-center gap-13 text-center">
+      <section className="px-4 sm:px-6 pt-20 sm:pt-28 lg:pt-32 pb-20 sm:pb-24">
+        <div className="mx-auto flex w-full max-w-5xl flex-col items-center gap-10 sm:gap-13 text-center">
           <div className="flex flex-col gap-5">
-            <h1 className="text-[48px] font-semibold leading-tight text-black">
+            <h1 className="text-[34px] sm:text-[44px] lg:text-[48px] font-semibold leading-tight text-black">
               Feeling overwhelmed by assignments, deadlines, and exams?
             </h1>
-            <p className="text-[20px] leading-[30px] text-gray-primary">
+            <p className="text-[18px] sm:text-[20px] leading-7 sm:leading-7.5 text-gray-primary">
               RealTrack helps you understand what really matters in your
               studies, so you can focus your energy, manage your workload, and
               stay on track toward graduation.
@@ -62,9 +63,9 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <section className="bg-indigo-primary/5 px-4 py-20">
-        <div className="mx-auto flex w-full max-w-[980px] flex-col items-center gap-20">
-          <h2 className="text-center text-[28px] font-medium text-black-primary">
+      <section className="bg-indigo-primary/5 px-4 sm:px-6 py-16 sm:py-20">
+        <div className="mx-auto flex w-full max-w-245 flex-col items-center gap-14 sm:gap-20">
+          <h2 className="text-center text-[24px] sm:text-[28px] font-medium text-black-primary">
             Everything to help you learn better, one step at a time
           </h2>
 
@@ -140,27 +141,47 @@ function FeatureCard({
 }) {
   return (
     <div
-      className={`${color} relative h-[351px] w-full overflow-hidden rounded-2xl`}
+      className={`${color} relative h-87.75 w-full overflow-hidden rounded-2xl`}
     >
       <div className="flex flex-col items-center gap-2 px-5 pt-6 pb-2 text-center text-white">
         <h3 className="text-xl font-semibold">{title}</h3>
         <p className="text-xs leading-snug">{description}</p>
       </div>
-      <div className="absolute inset-x-0 bottom-0 top-[108px]">{children}</div>
+      <div className="absolute inset-x-0 bottom-0 top-27">{children}</div>
     </div>
   );
 }
 
 function PassingTargetPreview() {
-  const courses: { name: string; credits: string; status: "On Track" | "Worth Reviewing" }[] = [
-    { name: "Data Structures and Algorithms", credits: "4 credits • 10–11 hrs/week", status: "On Track" },
-    { name: "Operating System", credits: "3 credits • 8–9 hrs/week", status: "Worth Reviewing" },
-    { name: "Computer Network", credits: "2 credits • 8–9 hrs/week", status: "On Track" },
-    { name: "Database", credits: "3 credits • 6–7 hrs/week", status: "Worth Reviewing" },
+  const courses: {
+    name: string;
+    credits: string;
+    status: "On Track" | "Worth Reviewing";
+  }[] = [
+    {
+      name: "Data Structures and Algorithms",
+      credits: "4 credits • 10–11 hrs/week",
+      status: "On Track",
+    },
+    {
+      name: "Operating System",
+      credits: "3 credits • 8–9 hrs/week",
+      status: "Worth Reviewing",
+    },
+    {
+      name: "Computer Network",
+      credits: "2 credits • 8–9 hrs/week",
+      status: "On Track",
+    },
+    {
+      name: "Database",
+      credits: "3 credits • 6–7 hrs/week",
+      status: "Worth Reviewing",
+    },
   ];
 
   return (
-    <div className="absolute right-0 bottom-0 w-[256px] rounded-tl-xl rounded-br-2xl bg-white p-3 shadow-lg">
+    <div className="absolute right-0 bottom-0 w-64 rounded-tl-xl rounded-br-2xl bg-white p-3 shadow-lg">
       <div className="flex flex-col gap-2">
         {courses.map((c) => (
           <div
@@ -194,9 +215,9 @@ function PassingTargetPreview() {
 function TaskValuePreview() {
   return (
     <div className="relative h-full w-full">
-      <div className="absolute left-1/2 top-[18px] h-[118px] w-[211px] -translate-x-1/2 -rotate-[5deg] rounded-lg bg-white/95" />
-      <div className="absolute left-1/2 top-[10px] h-[131px] w-[226px] -translate-x-1/2 rotate-[3deg] rounded-lg bg-white/95" />
-      <div className="absolute left-1/2 top-[20px] flex h-[124px] w-[243px] -translate-x-1/2 flex-col justify-end rounded-lg bg-white px-4 pb-3 pt-2 shadow-md">
+      <div className="absolute left-1/2 top-4.5 h-29.5 w-52.75 -translate-x-1/2 -rotate-5 rounded-lg bg-white/95" />
+      <div className="absolute left-1/2 top-2.5 h-32.75 w-56.5 -translate-x-1/2 rotate-3 rounded-lg bg-white/95" />
+      <div className="absolute left-1/2 top-5 flex h-31 w-60.75 -translate-x-1/2 flex-col justify-end rounded-lg bg-white px-4 pb-3 pt-2 shadow-md">
         <div className="flex items-center justify-between">
           <span className="text-[13px] font-medium text-black-primary">
             Focus First
@@ -204,7 +225,7 @@ function TaskValuePreview() {
           <AlertCircle size={16} className="text-[#e53d3d]" />
         </div>
         <div className="mt-2 flex items-end gap-2">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#ffd9c2] to-[#ff9a76] text-2xl">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-[#ffd9c2] to-[#ff9a76] text-2xl">
             <span role="img" aria-label="student">
               👧
             </span>
@@ -226,7 +247,7 @@ function TaskValuePreview() {
 
 function PriorityPlannerPreview() {
   return (
-    <div className="absolute left-[22px] right-[22px] top-1 rounded-tl-xl rounded-br-2xl bg-white shadow-lg">
+    <div className="absolute left-5.5 right-5.5 top-1 rounded-tl-xl rounded-br-2xl bg-white shadow-lg">
       <div className="flex items-center gap-1 border-b border-gray-100 p-2">
         <span className="rounded-md bg-indigo-primary/10 px-3 py-1 text-[10px] font-medium text-indigo-primary">
           Day
@@ -285,8 +306,8 @@ function ScheduleRow({
 function FlashcardsPreview() {
   return (
     <div className="relative h-full w-full">
-      <div className="absolute left-1/2 top-[40px] h-[157px] w-[240px] -translate-x-1/2 rounded-lg bg-[#ecf0f3]" />
-      <div className="absolute left-1/2 top-[24px] flex h-[154px] w-[232px] -translate-x-1/2 -rotate-[7deg] flex-col items-center justify-center gap-3 rounded-lg bg-white p-5 shadow-md">
+      <div className="absolute left-1/2 top-10 h-39.25 w-60 -translate-x-1/2 rounded-lg bg-[#ecf0f3]" />
+      <div className="absolute left-1/2 top-6 flex h-38.5 w-58 -translate-x-1/2 -rotate-7 flex-col items-center justify-center gap-3 rounded-lg bg-white p-5 shadow-md">
         <p className="text-center text-[11px] font-medium text-black-primary">
           A value-column that uniquely identifies each record is called a ___.
         </p>
@@ -300,7 +321,7 @@ function FlashcardsPreview() {
 
 function QuizLabPreview() {
   return (
-    <div className="absolute left-[22px] right-[22px] top-1 rounded-tl-xl rounded-br-2xl bg-white p-3 shadow-lg">
+    <div className="absolute left-5.5 right-5.5 top-1 rounded-tl-xl rounded-br-2xl bg-white p-3 shadow-lg">
       <p className="text-[11px] font-semibold text-black-primary">
         Algorithms Midterm Practice
       </p>
@@ -329,14 +350,12 @@ function StudyCompanionPreview() {
   return (
     <div className="relative h-full w-full">
       <ChatCard
-        className="absolute left-1/2 top-[48px] w-[269px] -translate-x-1/2 opacity-100"
+        className="absolute left-1/2 top-12 w-67.25 -translate-x-1/2 opacity-100"
         primary
       />
+      <ChatCard className="absolute left-1/2 top-28 w-61.25 -translate-x-1/2 opacity-95" />
       <ChatCard
-        className="absolute left-1/2 top-[112px] w-[245px] -translate-x-1/2 opacity-95"
-      />
-      <ChatCard
-        className="absolute left-1/2 top-[168px] w-[226px] -translate-x-1/2 opacity-70"
+        className="absolute left-1/2 top-42 w-56.5 -translate-x-1/2 opacity-70"
         muted
       />
     </div>
@@ -360,9 +379,7 @@ function ChatCard({
         <p className="truncate text-[10px] font-semibold text-black-primary">
           Database Midterm Practice
         </p>
-        <p className="truncate text-[8px] text-gray-primary">
-          Database System
-        </p>
+        <p className="truncate text-[8px] text-gray-primary">Database System</p>
         {primary && (
           <span className="mt-1 w-fit rounded-full bg-indigo-primary/10 px-1.5 py-0.5 text-[7px] font-medium text-indigo-primary">
             Not started

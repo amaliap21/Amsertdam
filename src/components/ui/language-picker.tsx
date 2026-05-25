@@ -11,7 +11,7 @@ type Props = {
   label?: string;
 };
 
-// Inline SVG flags — keeps the bundle small (no asset round-trip) and renders
+// Inline SVG flags, keeps the bundle small (no asset round-trip) and renders
 // reliably on every OS, unlike 🇮🇩 / 🇬🇧 emoji which Windows browsers drop to
 // "ID" / "GB" text.
 
@@ -76,7 +76,7 @@ export default function LanguagePicker({ value, onChange, disabled, label }: Pro
           {label}
         </label>
       )}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {OPTIONS.map(({ value: v, label: name, Flag }) => {
           const active = value === v;
           return (
@@ -86,7 +86,7 @@ export default function LanguagePicker({ value, onChange, disabled, label }: Pro
               onClick={() => onChange(v)}
               disabled={disabled}
               aria-pressed={active}
-              className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+              className={`flex items-center gap-3 rounded-xl border px-3.5 py-3 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed sm:px-4 ${
                 active
                   ? "border-indigo-primary bg-indigo-primary/5 text-indigo-primary"
                   : "border-gray-300 bg-white text-black-primary hover:border-indigo-primary/40"
