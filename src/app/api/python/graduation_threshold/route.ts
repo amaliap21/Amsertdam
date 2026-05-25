@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireUserId } from "@/lib/get-user-id";
 
 // Port of api/python/graduation_threshold.py
 
@@ -141,6 +142,9 @@ function calculateThreshold(data: {
 }
 
 export async function POST(req: NextRequest) {
+  const auth = await requireUserId();
+  if (auth.response) return auth.response;
+
   try {
     const data = await req.json();
     const result = calculateThreshold(data);

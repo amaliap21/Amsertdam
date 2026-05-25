@@ -4,6 +4,7 @@ import {
   type TaskInput as AnalysisInput,
   type TaskResult,
 } from "@/lib/python-ports/priority-analysis";
+import { requireUserId } from "@/lib/get-user-id";
 
 // Mirror of api/python/scheduling.py. Produces the same response shape so the
 // front-end can use this URL in dev and the Vercel Python function in prod.
@@ -603,6 +604,9 @@ interface RequestBody {
 }
 
 export async function POST(req: NextRequest) {
+  const auth = await requireUserId();
+  if (auth.response) return auth.response;
+
   try {
     const data = (await req.json()) as RequestBody;
     const incomingTasks = data.tasks ?? [];

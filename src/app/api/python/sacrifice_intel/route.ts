@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireUserId } from "@/lib/get-user-id";
 
 // Port of api/python/sacrifice_intel.py
 
@@ -47,6 +48,9 @@ function sacrificeAdvice(weight: number, hours: number): string {
 }
 
 export async function POST(req: NextRequest) {
+  const auth = await requireUserId();
+  if (auth.response) return auth.response;
+
   try {
     const data = await req.json();
     const tasks: SacrificeTaskInput[] = data.tasks ?? [];

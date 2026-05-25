@@ -39,7 +39,7 @@ function priorityToUrgency(priority: string): Urgency | "" {
 // ("Essay · HIGH (3h)") so we read that first.
 function urgencyOf(
   ev: Event,
-  taskPriorityByName?: Map<string, Urgency>,
+  taskPriorityByName?: Map<string, Urgency>
 ): string {
   if (ev.urgency) {
     const u = ev.urgency.toUpperCase();
@@ -98,7 +98,7 @@ type Props = {
 };
 
 export default function ExportModal({ isOpen, onClose, events, tasks }: Props) {
-  const [startDate, setStartDate] = useState(new Date().toString());
+  const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [format, setFormat] = useState("pdf");
 
@@ -246,8 +246,8 @@ export default function ExportModal({ isOpen, onClose, events, tasks }: Props) {
 
   const isInvalid = Boolean(
     (startDate && !endDate) ||
-    (!startDate && endDate) ||
-    (startDate && endDate && new Date(startDate) > new Date(endDate)),
+      (!startDate && endDate) ||
+      (startDate && endDate && new Date(startDate) > new Date(endDate))
   );
 
   return (
@@ -268,7 +268,9 @@ export default function ExportModal({ isOpen, onClose, events, tasks }: Props) {
           <X size={18} />
         </button>
 
-        <h2 className="text-base sm:text-lg font-semibold mb-1 sm:mb-2 pr-8">Export Schedule</h2>
+        <h2 className="text-base sm:text-lg font-semibold mb-1 sm:mb-2 pr-8">
+          Export Schedule
+        </h2>
         <p className="text-xs sm:text-sm text-gray-500 mb-4">
           Choose the date range and format
         </p>

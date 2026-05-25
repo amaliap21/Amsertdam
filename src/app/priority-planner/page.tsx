@@ -57,7 +57,7 @@ function fmtClock(h: number, m: number): string {
 function parseTimeRange(raw: string): { start: number; end: number } | null {
   if (!raw) return null;
   const match = raw.match(
-    /^\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*[-–]\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*$/i,
+    /^\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*[-–]\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*$/i
   );
   if (!match) return null;
   const start = parseClock(match[1]);
@@ -93,7 +93,7 @@ export default function PriorityPlanner() {
 
   const extraEvents = plannerEvents as ScheduleEvent[];
   const setExtraEvents = (
-    updater: ScheduleEvent[] | ((prev: ScheduleEvent[]) => ScheduleEvent[]),
+    updater: ScheduleEvent[] | ((prev: ScheduleEvent[]) => ScheduleEvent[])
   ) => {
     const next = typeof updater === "function" ? updater(extraEvents) : updater;
     setPlannerEvents(next);
@@ -144,7 +144,7 @@ export default function PriorityPlanner() {
   const addEventReplacingOverlaps = (incoming: ScheduleEvent) => {
     setExtraEvents((prev) => {
       const filtered = prev.filter(
-        (existing) => !eventsOverlap(existing, incoming),
+        (existing) => !eventsOverlap(existing, incoming)
       );
       return [...filtered, incoming];
     });
@@ -179,8 +179,8 @@ export default function PriorityPlanner() {
                 color: styles.color,
                 bgColor: styles.bgColor,
               }
-            : e,
-        ),
+            : e
+        )
       );
       setEditingEvent(null);
       return;
@@ -204,7 +204,9 @@ export default function PriorityPlanner() {
       const baseId = Date.now();
       let i = 0;
       while (cursor <= endDate && i < MAX_OCCURRENCES) {
-        const iso = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`;
+        const iso = `${cursor.getFullYear()}-${String(
+          cursor.getMonth() + 1
+        ).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`;
         occurrences.push({
           id: baseId + i,
           title: data.type,
@@ -231,7 +233,7 @@ export default function PriorityPlanner() {
         // Drop any pre-existing event that overlaps any new occurrence
         // — same "replace overlaps" rule the single-event path uses.
         const filtered = prev.filter(
-          (existing) => !occurrences.some((o) => eventsOverlap(existing, o)),
+          (existing) => !occurrences.some((o) => eventsOverlap(existing, o))
         );
         return [...filtered, ...occurrences];
       });
@@ -239,10 +241,12 @@ export default function PriorityPlanner() {
         data.repeatFreq === "daily"
           ? "daily"
           : data.repeatFreq === "weekly"
-            ? "weekly"
-            : "monthly";
+          ? "weekly"
+          : "monthly";
       toast.success(
-        `Added ${occurrences.length} ${cadence} occurrence${occurrences.length === 1 ? "" : "s"}`,
+        `Added ${occurrences.length} ${cadence} occurrence${
+          occurrences.length === 1 ? "" : "s"
+        }`
       );
       return;
     }
@@ -262,7 +266,7 @@ export default function PriorityPlanner() {
   // from here; task-derived events must be managed from Task Value.
   const taskEventIds = useMemo(
     () => new Set(taskEvents.map((e) => e.id)),
-    [taskEvents],
+    [taskEvents]
   );
   const isManualEvent = (e: ScheduleEvent) => !taskEventIds.has(e.id);
 
@@ -320,7 +324,7 @@ export default function PriorityPlanner() {
         planStart.setDate(planStart.getDate() + 1);
       }
       const startDateIso = `${planStart.getFullYear()}-${String(
-        planStart.getMonth() + 1,
+        planStart.getMonth() + 1
       ).padStart(2, "0")}-${String(planStart.getDate()).padStart(2, "0")}`;
 
       const parseDeadlineDays = (dateStr: string): number => {
@@ -329,8 +333,7 @@ export default function PriorityPlanner() {
         const candidate = new Date(`${isoDate}T00:00:00`);
         if (Number.isNaN(candidate.getTime())) return 7;
         const diff = Math.round(
-          (candidate.getTime() - planStart.getTime()) /
-            (1000 * 60 * 60 * 24),
+          (candidate.getTime() - planStart.getTime()) / (1000 * 60 * 60 * 24)
         );
         return Math.max(0, diff);
       };
@@ -341,22 +344,22 @@ export default function PriorityPlanner() {
       // analyzer re-score from incomplete inputs (which made every task
       // land in the MEDIUM band).
       const tierFromPriority = (
-        priority: TaskItem["priority"],
+        priority: TaskItem["priority"]
       ): "HIGH" | "MEDIUM" | "LOW" =>
         priority === "Focus First"
           ? "HIGH"
           : priority === "If You Have Energy"
-            ? "MEDIUM"
-            : "LOW";
+          ? "MEDIUM"
+          : "LOW";
 
       const gradeWeightFromPriority = (
-        priority: TaskItem["priority"],
+        priority: TaskItem["priority"]
       ): number =>
         priority === "Focus First"
           ? 25
           : priority === "If You Have Energy"
-            ? 12
-            : 5;
+          ? 12
+          : 5;
 
       const resp = await fetch("/api/python/scheduling", {
         method: "POST",
@@ -433,22 +436,33 @@ export default function PriorityPlanner() {
           end_time: block.end_time,
           hours_allocated: block.hours_allocated,
           tier: block.tier,
-        })),
+        }))
       );
 
       // ALSO add the schedule blocks as planner events so the user sees
       // "work on X — Tue 9-11 AM" in the day/week/month views, not just
       // the task deadlines. This is the actual answer to "when should I
       // work on each assignment".
-      const tierToStyle = (tier: "HIGH" | "MEDIUM" | "LOW") =>
-        tier === "HIGH"
+      const tierToStyle = (
+        tier: "HIGH" | "MEDIUM" | "LOW" | "CLASS" | "TASK" | "SELF STUDY"
+      ) =>
+        tier === "CLASS"
+          ? TYPE_STYLES.Class
+          : tier === "TASK"
+          ? TYPE_STYLES.Task
+          : tier === "SELF STUDY"
+          ? TYPE_STYLES["Self Study"]
+          : tier === "HIGH"
           ? PRIORITY_STYLES["Focus First"]
           : tier === "MEDIUM"
-            ? PRIORITY_STYLES["If You Have Energy"]
-            : PRIORITY_STYLES["Safe to Minimize"];
+          ? PRIORITY_STYLES["If You Have Energy"]
+          : PRIORITY_STYLES["Safe to Minimize"];
 
       const isoDate = (d: Date) =>
-        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+          2,
+          "0"
+        )}-${String(d.getDate()).padStart(2, "0")}`;
 
       // Any block before today is useless advice — defensive guard in
       // addition to the planStart adjustment above.
@@ -464,9 +478,11 @@ export default function PriorityPlanner() {
         priorityByTaskId.set(String(t.id), t.priority);
         priorityByName.set(t.title, t.priority);
       }
-      const resolveTier = (
-        block: { task_id?: string; task_name: string; tier: string },
-      ): "HIGH" | "MEDIUM" | "LOW" => {
+      const resolveTier = (block: {
+        task_id?: string;
+        task_name: string;
+        tier: string;
+      }): "HIGH" | "MEDIUM" | "LOW" => {
         const userPriority =
           (block.task_id && priorityByTaskId.get(String(block.task_id))) ||
           priorityByName.get(block.task_name);
@@ -475,7 +491,11 @@ export default function PriorityPlanner() {
         if (userPriority === "Safe to Minimize") return "LOW";
         // Fall back to Python's tier if the user-side lookup misses
         // (renamed task, stale id, etc.).
-        if (block.tier === "HIGH" || block.tier === "MEDIUM" || block.tier === "LOW") {
+        if (
+          block.tier === "HIGH" ||
+          block.tier === "MEDIUM" ||
+          block.tier === "LOW"
+        ) {
           return block.tier;
         }
         return "MEDIUM";
@@ -488,11 +508,12 @@ export default function PriorityPlanner() {
       json.schedule.forEach((block, i) => {
         const start = new Date(block.start_time);
         const end = new Date(block.end_time);
-        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return;
+        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()))
+          return;
         const blockDay = new Date(
           start.getFullYear(),
           start.getMonth(),
-          start.getDate(),
+          start.getDate()
         );
         if (blockDay < todayMidnight) {
           droppedPast++;
@@ -506,7 +527,10 @@ export default function PriorityPlanner() {
           title: "Task",
           label: `Work on ${block.task_name}`,
           date: isoDate(start),
-          time: `${fmtClock(start.getHours(), start.getMinutes())} - ${fmtClock(end.getHours(), end.getMinutes())}`,
+          time: `${fmtClock(start.getHours(), start.getMinutes())} - ${fmtClock(
+            end.getHours(),
+            end.getMinutes()
+          )}`,
           subject: `${block.task_name} · ${tier} (${block.hours_allocated}h)`,
           color: style.color,
           bgColor: style.bgColor,
@@ -514,7 +538,7 @@ export default function PriorityPlanner() {
       });
       if (droppedPast > 0) {
         console.info(
-          `[plan-with-ai] dropped ${droppedPast} block(s) scheduled before today`,
+          `[plan-with-ai] dropped ${droppedPast} block(s) scheduled before today`
         );
       }
 
@@ -522,15 +546,17 @@ export default function PriorityPlanner() {
       // this means the deadline was too close to allocate hours within
       // available sessions — the user needs to know rather than wonder
       // why their assignment isn't on the plan.
-      const unscheduled = tasks.filter(
-        (t) => !scheduledTaskNames.has(t.title),
-      );
+      const unscheduled = tasks.filter((t) => !scheduledTaskNames.has(t.title));
       if (unscheduled.length > 0) {
         toast.error(
-          `Couldn't fit ${unscheduled.length} task${unscheduled.length === 1 ? "" : "s"} into the plan: ${unscheduled
+          `Couldn't fit ${unscheduled.length} task${
+            unscheduled.length === 1 ? "" : "s"
+          } into the plan: ${unscheduled
             .map((t) => t.title)
-            .join(", ")}. Their deadlines may be too close, or estimated hours too high for the available sessions.`,
-          { duration: 8000 },
+            .join(
+              ", "
+            )}. Their deadlines may be too close, or estimated hours too high for the available sessions.`,
+          { duration: 8000 }
         );
       }
 
@@ -553,13 +579,15 @@ export default function PriorityPlanner() {
       setAiSummary(
         `Recommended ${json.summary.total_tasks} ${taskWord} across ${json.summary.days_needed} ${dayWord} ` +
           `(${json.summary.total_hours_needed}h working time). ` +
-          `${json.summary.high_priority} HIGH, ${json.summary.medium_priority} MEDIUM, ${json.summary.low_priority} LOW.${warningNote}`,
+          `${json.summary.high_priority} HIGH, ${json.summary.medium_priority} MEDIUM, ${json.summary.low_priority} LOW.${warningNote}`
       );
       toast.success(
         aiEvents.length > 0
-          ? `Added ${aiEvents.length} recommended work block${aiEvents.length === 1 ? "" : "s"}`
+          ? `Added ${aiEvents.length} recommended work block${
+              aiEvents.length === 1 ? "" : "s"
+            }`
           : "Schedule generated",
-        { id: t },
+        { id: t }
       );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed", { id: t });
@@ -636,17 +664,21 @@ export default function PriorityPlanner() {
     const selectedDate = new Date(year, month, selectedDay);
 
     return events.filter((event) => {
-      const eventDate = new Date(event.date);
+      // Parse as local midnight to avoid UTC off-by-one in negative-UTC zones
+      const [ey, em, ed] = event.date.split("-").map(Number);
+      const eventDate = new Date(ey, em - 1, ed);
 
       // DAY
       if (selected === "Day") {
         return eventDate.toDateString() === selectedDate.toDateString();
       }
 
-      // WEEK
+      // WEEK (Monday-first, matching the calendar grid)
       if (selected === "Week") {
+        const dow = selectedDate.getDay();
+        const mondayOffset = dow === 0 ? 6 : dow - 1;
         const startOfWeek = new Date(selectedDate);
-        startOfWeek.setDate(selectedDate.getDate() - selectedDate.getDay());
+        startOfWeek.setDate(selectedDate.getDate() - mondayOffset);
 
         const endOfWeek = new Date(startOfWeek);
         endOfWeek.setDate(startOfWeek.getDate() + 6);
@@ -669,10 +701,10 @@ export default function PriorityPlanner() {
     selected.toLowerCase() === "day"
       ? currentDate.toLocaleDateString("en-US", { weekday: "long" })
       : selected.toLowerCase() === "week"
-        ? currentDate.toLocaleDateString("en-US", { weekday: "long" })
-        : selected.toLowerCase() === "month"
-          ? currentDate.toLocaleDateString("en-US", { weekday: "long" })
-          : "";
+      ? currentDate.toLocaleDateString("en-US", { weekday: "long" })
+      : selected.toLowerCase() === "month"
+      ? currentDate.toLocaleDateString("en-US", { weekday: "long" })
+      : "";
 
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isAddScheduleOpen, setIsAddScheduleOpen] = useState(false);
@@ -761,8 +793,8 @@ export default function PriorityPlanner() {
                 selected === "Day"
                   ? previousDay
                   : selected === "Week"
-                    ? previousWeek
-                    : previousMonth
+                  ? previousWeek
+                  : previousMonth
               }
               className="px-2 py-1 hover:bg-gray-100 rounded-lg transition-colors"
               aria-label="Previous"
@@ -787,8 +819,8 @@ export default function PriorityPlanner() {
                 selected === "Day"
                   ? nextDay
                   : selected === "Week"
-                    ? nextWeek
-                    : nextMonth
+                  ? nextWeek
+                  : nextMonth
               }
               className="px-2 py-1 hover:bg-gray-100 rounded-lg transition-colors"
               aria-label="Next"
@@ -819,7 +851,56 @@ export default function PriorityPlanner() {
         }}
       >
         <h1>
-          {dayName}, {selectedDay} {monthName}
+          {selected === "Day" && (
+            <>
+              {dayName}, {selectedDay} {monthName}
+            </>
+          )}
+          {selected === "Week" &&
+            (() => {
+              const dow = new Date(year, month, selectedDay).getDay();
+              const mondayOffset = dow === 0 ? 6 : dow - 1;
+              const weekStart = new Date(
+                year,
+                month,
+                selectedDay - mondayOffset
+              );
+              const weekEnd = new Date(
+                year,
+                month,
+                selectedDay - mondayOffset + 6
+              );
+              return (
+                <>
+                  {weekStart.toLocaleDateString("en-US", {
+                    weekday: "long",
+                    day: "numeric",
+                    month: "long",
+                  })}
+                  {" — "}
+                  {weekEnd.toLocaleDateString("en-US", {
+                    weekday: "long",
+                    day: "numeric",
+                    month: "long",
+                  })}
+                </>
+              );
+            })()}
+          {selected === "Month" && (
+            <>
+              {new Date(year, month, 1).toLocaleDateString("en-US", {
+                weekday: "long",
+                day: "numeric",
+                month: "long",
+              })}
+              {" — "}
+              {new Date(year, month + 1, 0).toLocaleDateString("en-US", {
+                weekday: "long",
+                day: "numeric",
+                month: "long",
+              })}
+            </>
+          )}
         </h1>
 
         {/* Events for the selected date */}

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractTextFromUpload } from "@/lib/upload-text";
+import { requireUserId } from "@/lib/get-user-id";
 import {
   extractFlashcards,
   estimateMaxCards,
@@ -24,6 +25,9 @@ function tidyText(raw: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  const auth = await requireUserId();
+  if (auth.response) return auth.response;
+
   try {
     const formData = await req.formData();
     const file = formData.get("file");

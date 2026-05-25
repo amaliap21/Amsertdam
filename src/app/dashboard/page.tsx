@@ -160,7 +160,7 @@ export default function Dashboard() {
             t.priority === "Focus First"
               ? "bg-red-500"
               : t.priority === "If You Have Energy"
-                ? "bg-yellow-500"
+                ? "bg-amber-500"
                 : "bg-green-primary",
         };
       }),
@@ -174,12 +174,6 @@ export default function Dashboard() {
     // AI-generated work blocks (subject ends with "· HIGH (3h)" etc.)
     // are now shown — they're the recommended working time, not noise.
     const taskIds = new Set(storeTasks.map((t) => String(t.id)));
-    const colorFor = (title: string) =>
-      title === "Class"
-        ? "bg-green-primary"
-        : title === "Self Study"
-          ? "bg-teal-primary"
-          : "bg-blue-primary";
     return plannerEvents
       .filter((e) => !taskIds.has(String(e.id)))
       .map((e) => ({
@@ -188,7 +182,7 @@ export default function Dashboard() {
         sortKey: `${e.date} ${e.time}`,
         time: `${e.time} • ${e.date}`,
         title: `[${e.label ?? e.title}] ${e.subject}`,
-        color: colorFor(e.title),
+        color: e.color,
       }));
   }, [plannerEvents, storeTasks]);
 
@@ -201,7 +195,7 @@ export default function Dashboard() {
     [taskEvents, plannerOnlyEvents],
   );
 
-  type DotColor = "red" | "yellow" | "green" | "blue" | "teal";
+  type DotColor = "red" | "amber" | "green" | "blue" | "teal";
 
   // Map: "YYYY-MM-DD" -> set of dot colors (priority for tasks, type for
   // manual planner events). Order in render: red → yellow → green → blue → teal.
@@ -218,18 +212,22 @@ export default function Dashboard() {
         task.priority === "Focus First"
           ? "red"
           : task.priority === "If You Have Energy"
-            ? "yellow"
+            ? "amber"
             : "green";
       push(isoDate, color);
     }
     for (const ev of plannerOnlyEvents) {
-      // ev.color is a bg-class; map it back to a DotColor.
+      // ev.color is a bg-class from the planner; map it back to a DotColor.
       const color: DotColor =
-        ev.color === "bg-green-primary"
-          ? "green"
-          : ev.color === "bg-teal-primary"
-            ? "teal"
-            : "blue";
+        ev.color === "bg-red-500"
+          ? "red"
+          : ev.color === "bg-amber-500"
+            ? "amber"
+            : ev.color === "bg-green-primary"
+              ? "green"
+              : ev.color === "bg-teal-primary"
+                ? "teal"
+                : "blue";
       push(ev.isoDate, color);
     }
     return map;
@@ -238,8 +236,8 @@ export default function Dashboard() {
   const dotColorClass = (c: DotColor) =>
     c === "red"
       ? "bg-red-500"
-      : c === "yellow"
-        ? "bg-yellow-500"
+      : c === "amber"
+        ? "bg-amber-500"
         : c === "green"
           ? "bg-green-primary"
           : c === "blue"
@@ -527,7 +525,7 @@ export default function Dashboard() {
               const dotSet = iso ? priorityDotsByIso.get(iso) : undefined;
               // Order red → yellow → green → blue → teal for visual consistency.
               const dots: DotColor[] = dotSet
-                ? (["red", "yellow", "green", "blue", "teal"] as const).filter(
+                ? (["red", "amber", "green", "blue", "teal"] as const).filter(
                     (c) => dotSet.has(c),
                   )
                 : [];

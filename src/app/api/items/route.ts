@@ -23,6 +23,20 @@ export async function POST(req: Request) {
     const { userId } = auth
 
     const body = await req.json()
+
+    // Verify the assessment belongs to the authenticated user
+    if (body.assessment_id) {
+      const { data: assessment } = await supabaseAdmin
+        .from('assessments')
+        .select('id')
+        .eq('id', body.assessment_id)
+        .eq('user_id', userId)
+        .single()
+      if (!assessment) {
+        return NextResponse.json({ error: 'Assessment not found or not owned by you' }, { status: 403 })
+      }
+    }
+
     const payload = { title: body.title, description: body.description ?? null, assessment_id: body.assessment_id, user_id: userId }
     const { data, error } = await supabaseAdmin.from('items').insert(payload).select().single()
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })

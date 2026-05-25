@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { streamClaude } from "@/lib/anthropic";
+import { requireUserId } from "@/lib/get-user-id";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -54,6 +55,9 @@ function formatContext(ctx: Body["context"]): string | null {
 }
 
 export async function POST(req: NextRequest) {
+  const auth = await requireUserId();
+  if (auth.response) return auth.response;
+
   let body: Body;
   try {
     body = await req.json();

@@ -342,6 +342,7 @@ export const useStore = create<AppState>()(
         setDecks: (d) => set({ decks: d }),
         addTask: async (task) => {
           const id = task.id ?? uid('task')
+          const localTask = { id, title: task.title, course: task.course, date: task.date, timeEstimate: task.timeEstimate, priority: task.priority, description: task.description, effort: task.effort }
           try {
             const resp = await fetch('/api/tasks', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: task.title, course: task.course, date: task.date, estimatedHours: task.timeEstimate ? Number(String(task.timeEstimate).replace('h','')) : null, priority: task.priority, description: task.description, effort: task.effort }) })
             if (resp.ok) {
@@ -350,12 +351,9 @@ export const useStore = create<AppState>()(
               return body.id
             }
           } catch {
-            // fallback local
-            set((state) => ({ tasks: [ { id, title: task.title, course: task.course, date: task.date, timeEstimate: task.timeEstimate, priority: task.priority, description: task.description, effort: task.effort }, ...state.tasks ] }))
-            return id
+            // network error — fallback local
           }
-          // if failed, fallback
-          set((state) => ({ tasks: [ { id, title: task.title, course: task.course, date: task.date, timeEstimate: task.timeEstimate, priority: task.priority, description: task.description, effort: task.effort }, ...state.tasks ] }))
+          set((state) => ({ tasks: [ localTask, ...state.tasks ] }))
           return id
         },
         removeTask: async (id) => {

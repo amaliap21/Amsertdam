@@ -3,11 +3,15 @@ import {
   analyzeBatch,
   analyzeEffortImpact,
 } from "@/lib/python-ports/priority-analysis";
+import { requireUserId } from "@/lib/get-user-id";
 
 // Mirror of api/python/priority_analysis.py, same input/output schema so the
 // front-end can target this URL in dev and the Vercel Python function in prod.
 
 export async function POST(req: NextRequest) {
+  const auth = await requireUserId();
+  if (auth.response) return auth.response;
+
   try {
     const data = await req.json();
 

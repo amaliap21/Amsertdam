@@ -23,6 +23,20 @@ export async function POST(req: Request) {
     const { userId } = auth
 
     const body = await req.json()
+
+    // Verify the course belongs to the authenticated user
+    if (body.course_id) {
+      const { data: course } = await supabaseAdmin
+        .from('courses')
+        .select('id')
+        .eq('id', body.course_id)
+        .eq('user_id', userId)
+        .single()
+      if (!course) {
+        return NextResponse.json({ error: 'Course not found or not owned by you' }, { status: 403 })
+      }
+    }
+
     const payload = { title: body.title, description: body.description ?? null, course_id: body.course_id, user_id: userId }
     const { data, error } = await supabaseAdmin.from('assessments').insert(payload).select().single()
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
