@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(git lfs *)",
-      "PowerShell($ts = \\(npx tsc --noEmit 2>&1\\); $errors = \\($ts | Out-String\\) -split \"`n\" | Where-Object { $_ -match \"error TS\" }; \"TS errors: $\\($errors.Count\\)\"; $errors | Select-Object -First 10)",
-      "Bash(npx next *)"
-    ]
-  }
-}
