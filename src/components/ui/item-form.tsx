@@ -38,7 +38,7 @@ export default function ItemForm({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center p-1.5 sm:items-center sm:p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-1.5 sm:p-4"
       style={{ background: "rgba(0, 0, 0, 0.64)" }}
       onClick={onCancel}
     >

@@ -39,7 +39,7 @@ export default function AssessmentForm({
 
   return (
     <div
-      className="fixed inset-0 flex items-end justify-center p-2 sm:items-center sm:p-4 z-50"
+      className="fixed inset-0 flex items-center justify-center p-2 sm:p-4 z-50"
       style={{ background: "rgba(0, 0, 0, 0.64)" }}
     >
       <div className="relative w-[calc(100vw-0.5rem)] max-w-[20.5rem] max-h-[90dvh] overflow-y-auto rounded-2xl bg-white px-2.5 pb-2.5 pt-9 shadow-xl sm:w-full sm:max-w-lg sm:px-6 sm:pb-6 sm:pt-6">

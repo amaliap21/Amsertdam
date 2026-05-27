@@ -297,7 +297,7 @@ function AddScheduleModalInner({ isOpen, onClose, onAdd, initial }: Props) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
       <form
         onSubmit={handleSubmit}
-        className="relative w-[calc(100vw-0.5rem)] max-w-[20.5rem] max-h-[90dvh] overflow-y-auto rounded-2xl bg-white px-2.5 pb-2.5 pt-9 shadow-xl sm:w-full sm:max-w-lg sm:px-6 sm:pb-6 sm:pt-6"
+        className="relative w-full max-w-lg max-h-[90dvh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl sm:p-9"
       >
         <button
           type="button"
@@ -459,7 +459,7 @@ function AddScheduleModalInner({ isOpen, onClose, onAdd, initial }: Props) {
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-4 sm:gap-5">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5">
             <div className="flex flex-col gap-2 min-w-0">
               <label
                 htmlFor="schedule-start-time"

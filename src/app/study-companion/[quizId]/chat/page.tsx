@@ -225,29 +225,29 @@ export default function StudyCompanionChat({
 
     const context = quiz
       ? {
-          quizTitle: quiz.title,
-          course: quiz.course,
-          score: attempt ? `${attempt.correct}/${attempt.total}` : undefined,
-          questions: quiz.questions.map((q) => {
-            const userLetter = attempt?.answers?.[q.id];
-            const userOption = q.options.find((o) => o.letter === userLetter);
-            const correctOption = q.options.find(
-              (o) => o.letter === q.correctAnswer,
-            );
-            return {
-              prompt: q.prompt,
-              userAnswer: userOption
-                ? `${userOption.letter}. ${userOption.text}`
-                : userLetter
-                  ? userLetter
-                  : "(not answered)",
-              correctAnswer: correctOption
-                ? `${correctOption.letter}. ${correctOption.text}`
-                : q.correctAnswer,
-              isCorrect: Boolean(userLetter) && userLetter === q.correctAnswer,
-            };
-          }),
-        }
+        quizTitle: quiz.title,
+        course: quiz.course,
+        score: attempt ? `${attempt.correct}/${attempt.total}` : undefined,
+        questions: quiz.questions.map((q) => {
+          const userLetter = attempt?.answers?.[q.id];
+          const userOption = q.options.find((o) => o.letter === userLetter);
+          const correctOption = q.options.find(
+            (o) => o.letter === q.correctAnswer,
+          );
+          return {
+            prompt: q.prompt,
+            userAnswer: userOption
+              ? `${userOption.letter}. ${userOption.text}`
+              : userLetter
+                ? userLetter
+                : "(not answered)",
+            correctAnswer: correctOption
+              ? `${correctOption.letter}. ${correctOption.text}`
+              : q.correctAnswer,
+            isCorrect: Boolean(userLetter) && userLetter === q.correctAnswer,
+          };
+        }),
+      }
       : undefined;
 
     try {
@@ -348,16 +348,14 @@ export default function StudyCompanionChat({
         {messages.map((message) => (
           <div
             key={message.id}
-            className={`flex ${
-              message.role === "user" ? "justify-end" : "justify-start"
-            }`}
+            className={`flex ${message.role === "user" ? "justify-end" : "justify-start"
+              }`}
           >
             <div
-              className={`max-w-[85%] sm:max-w-2xl rounded-xl p-4 sm:p-5 text-sm break-words ${
-                message.role === "user"
+              className={`max-w-[85%] sm:max-w-2xl rounded-xl p-4 sm:p-5 text-sm break-words ${message.role === "user"
                   ? "bg-indigo-primary text-white whitespace-pre-line"
                   : "bg-white border border-gray-200 text-black-primary"
-              }`}
+                }`}
             >
               {message.content ? (
                 message.role === "assistant" ? (
@@ -383,14 +381,14 @@ export default function StudyCompanionChat({
         className="fixed bottom-3 sm:bottom-6 left-3 right-3 sm:left-6 sm:right-6 lg:left-[calc(16rem+1rem)] lg:right-14.75 flex flex-col gap-1.5 bg-white border border-gray-200 rounded-2xl px-3 sm:px-4 py-2 shadow-md"
         style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
       >
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           {/* Pick the model. Premium (Opus) charges 1 credit per reply. */}
           <select
             value={chatModel}
             onChange={(e) => setChatModel(e.target.value)}
             disabled={streaming}
             title="Choose the AI model"
-            className="shrink-0 rounded-lg border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-black-primary outline-none focus:border-indigo-primary disabled:opacity-50"
+            className="w-full rounded-lg border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-black-primary outline-none focus:border-indigo-primary disabled:opacity-50 sm:w-auto"
           >
             {MODEL_OPTIONS.map((m) => (
               <option key={m.id} value={m.id}>
@@ -399,21 +397,23 @@ export default function StudyCompanionChat({
               </option>
             ))}
           </select>
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder={streaming ? "AI is typing…" : "Ask anything…"}
-            disabled={streaming}
-            className="flex-1 min-w-0 bg-transparent outline-none text-sm text-black-primary placeholder:text-gray-primary disabled:opacity-50"
-          />
-          <button
-            type="submit"
-            className="flex items-center justify-center w-9 h-9 shrink-0 bg-indigo-primary text-white rounded-full hover:bg-indigo-600 transition-colors disabled:opacity-50"
-            disabled={!input.trim() || streaming}
-          >
-            <Send size={16} />
-          </button>
+          <div className="flex items-center gap-2 sm:flex-1">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={streaming ? "AI is typing…" : "Ask anything…"}
+              disabled={streaming}
+              className="flex-1 min-w-0 bg-transparent outline-none text-sm text-black-primary placeholder:text-gray-primary disabled:opacity-50"
+            />
+            <button
+              type="submit"
+              className="flex items-center justify-center w-9 h-9 shrink-0 bg-indigo-primary text-white rounded-full hover:bg-indigo-600 transition-colors disabled:opacity-50"
+              disabled={!input.trim() || streaming}
+            >
+              <Send size={16} />
+            </button>
+          </div>
         </div>
         {modelTier(chatModel) === "premium" && (
           <p className="px-1 text-[10px] text-gray-primary">
