@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, Paperclip, Send, Sparkles } from "lucide-react";
+import { ArrowLeft, Send, Sparkles } from "lucide-react";
 import { use, useEffect, useMemo, useRef, useState } from "react";
 import { useQuizById } from "@/lib/quiz-data";
+import { MODEL_OPTIONS, modelTier } from "@/lib/ai/openrouter";
 import { useStore } from "@/store/use-store";
 
 type Message = {
@@ -191,6 +192,7 @@ export default function StudyCompanionChat({
     });
   }, [welcomeContent]);
   const [streaming, setStreaming] = useState(false);
+  const [chatModel, setChatModel] = useState(MODEL_OPTIONS[0].id);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -252,7 +254,7 @@ export default function StudyCompanionChat({
       const resp = await fetch("/api/ai/study-companion/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ messages: apiMessages, context }),
+        body: JSON.stringify({ messages: apiMessages, context, model: chatModel }),
       });
 
       if (!resp.ok || !resp.body) {
@@ -378,30 +380,46 @@ export default function StudyCompanionChat({
 
       <form
         onSubmit={handleSubmit}
-        className="fixed bottom-3 sm:bottom-6 left-3 right-3 sm:left-6 sm:right-6 lg:left-[calc(16rem+1rem)] lg:right-14.75 flex items-center gap-3 bg-white border border-gray-200 rounded-full px-4 sm:px-5 py-2.5 shadow-md"
-        style={{ paddingBottom: "max(0.625rem, env(safe-area-inset-bottom))" }}
+        className="fixed bottom-3 sm:bottom-6 left-3 right-3 sm:left-6 sm:right-6 lg:left-[calc(16rem+1rem)] lg:right-14.75 flex flex-col gap-1.5 bg-white border border-gray-200 rounded-2xl px-3 sm:px-4 py-2 shadow-md"
+        style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
       >
-        <button
-          type="button"
-          className="text-gray-primary hover:text-black-primary transition-colors"
-        >
-          <Paperclip size={18} />
-        </button>
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder={streaming ? "AI is typing…" : "Ask anything…"}
-          disabled={streaming}
-          className="flex-1 bg-transparent outline-none text-sm text-black-primary placeholder:text-gray-primary disabled:opacity-50"
-        />
-        <button
-          type="submit"
-          className="flex items-center justify-center w-9 h-9 bg-indigo-primary text-white rounded-full hover:bg-indigo-600 transition-colors disabled:opacity-50"
-          disabled={!input.trim() || streaming}
-        >
-          <Send size={16} />
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Pick the model. Premium (Opus) charges 1 credit per reply. */}
+          <select
+            value={chatModel}
+            onChange={(e) => setChatModel(e.target.value)}
+            disabled={streaming}
+            title="Choose the AI model"
+            className="shrink-0 rounded-lg border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-black-primary outline-none focus:border-indigo-primary disabled:opacity-50"
+          >
+            {MODEL_OPTIONS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+                {m.tier === "premium" ? " (Premium)" : ""}
+              </option>
+            ))}
+          </select>
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder={streaming ? "AI is typing…" : "Ask anything…"}
+            disabled={streaming}
+            className="flex-1 min-w-0 bg-transparent outline-none text-sm text-black-primary placeholder:text-gray-primary disabled:opacity-50"
+          />
+          <button
+            type="submit"
+            className="flex items-center justify-center w-9 h-9 shrink-0 bg-indigo-primary text-white rounded-full hover:bg-indigo-600 transition-colors disabled:opacity-50"
+            disabled={!input.trim() || streaming}
+          >
+            <Send size={16} />
+          </button>
+        </div>
+        {modelTier(chatModel) === "premium" && (
+          <p className="px-1 text-[10px] text-gray-primary">
+            Premium model — each reply uses 1 credit.
+          </p>
+        )}
       </form>
     </div>
   );

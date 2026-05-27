@@ -125,6 +125,28 @@ type CachedCourse = {
 };
 
 export default function AddScheduleModal({ isOpen, onClose, onAdd, initial }: Props) {
+  if (!isOpen) return null;
+  const resetKey = [
+    initial?.title ?? "",
+    initial?.type ?? "",
+    initial?.date ?? "",
+    initial?.time ?? "",
+    initial?.repeatFreq ?? "",
+    initial?.repeatUntil ?? "",
+  ].join("|");
+
+  return (
+    <AddScheduleModalInner
+      key={resetKey}
+      isOpen={isOpen}
+      onClose={onClose}
+      onAdd={onAdd}
+      initial={initial}
+    />
+  );
+}
+
+function AddScheduleModalInner({ isOpen, onClose, onAdd, initial }: Props) {
   const isEdit = !!initial;
   const [title, setTitle] = useState(initial?.title ?? "");
   const [type, setType] = useState<ScheduleType>(initial?.type ?? "Class");
@@ -167,9 +189,14 @@ export default function AddScheduleModal({ isOpen, onClose, onAdd, initial }: Pr
     () => courses.find((c) => c.title === courseName) ?? null,
     [courses, courseName],
   );
+  const resolvedScheduleIdx = useMemo(() => {
+    if (!selectedCourse) return -1;
+    if (scheduleIdx >= 0) return scheduleIdx;
+    return selectedCourse.scheduleEntries.length > 0 ? 0 : -1;
+  }, [selectedCourse, scheduleIdx]);
   const selectedSchedule =
-    selectedCourse && scheduleIdx >= 0
-      ? selectedCourse.scheduleEntries[scheduleIdx]
+    selectedCourse && resolvedScheduleIdx >= 0
+      ? selectedCourse.scheduleEntries[resolvedScheduleIdx]
       : null;
   // The date + time are locked when the user has selected a course
   // schedule. Conceptually, "this class meets every Monday 10–12" is the
@@ -184,78 +211,46 @@ export default function AddScheduleModal({ isOpen, onClose, onAdd, initial }: Pr
   const [repeatUntil, setRepeatUntil] = useState(initial?.repeatUntil ?? "");
   const [typeOpen, setTypeOpen] = useState(false);
 
-  // Resync inputs when the parent swaps `initial` in-place (e.g. user clicks
-  // Edit on a different schedule without remounting the modal).
-  useEffect(() => {
-    if (!isOpen) return;
-    setTitle(initial?.title ?? "");
-    setType(initial?.type ?? "Class");
-    setDate(initial?.date ?? "");
-    const r = initial ? splitTimeRange(initial.time) : { start: "", end: "" };
-    setStartTime(r.start);
-    setEndTime(r.end);
-    setRepeatFreq(
-      initial?.repeatFreq ?? (initial?.type === "Class" ? "weekly" : "none"),
-    );
-    setRepeatUntil(initial?.repeatUntil ?? "");
-    setCourseName("");
-    setScheduleIdx(-1);
-    setTypeOpen(false);
-  }, [isOpen, initial]);
+  const effectiveDate = lockedFromSchedule && selectedSchedule?.day
+    ? firstOccurrenceISO(selectedSchedule.day, date || undefined)
+    : date;
+  const effectiveStartTime = lockedFromSchedule
+    ? selectedSchedule?.startTime ?? startTime
+    : startTime;
+  const effectiveEndTime = lockedFromSchedule
+    ? selectedSchedule?.endTime ?? endTime
+    : endTime;
 
-  // When the user switches to Class type, nudge recurrence to weekly so
-  // they don't have to set it manually for the common case. Doesn't
-  // override an explicit choice they already made.
-  useEffect(() => {
-    if (type === "Class" && repeatFreq === "none") {
+  const handleTypeChange = (nextType: ScheduleType) => {
+    setType(nextType);
+    if (nextType === "Class" && repeatFreq === "none") {
       setRepeatFreq("weekly");
     }
-  }, [type, repeatFreq]);
-
-  // Switching away from Class type clears the course picker — courses
-  // are only meaningful for class sessions.
-  useEffect(() => {
-    if (type !== "Class") {
+    if (nextType !== "Class") {
       setCourseName("");
       setScheduleIdx(-1);
     }
-  }, [type]);
+  };
 
-  // When the user picks a course that has multiple schedule entries,
-  // default the picker to the first one so date/time auto-populate.
-  useEffect(() => {
-    if (selectedCourse && scheduleIdx < 0 && selectedCourse.scheduleEntries.length > 0) {
+  const handleCourseChange = (nextCourse: string) => {
+    setCourseName(nextCourse);
+    const course = courses.find((c) => c.title === nextCourse) ?? null;
+    if (course && course.scheduleEntries.length > 0) {
       setScheduleIdx(0);
+      return;
     }
-    if (!selectedCourse && scheduleIdx >= 0) {
-      setScheduleIdx(-1);
-    }
-  }, [selectedCourse, scheduleIdx]);
-
-  // Mirror the locked schedule's day/time into the form fields whenever
-  // the chosen schedule entry changes.
-  useEffect(() => {
-    if (!selectedSchedule) return;
-    if (selectedSchedule.startTime) setStartTime(selectedSchedule.startTime);
-    if (selectedSchedule.endTime) setEndTime(selectedSchedule.endTime);
-    if (selectedSchedule.day) {
-      // Snap the date to the first occurrence of the locked weekday on
-      // or after whatever the user already typed (or today if blank).
-      setDate((prev) => firstOccurrenceISO(selectedSchedule.day!, prev || undefined));
-    }
-  }, [selectedSchedule]);
-
-  if (!isOpen) return null;
+    setScheduleIdx(-1);
+  };
 
   const repeats = repeatFreq !== "none";
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title || !type || !date || !startTime || !endTime) {
+    if (!title || !type || !effectiveDate || !effectiveStartTime || !effectiveEndTime) {
       toast.error("Please fill in all required fields");
       return;
     }
-    if (startTime >= endTime) {
+    if (effectiveStartTime >= effectiveEndTime) {
       toast.error("End time must be after start time");
       return;
     }
@@ -264,18 +259,18 @@ export default function AddScheduleModal({ isOpen, onClose, onAdd, initial }: Pr
         toast.error("Pick a 'Repeat until' date for the recurring schedule");
         return;
       }
-      if (repeatUntil < date) {
+      if (repeatUntil < effectiveDate) {
         toast.error("'Repeat until' must be on or after the start date");
         return;
       }
     }
     // Build the same "1 PM - 3 PM" range string the planner already parses
     // via parseTimeRange, so this stays compatible with existing events.
-    const time = `${formatTime12(startTime)} - ${formatTime12(endTime)}`;
+    const time = `${formatTime12(effectiveStartTime)} - ${formatTime12(effectiveEndTime)}`;
     onAdd?.({
       title,
       type,
-      date,
+      date: effectiveDate,
       time,
       repeatFreq: repeats ? repeatFreq : undefined,
       repeatUntil: repeats ? repeatUntil : undefined,
@@ -289,6 +284,8 @@ export default function AddScheduleModal({ isOpen, onClose, onAdd, initial }: Pr
       setEndTime("");
       setRepeatFreq("weekly");
       setRepeatUntil("");
+      setCourseName("");
+      setScheduleIdx(-1);
     }
     onClose();
   };
@@ -356,7 +353,7 @@ export default function AddScheduleModal({ isOpen, onClose, onAdd, initial }: Pr
                     <button
                       type="button"
                       onClick={() => {
-                        setType(t.value);
+                        handleTypeChange(t.value);
                         setTypeOpen(false);
                       }}
                       className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-gray-50"
@@ -385,7 +382,7 @@ export default function AddScheduleModal({ isOpen, onClose, onAdd, initial }: Pr
               <select
                 id="schedule-course"
                 value={courseName}
-                onChange={(e) => setCourseName(e.target.value)}
+                onChange={(e) => handleCourseChange(e.target.value)}
                 className="w-full rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-indigo-primary"
               >
                 <option value="">
@@ -413,7 +410,7 @@ export default function AddScheduleModal({ isOpen, onClose, onAdd, initial }: Pr
                   </label>
                   <select
                     id="schedule-course-slot"
-                    value={String(scheduleIdx)}
+                    value={String(resolvedScheduleIdx)}
                     onChange={(e) => setScheduleIdx(Number(e.target.value))}
                     className="w-full rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-indigo-primary"
                   >
@@ -448,7 +445,7 @@ export default function AddScheduleModal({ isOpen, onClose, onAdd, initial }: Pr
             <input
               id="schedule-date"
               type="date"
-              value={date}
+              value={effectiveDate}
               onChange={(e) => setDate(e.target.value)}
               disabled={lockedFromSchedule}
               className="w-full min-w-0 max-w-full rounded-lg border border-gray-200 px-3 sm:px-4 py-2.5 text-base sm:text-sm outline-none focus:border-indigo-primary disabled:bg-gray-50 disabled:text-gray-600 disabled:cursor-not-allowed"
@@ -456,7 +453,7 @@ export default function AddScheduleModal({ isOpen, onClose, onAdd, initial }: Pr
             />
             {lockedFromSchedule && (
               <p className="text-[11px] text-gray-primary">
-                Locked to {selectedSchedule!.day} — this course&apos;s
+                Locked to {selectedSchedule?.day ?? "this day"} — this course&apos;s
                 schedule is set in Passing Target.
               </p>
             )}
@@ -476,7 +473,7 @@ export default function AddScheduleModal({ isOpen, onClose, onAdd, initial }: Pr
               <input
                 id="schedule-start-time"
                 type="time"
-                value={startTime}
+                value={effectiveStartTime}
                 onChange={(e) => setStartTime(e.target.value)}
                 disabled={lockedFromSchedule}
                 className="w-full min-w-0 max-w-full rounded-lg border border-gray-200 px-2 sm:px-3 py-2.5 text-base sm:text-sm outline-none focus:border-indigo-primary disabled:bg-gray-50 disabled:text-gray-600 disabled:cursor-not-allowed"
@@ -497,7 +494,7 @@ export default function AddScheduleModal({ isOpen, onClose, onAdd, initial }: Pr
               <input
                 id="schedule-end-time"
                 type="time"
-                value={endTime}
+                value={effectiveEndTime}
                 onChange={(e) => setEndTime(e.target.value)}
                 disabled={lockedFromSchedule}
                 className="w-full min-w-0 max-w-full rounded-lg border border-gray-200 px-2 sm:px-3 py-2.5 text-base sm:text-sm outline-none focus:border-indigo-primary disabled:bg-gray-50 disabled:text-gray-600 disabled:cursor-not-allowed"
@@ -544,7 +541,7 @@ export default function AddScheduleModal({ isOpen, onClose, onAdd, initial }: Pr
                 id="schedule-repeat-until"
                 type="date"
                 value={repeatUntil}
-                min={date || undefined}
+                min={effectiveDate || undefined}
                 onChange={(e) => setRepeatUntil(e.target.value)}
                 className="w-full min-w-0 max-w-full rounded-lg border border-gray-200 px-3 sm:px-4 py-2.5 text-base sm:text-sm outline-none focus:border-indigo-primary"
                 style={{ WebkitAppearance: "none" }}

@@ -149,13 +149,9 @@ export async function PATCH(req: Request) {
       // forever, which made `normalizeCourse` pick them up and drop the
       // real data from `course_payload` — the "assessments disappear
       // after refresh" bug.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ;(payload as Record<string, unknown>).credits = credits
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ;(payload as Record<string, unknown>).threshold = threshold
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ;(payload as Record<string, unknown>).assessments = assessments
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ;(payload as Record<string, unknown>).schedule_entries = scheduleEntries
     }
 

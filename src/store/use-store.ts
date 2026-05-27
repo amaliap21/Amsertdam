@@ -79,6 +79,16 @@ export type GanttBlock = {
   tier: "HIGH" | "MEDIUM" | "LOW";
 };
 
+// Mirrors AnalysisResult from @/lib/ai/prompt (kept local so the store
+// doesn't pull in server-side AI code).
+export type AiAnalysis = {
+  verdict: "correct" | "partially_correct" | "incorrect";
+  score: number;
+  feedback: string;
+  mistakes: string[];
+  concept: string;
+};
+
 export type QuizAttempt = {
   id: string;
   quizId: string;
@@ -131,6 +141,18 @@ interface AppState {
   setGanttData: (data: GanttBlock[] | null) => void;
   aiSummary: string | null;
   setAiSummary: (summary: string | null) => void;
+
+  // Persisted AI answer analyses, keyed by `${quizId}:${questionId}` so the
+  // graded feedback on the Study Companion review page survives a refresh.
+  aiAnalyses: Record<string, AiAnalysis>;
+  setAiAnalysis: (key: string, analysis: AiAnalysis) => void;
+
+  // Shared AI usage counters so every Analyze button shows the SAME daily
+  // free count / premium balance (they're one global pool). Fetched fresh
+  // on mount; persisted only to avoid a flash of "…" before that lands.
+  aiRemaining: number | null;
+  aiCredits: number | null;
+  setAiUsage: (usage: { remaining?: number; credits?: number }) => void;
 
   // Cached courses for fast first paint on the dashboard. Persisted so the
   // courses overview doesn't blank out between navigations / refreshes.
@@ -386,6 +408,18 @@ export const useStore = create<AppState>()(
         setHiddenTaskEventIds: (hiddenTaskEventIds) => set({ hiddenTaskEventIds }),
         ganttData: null,
         setGanttData: (ganttData) => set({ ganttData }),
+        aiAnalyses: {},
+        setAiAnalysis: (key, analysis) =>
+          set((state) => ({
+            aiAnalyses: { ...state.aiAnalyses, [key]: analysis },
+          })),
+        aiRemaining: null,
+        aiCredits: null,
+        setAiUsage: ({ remaining, credits }) =>
+          set((state) => ({
+            aiRemaining: remaining ?? state.aiRemaining,
+            aiCredits: credits ?? state.aiCredits,
+          })),
         aiSummary: null,
         setAiSummary: (aiSummary) => set({ aiSummary }),
         coursesCache: [],

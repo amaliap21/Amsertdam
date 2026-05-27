@@ -5,6 +5,14 @@
 
 type IsoTimestamp = string;
 
+type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[];
+
 export type Database = {
   public: {
     Tables: {
@@ -123,6 +131,38 @@ export type Database = {
           created_at?: IsoTimestamp;
         };
         Update: Partial<Database["public"]["Tables"]["quizzes"]["Insert"]>;
+        Relationships: [];
+      };
+      ai_analyses: {
+        Row: {
+          id: string;
+          user_id: string;
+          subject: string | null;
+          question: string;
+          user_answer: string;
+          verdict: "correct" | "partially_correct" | "incorrect";
+          result: Json;
+          model_used: string;
+          cached: boolean;
+          tokens_prompt: number | null;
+          tokens_completion: number | null;
+          created_at: IsoTimestamp;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          subject?: string | null;
+          question: string;
+          user_answer: string;
+          verdict: "correct" | "partially_correct" | "incorrect";
+          result: Json;
+          model_used: string;
+          cached?: boolean;
+          tokens_prompt?: number | null;
+          tokens_completion?: number | null;
+          created_at?: IsoTimestamp;
+        };
+        Update: Partial<Database["public"]["Tables"]["ai_analyses"]["Insert"]>;
         Relationships: [];
       };
     };

@@ -57,9 +57,29 @@ export default function PrivacyPage() {
           <h2 className="text-xl font-semibold">Where your data lives</h2>
           <p>
             Account credentials and study data are stored in Supabase (hosted
-            in Singapore). AI generation uses Anthropic&apos;s Claude API;
-            content sent to Anthropic is governed by Anthropic&apos;s
-            commercial terms (no training on customer data).
+            in Singapore). AI generation uses OpenRouter to access multiple
+            model providers and may fall back to Anthropic&apos;s Claude API if
+            the free-tier models are unavailable. Content sent to these
+            providers is governed by their commercial terms (no training on
+            customer data).
+          </p>
+        </section>
+
+        <section>
+          <h2 className="text-xl font-semibold">Payments</h2>
+          <p>
+            Premium credit purchases are processed by{" "}
+            <strong>Midtrans</strong> (PT Midtrans), a licensed Indonesian
+            payment gateway. When you pay, your payment details (card number,
+            e-wallet, bank account) are entered on Midtrans&apos;s secure
+            checkout and handled by Midtrans — <strong>RealTrack never sees or
+            stores them</strong>. We only receive a payment confirmation
+            containing the order ID, amount, status, and your account reference,
+            which we use to add credits to your account. See{" "}
+            <Link href="/terms#refunds" className="text-indigo-primary hover:underline">
+              Refund Policy
+            </Link>
+            .
           </p>
         </section>
 

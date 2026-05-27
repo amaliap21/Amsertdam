@@ -343,14 +343,6 @@ export default function PriorityPlanner() {
       // client-side. Trusting the user's bucket beats letting the Python
       // analyzer re-score from incomplete inputs (which made every task
       // land in the MEDIUM band).
-      const tierFromPriority = (
-        priority: TaskItem["priority"]
-      ): "HIGH" | "MEDIUM" | "LOW" =>
-        priority === "Focus First"
-          ? "HIGH"
-          : priority === "If You Have Energy"
-          ? "MEDIUM"
-          : "LOW";
 
       const gradeWeightFromPriority = (
         priority: TaskItem["priority"]
@@ -944,7 +936,7 @@ export default function PriorityPlanner() {
                   </div>
                 )}
               </div>
-              <p className="text-sm font-medium text-gray-primary break-words">
+              <p className="text-sm font-medium text-gray-primary wrap-break-word">
                 [{event.label ?? event.title}] {event.subject}
               </p>
             </div>
@@ -1030,7 +1022,7 @@ export default function PriorityPlanner() {
                           </div>
                         )}
                       </div>
-                      <p className="text-sm font-medium text-gray-primary break-words">
+                      <p className="text-sm font-medium text-gray-primary wrap-break-word">
                         [{event.label ?? event.title}] {event.subject}
                       </p>
                     </div>

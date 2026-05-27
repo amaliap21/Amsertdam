@@ -121,7 +121,20 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <footer className="py-10 text-center">
+      <footer className="flex flex-col items-center gap-3 py-10 text-center">
+        <div className="flex items-center gap-4 text-sm">
+          <Link href="/terms" className="text-gray-primary hover:text-indigo-primary hover:underline">
+            Terms of Service
+          </Link>
+          <span className="text-gray-300">·</span>
+          <Link href="/privacy" className="text-gray-primary hover:text-indigo-primary hover:underline">
+            Privacy Policy
+          </Link>
+          <span className="text-gray-300">·</span>
+          <Link href="/terms#refunds" className="text-gray-primary hover:text-indigo-primary hover:underline">
+            Refund Policy
+          </Link>
+        </div>
         <p className="text-base text-[#5d5d5d]">© 2026 RealTrack</p>
       </footer>
     </div>

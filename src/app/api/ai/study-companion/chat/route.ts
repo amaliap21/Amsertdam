@@ -1,5 +1,10 @@
 import { NextRequest } from "next/server";
-import { streamClaude } from "@/lib/anthropic";
+import {
+  resolveChain,
+  modelTier,
+  PREMIUM_CREDIT_COST,
+} from "@/lib/ai/openrouter";
+import { spendCredit, refundCredit } from "@/lib/ai/credits";
 import { requireUserId } from "@/lib/get-user-id";
 
 export const runtime = "nodejs";
@@ -9,6 +14,9 @@ type ChatMessage = { role: "user" | "assistant"; content: string };
 
 type Body = {
   messages: ChatMessage[];
+  /** Chosen model id (from MODEL_OPTIONS). Premium models charge a credit
+   *  per reply; free models are free. */
+  model?: string;
   context?: {
     quizTitle?: string;
     course?: string;
@@ -34,6 +42,103 @@ const SYSTEM_PROMPT = `You are Study Companion, a warm, patient, expert tutor th
 - If asked about something outside the study material, gently redirect or answer briefly and offer to keep going.
 
 Always ground feedback in the specific quiz context the user provides, never invent questions, answers, or scores that aren't in the context.`;
+
+const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
+const STREAM_TIMEOUT_MS = 20000;
+
+async function fetchOpenRouterStream(
+  model: string,
+  messages: { role: "system" | "user" | "assistant"; content: string }[],
+  signal: AbortSignal,
+): Promise<Response> {
+  return fetch(OPENROUTER_ENDPOINT, {
+    method: "POST",
+    signal,
+    headers: {
+      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY ?? ""}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": process.env.OPENROUTER_APP_URL ?? "http://localhost:3000",
+      "X-Title": "RealTrack Study Companion",
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      temperature: 0.4,
+      max_tokens: 700,
+      stream: true,
+    }),
+  });
+}
+
+async function* streamOpenRouterResponse(resp: Response): AsyncGenerator<string> {
+  if (!resp.body) return;
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const events = buffer.split("\n\n");
+    buffer = events.pop() ?? "";
+
+    for (const event of events) {
+      const dataLine = event
+        .split("\n")
+        .find((l) => l.startsWith("data:"));
+      if (!dataLine) continue;
+      const payload = dataLine.slice(5).trim();
+      if (!payload || payload === "[DONE]") continue;
+      try {
+        const parsed = JSON.parse(payload) as {
+          choices?: Array<{ delta?: { content?: string } }>;
+        };
+        const delta = parsed.choices?.[0]?.delta?.content;
+        if (typeof delta === "string" && delta.length > 0) {
+          yield delta;
+        }
+      } catch {
+        // skip malformed events
+      }
+    }
+  }
+}
+
+// Streams over the given chain. NO automatic Claude fallback: premium
+// models (Opus) cost money and are only reached when the caller has spent a
+// credit and passed the premium chain. Free callers get only free models.
+async function* streamWithFallback(
+  messages: { role: "system" | "user" | "assistant"; content: string }[],
+  chain: readonly string[],
+): AsyncGenerator<string> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
+
+  try {
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) return;
+    for (const model of chain) {
+      try {
+        const resp = await fetchOpenRouterStream(model, messages, controller.signal);
+        if (resp.status === 429 || resp.status >= 500) continue;
+        if (!resp.ok || !resp.body) continue;
+
+        let didYield = false;
+        for await (const delta of streamOpenRouterResponse(resp)) {
+          didYield = true;
+          yield delta;
+        }
+        if (didYield) return;
+      } catch {
+        // try next model in the chain
+      }
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 function formatContext(ctx: Body["context"]): string | null {
   if (!ctx) return null;
@@ -75,6 +180,35 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // Resolve model + billing tier. Validate any explicit model.
+  const requestedModel =
+    typeof body.model === "string" ? body.model : undefined;
+  const tier = requestedModel ? modelTier(requestedModel) : "free";
+  if (requestedModel && !tier) {
+    return new Response(JSON.stringify({ error: "Unknown model" }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  const isPremium = tier === "premium";
+
+  // Premium replies cost a credit, charged up front. Refunded later if the
+  // stream produced nothing.
+  if (isPremium) {
+    const balance = await spendCredit(auth.userId, PREMIUM_CREDIT_COST);
+    if (balance === null) {
+      return new Response(
+        JSON.stringify({
+          error:
+            "You have no premium credits left. Buy a pack to chat with Claude Opus.",
+          needsCredits: true,
+        }),
+        { status: 402, headers: { "content-type": "application/json" } },
+      );
+    }
+  }
+  const chain = resolveChain(requestedModel, isPremium ? "premium" : "free");
+
   const contextText = formatContext(body.context);
   const messages: { role: "user" | "assistant"; content: string }[] = [];
   if (contextText) {
@@ -99,15 +233,31 @@ export async function POST(req: NextRequest) {
           ...messages,
         ];
 
-        for await (const delta of streamClaude(allMessages)) {
+        let streamed = false;
+        for await (const delta of streamWithFallback(allMessages, chain)) {
+          streamed = true;
           controller.enqueue(
             encoder.encode(
               `data: ${JSON.stringify({ delta })}\n\n`,
             ),
           );
         }
+        // Nothing came back. Refund the premium credit and tell the client.
+        if (!streamed) {
+          if (isPremium) await refundCredit(auth.userId, PREMIUM_CREDIT_COST);
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                error: isPremium
+                  ? "Claude is busy right now — your credit was refunded. Please try again."
+                  : "Free models are busy right now. Try again, or switch to a premium model.",
+              })}\n\n`,
+            ),
+          );
+        }
         controller.enqueue(encoder.encode(`data: [DONE]\n\n`));
       } catch (err) {
+        if (isPremium) await refundCredit(auth.userId, PREMIUM_CREDIT_COST);
         const message = err instanceof Error ? err.message : "stream error";
         controller.enqueue(
           encoder.encode(`data: ${JSON.stringify({ error: message })}\n\n`),

@@ -3,31 +3,26 @@
 - [x] When exporting to pdf or excel in Priority Planner, class should not have urgency and task should have the right urgency based on task value
 - [x] Gantt chart disappear after refreshes
 - [x] Sidebar should always follow, currently its affected by scrolling
+- [x] Export modal silently filters out past events when only an end date is picked.
+- [x] `/api/ai/study-companion/chat` is unauthenticated.
+- [x] Take-quiz page crashes when a quiz has zero questions.
+- [x] Flashcard review crashes for text-mode decks whose cards array is empty.
+- [x] Priority Planner Week/Day/Month filter is off-by-one in non-UTC timezones.
+- [x] Priority Planner Week filter starts on Sunday but the calendar grid starts on Monday.
+- [x] `POST /api/items` lets a user attach an item to another user's assessment.
+- [x] Edit-task drops effort/priority info but PATCH is OK; however the previous-advice carry-forward is line-fragile.
+- [x] Quiz Preview "Download" button is a fake.
+- [x] 6 unauthenticated API routes.
+- [x] `POST /api/assessments` missing `course_id` ownership check.
+- [x] `addTask` ghost task on non-ok server response.
+- [x] Dashboard calendar dot colors out of sync with Priority Planner.
 
 ## Bug audit findings
+- [x] **Right now, analysis results are cached by content (subject | tier | correctAnswer | userAnswer), shared across all users, to avoid paying for the same Opus call twice.** Consequence:
+  - If student A (premium) analyzes a question and answer, the result is cached.
+  - If student B later requests a premium analysis of the identical question + identical answer + identical correct answer, the route returns the cache hit before spending — so B gets a
+  premium-quality result without spending a credit.
 
-- [x] **Export modal silently filters out past events when only an end date is picked.** `src/components/ui/export-form.tsx:101` initializes `startDate` with `new Date().toString()` (e.g., `"Sun May 24 2026 12:34:56 GMT-0400"`). `<input type="date">` rejects that string so the field renders empty, but the state still holds today's stringified Date. Repro: 1. Open Priority Planner → Export. 2. Leave Start date visibly empty. 3. Pick an End date a week from today. 4. Click Download. Result: the export only contains events from today onward — past events the user expected to be included (because they left Start "blank") are silently dropped. The `isInvalid` check on line 247 also treats this hidden value as valid so the button is enabled. Fix: initialize `startDate` to `""`. 
-
-- [x] **`/api/ai/study-companion/chat` is unauthenticated.** `src/app/api/ai/study-companion/chat/route.ts` never calls `requireUserId`, while every other data route in `src/app/api/**` does. `middleware.ts` explicitly excludes `/api/*` from the auth gate (line 22) because it expects routes to enforce auth themselves. Repro: 1. Sign out. 2. From any client (curl/Postman), POST `{"messages":[{"role":"user","content":"hi"}]}` to `/api/ai/study-companion/chat`. 3. The endpoint streams a Claude response and burns Anthropic API credits with no rate limit and no user attribution. `src/app/api/ai/flashcards/generate/route.ts` and `src/app/api/ai/quiz/generate/route.ts` are also unauthenticated, but they only run deterministic ports (no external API spend); the Claude streaming endpoint is the real cost-leak.
-
-- [x] **Take-quiz page crashes when a quiz has zero questions.** `src/app/quiz-lab/[quizId]/take/page.tsx:26-29` does `const total = quiz.questions.length; const question = quiz.questions[current]; const selected = answers[question.id];` with no guard on `question` being undefined. Repro: 1. Create a quiz via the API or DB with `questions: []` (or open a quiz whose questions were stripped by a migration). 2. Navigate to `/quiz-lab/<id>/take`. 3. The page throws `Cannot read properties of undefined (reading 'id')` and the route renders the error overlay. `progress = ((current + 1) / total) * 100` also becomes `Infinity`. Add a guard that redirects or renders an empty state when `quiz.questions.length === 0`. [SKIP]
-
-- [x] **Flashcard review crashes for text-mode decks whose cards array is empty.** `src/app/flashcards/[deckId]/review/page.tsx:627` does `const currentCard = deck.cards[currentCardIndex];` and line 683 reads `currentCard.question` without checking if `currentCard` exists. The store maps server rows with `cards: Array.isArray(d.cards) ? d.cards : []` (`src/store/use-store.ts:453, 481`) so a deck row whose `cards` column was nulled out — or a persisted localStorage deck without `imageMode` and with `cards: []` — renders zero cards. Repro: 1. In the DB or via a stale localStorage, have a flashcard deck with `card_count: 5` but `cards` null/empty. 2. Open `/flashcards/<deckId>/review`. 3. Crashes with `Cannot read properties of undefined (reading 'question')`. Guard with `if (!currentCard) return <empty state/>;`. [SKIP]
-
-- [x] **Priority Planner Week/Day/Month filter is off-by-one in non-UTC timezones.** `src/app/priority-planner/page.tsx:638-665` builds `eventDate = new Date(event.date)` where `event.date` is `"YYYY-MM-DD"`. ISO date-only strings parse as UTC midnight, while `selectedDate` is built with `new Date(year, month, selectedDay)` (local midnight). The two are compared with `>=` / `<=` and `toDateString()`. Repro: 1. In a browser with a negative-UTC timezone (e.g., America/New_York, set OS clock or use `TZ=America/New_York`). 2. Add a Task in Task Value with deadline `2026-06-01T08:00` local. 3. Open Priority Planner, navigate to the week containing June 1. 4. Switch to Day view on May 31. The task derived from June 1 appears in the May 31 day filter because `new Date("2026-06-01")` is May 31 19:00 EST and `toDateString()` returns "Sat May 31 2026". Same off-by-one drives the Week boundary check.
-
-- [x] **Priority Planner Week filter starts on Sunday but the calendar grid starts on Monday.** `src/app/priority-planner/page.tsx:649` uses `startOfWeek.setDate(selectedDate.getDate() - selectedDate.getDay())` which always rolls back to Sunday (JS `getDay()` returns 0 for Sunday). The calendar layout, however, uses Monday-first (`adjustedFirstDay = firstDayOfMonth === 0 ? 6 : firstDayOfMonth - 1`, line 590). Repro: 1. Add a Task whose deadline is a Sunday. 2. Open Priority Planner. 3. Navigate to the Monday after that Sunday. 4. Switch to Week view. The task is not in the filter (Mon-Sun week) even though the user is on the Monday that "begins" the same row in the displayed grid. (Conversely, if you stand on the Sunday after, the task appears even though that Sunday is the last day of the previous Monday-first row.)
-
-- [x] **`POST /api/items` lets a user attach an item to another user's assessment.** `src/app/api/items/route.ts:24-28` writes `assessment_id: body.assessment_id` straight to the row without verifying that the referenced assessment is owned by `userId`. The corresponding row gets `user_id = <attacker>` so the attacker doesn't see anything different in their own GET, but the inserted item dangles under the victim's `assessment_id`. Repro: 1. As userA, look up an `assessment_id` from your own assessments. 2. As userB (any second account), POST `/api/items {"title":"x","assessment_id":"<userA's id>"}`. 3. The insert succeeds. The same lack of cross-user validation exists for `POST /api/assessments` (`course_id`, line 26) — neither rejects a foreign-owned parent id. If you later turn on database FK constraints with cascading deletes, deleting one user's course can wipe items created under another user's row.
-
-- [x] **Edit-task drops effort/priority info but PATCH is OK; however the previous-advice carry-forward is line-fragile.** `src/app/task-value/page.tsx:86-94` rebuilds `description` by taking `data.description` (always `"Assessment: X • Item: Y"` from the form) and appending only lines 2+ of the OLD description. That works while the AI advice consistently lives on line 2, but the AI also runs `metaMatch = description.match(/^(Assessment:[^\n]*)/i)` and writes `${meta}\n${ai.action}` (one-line advice). Repro: 1. Run "Ask AI to Prioritize" so each task gets a 2-line description. 2. Click pencil on a task and re-pick the assessment / item. 3. Save. Result: any AI advice longer than one line, or any user-typed notes pre-existing in `task.description` that have an empty leading line, are merged into a single `data.description` that drops the trailing tier hint. Lower-severity than the others; flagging because the edit path has no guard against the legacy multi-line shape.
-
-- [x] **Quiz Preview "Download" button is a fake.** `src/app/quiz-lab/[quizId]/preview/page.tsx:35` wires the Download button to `onClick={() => toast.success("Download started")}` — it shows a success toast but never actually downloads anything. Repro: 1. Open Quiz Lab. 2. Click Preview on any quiz. 3. Click Download in the preview header. 4. Toast says "Download started" but no file is saved. The Quiz Lab list page does have a working PDF download (`downloadQuizPdf`); the preview page should call the same helper, or the button should be removed. [SKIP]
-
-## Audit round 2
-
-- [x] **6 unauthenticated API routes.** `api/python/scheduling`, `api/python/sacrifice_intel`, `api/python/priority_analysis`, `api/python/graduation_threshold`, `api/ai/flashcards/generate`, `api/ai/quiz/generate` — all lacked `requireUserId()`. Fixed: added auth to all 6.
-- [x] **`POST /api/assessments` missing `course_id` ownership check.** Same pattern as the items bug — `course_id` was written without verifying the course belongs to the user. Fixed: added ownership query before insert.
-- [x] **`addTask` ghost task on non-ok server response.** `use-store.ts` had duplicate fallback code that always ran after a non-ok API response. Fixed: consolidated into single fallback path.
-- [x] **Dashboard calendar dot colors out of sync with Priority Planner.** Dashboard used `bg-yellow-500` for "If You Have Energy" while Priority Planner used `bg-amber-500`. Fixed: unified to `bg-amber-500` everywhere.
-
+  For multiple-choice quizzes this can happen (two students pick the same letter on the same question). It's not "using A's credits" — A's balance is untouched — but A effectively paid to
+  generate a result B reused for free.
+- []

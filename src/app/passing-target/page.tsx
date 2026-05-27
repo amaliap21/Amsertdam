@@ -169,19 +169,6 @@ function normalizeCourse(course: RawCourse): Courses {
   };
 }
 
-// Flatten sub-items into a single effective score for an assessment
-function effectiveScore(a: Assessment): number | undefined {
-  if (a.items && a.items.length > 0) {
-    const totalWeight = a.items.reduce((s, i) => s + i.weight, 0);
-    const allGraded = a.items.every((i) => i.score !== undefined);
-    if (!allGraded || totalWeight === 0) return undefined;
-    return (
-      a.items.reduce((s, i) => s + i.weight * (i.score ?? 0), 0) / totalWeight
-    );
-  }
-  return a.score;
-}
-
 // Flatten an assessment tree into leaf rows (one per gradeable item).
 // An assessment with sub-items is replaced by its leaves; otherwise it IS a leaf.
 type Leaf = { name: string; weight: number; score?: number; parent?: string };

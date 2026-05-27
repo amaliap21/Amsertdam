@@ -8,7 +8,10 @@ import type { Tour as ShepherdTour } from "shepherd.js";
 
 type Router = { push: (href: string) => void };
 
-export const TOUR_STORAGE_KEY = "realtrack-tour-status";
+// Versioned: bump the suffix whenever the tour gains new steps so users who
+// completed an earlier version see the renewed tour once. (v2 adds the
+// Study Companion + premium-credits steps.)
+export const TOUR_STORAGE_KEY = "realtrack-tour-status-v2";
 
 /** Mark the tour completed so it does not auto-fire on subsequent visits. */
 export function markTourCompleted() {
@@ -270,8 +273,28 @@ export async function createTour(router: Router): Promise<ShepherdTour> {
       buttons: [
         navigateBack("/flashcards", '[data-tour="create-deck"]'),
         skipBtn,
-        navigateNext("/dashboard", '[data-tour="dashboard-hero"]'),
+        navigateNext("/study-companion", '[data-tour="ai-credits"]'),
       ],
+    },
+    {
+      id: "study-companion",
+      attachTo: { element: '[data-tour="ai-credits"]', on: pos("bottom") },
+      title: "Study Companion",
+      text: "After you take a quiz, this page reviews your answers with AI — it explains mistakes and shows whether each course is on track to pass.",
+      beforeShowPromise: waitFor('[data-tour="ai-credits"]'),
+      buttons: [
+        navigateBack("/quiz-lab", '[data-tour="create-quiz"]'),
+        skipBtn,
+        nextBtn(),
+      ],
+    },
+    {
+      id: "ai-credits",
+      attachTo: { element: '[data-tour="buy-credits"]', on: pos("bottom") },
+      title: "Free analyses & premium credits",
+      text: "You get free AI analyses every day. For deeper Claude-quality feedback, buy premium credits — pay easily with QRIS, e-wallet, or card. You can pick which model to use on each analysis.",
+      beforeShowPromise: waitFor('[data-tour="buy-credits"]'),
+      buttons: [skipBtn, navigateNext("/dashboard", '[data-tour="dashboard-hero"]')],
     },
     {
       id: "done",
@@ -279,7 +302,7 @@ export async function createTour(router: Router): Promise<ShepherdTour> {
       text: "Restart this tour any time using the ? button in the top bar. Happy studying!",
       beforeShowPromise: waitFor('[data-tour="dashboard-hero"]'),
       buttons: [
-        navigateBack("/quiz-lab", '[data-tour="create-quiz"]'),
+        navigateBack("/study-companion", '[data-tour="ai-credits"]'),
         doneBtn,
       ],
     },
