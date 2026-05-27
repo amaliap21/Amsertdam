@@ -82,6 +82,33 @@ export default function RootLayout({
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+
+        {/* Branding: RealTrack logo as the favicon + link-preview image,
+            replacing the default Next/Vercel mark. The favicon itself comes
+            from src/app/icon.png (Next icon convention); these tags cover
+            social/link previews (Open Graph + Twitter) and an explicit
+            icon link as a belt-and-suspenders. */}
+        <title>RealTrack</title>
+        <meta
+          name="description"
+          content="RealTrack — study planning, flashcards, quizzes, and an AI study companion that reviews your answers."
+        />
+        <link rel="icon" href="/logo.png" type="image/png" />
+        <link rel="apple-touch-icon" href="/logo.png" />
+        <meta property="og:title" content="RealTrack" />
+        <meta
+          property="og:description"
+          content="Study planning, flashcards, quizzes, and an AI study companion."
+        />
+        <meta property="og:image" content="/logo.png" />
+        <meta property="og:type" content="website" />
+        <meta name="twitter:card" content="summary" />
+        <meta name="twitter:title" content="RealTrack" />
+        <meta
+          name="twitter:description"
+          content="Study planning, flashcards, quizzes, and an AI study companion."
+        />
+        <meta name="twitter:image" content="/logo.png" />
       </head>
       <body className={`${inter.className} antialiased relative`}>
         <AuthSync />
