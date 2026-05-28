@@ -6,6 +6,10 @@ import {
   estimateMaxQuestions,
   type Language,
 } from "@/lib/python-ports/quiz-extractor";
+import { AI_USE_LLM } from "@/lib/ai/config";
+import { generateQuizWithProviders } from "@/lib/ai/provider-router";
+import { splitTextIntoChunks } from "@/lib/ai/splitter";
+import { aggregateQuizResults } from "@/lib/ai/aggregator";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -93,7 +97,43 @@ export async function POST(req: NextRequest) {
 
     const requested = Number.isFinite(requestedQuestionsRaw) ? requestedQuestionsRaw : 0;
     const effective = requested > 0 ? Math.min(requested, maxQuestions) : maxQuestions;
-    const questions = extractQuiz(cleaned, Math.max(1, effective), 0, language);
+    // Try LLM-based generation first (if enabled). Fall back to deterministic extractor.
+    let questions: any[] = [];
+    if (AI_USE_LLM) {
+      const CHUNK_SIZE = Number(process.env.AI_CHUNK_SIZE || 4000);
+      const CHUNK_OVERLAP = Number(process.env.AI_CHUNK_OVERLAP || 200);
+      const threshold = CHUNK_SIZE * 1; // if text longer than chunk size, split
+      try {
+        const chunks = cleaned.length > threshold ? splitTextIntoChunks(cleaned, CHUNK_SIZE, CHUNK_OVERLAP) : [cleaned];
+        const perChunk = Math.max(1, Math.ceil(effective / chunks.length));
+        const parts: any[][] = [];
+        for (const chunk of chunks) {
+          const system = `You are a concise assistant. Respond ONLY with a single valid JSON object matching: {"questions":[{"prompt":"...","options":[{"letter":"A","text":"..."}],"correctAnswer":"A"}]}. Produce up to ${perChunk} questions derived from the provided source text. Keep options plausible and the correct answer grounded in the source.`;
+          const user = `Source text:\n${chunk}\n\nReturn up to ${perChunk} multiple-choice questions.`;
+          try {
+            const result = await generateQuizWithProviders([
+              { role: "system", content: system },
+              { role: "user", content: user },
+            ]);
+            if (result.ok && result.payload?.questions?.length) {
+              parts.push(result.payload.questions);
+            }
+          } catch {
+            // ignore chunk-level failures
+          }
+          if (parts.flat().length >= effective) break;
+        }
+        if (parts.length > 0) {
+          questions = aggregateQuizResults(parts, Math.max(1, effective));
+        }
+      } catch {
+        // fall back to extractor below
+      }
+    }
+
+    if (!questions || questions.length === 0) {
+      questions = extractQuiz(cleaned, Math.max(1, effective), 0, language);
+    }
 
     if (questions.length === 0) {
       return NextResponse.json(

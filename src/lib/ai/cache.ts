@@ -1,3 +1,30 @@
+type CacheEntry<T> = { value: T; expiresAt: number };
+
+const CACHE_TTL = Number(process.env.AI_CACHE_TTL_MS || 24 * 60 * 60 * 1000); // default 24h
+
+const store: Map<string, CacheEntry<unknown>> = new Map();
+
+export function cacheGet<T>(key: string): T | null {
+  const e = store.get(key);
+  if (!e) return null;
+  if (Date.now() > e.expiresAt) {
+    store.delete(key);
+    return null;
+  }
+  return e.value as T;
+}
+
+export function cacheSet<T>(key: string, value: T, ttl = CACHE_TTL) {
+  store.set(key, { value, expiresAt: Date.now() + ttl });
+}
+
+export function cacheDelete(key: string) {
+  store.delete(key);
+}
+
+export function cacheClear() {
+  store.clear();
+}
 import { createHash } from "crypto";
 import { redis } from "./limits";
 import type { AnalysisResult } from "./prompt";

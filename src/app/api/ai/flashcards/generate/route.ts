@@ -6,6 +6,10 @@ import {
   estimateMaxCards,
   type Language,
 } from "@/lib/python-ports/flashcard-extractor";
+import { AI_USE_LLM } from "@/lib/ai/config";
+import { generateFlashcardsWithProviders } from "@/lib/ai/provider-router";
+import { splitTextIntoChunks } from "@/lib/ai/splitter";
+import { aggregateFlashcardResults } from "@/lib/ai/aggregator";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -89,7 +93,41 @@ export async function POST(req: NextRequest) {
 
     const requested = Number.isFinite(requestedCardsRaw) ? requestedCardsRaw : 0;
     const effective = requested > 0 ? Math.min(requested, maxCards) : maxCards;
-    const cards = extractFlashcards(cleanedText, Math.max(1, effective), language);
+
+    // Attempt LLM-based generation if enabled. Falls back to deterministic extractor.
+    let cards: any[] = [];
+    if (AI_USE_LLM) {
+      const CHUNK_SIZE = Number(process.env.AI_CHUNK_SIZE || 4000);
+      const CHUNK_OVERLAP = Number(process.env.AI_CHUNK_OVERLAP || 200);
+      try {
+        const chunks = cleanedText.length > CHUNK_SIZE ? splitTextIntoChunks(cleanedText, CHUNK_SIZE, CHUNK_OVERLAP) : [cleanedText];
+        const perChunk = Math.max(1, Math.ceil(effective / chunks.length));
+        const parts: any[][] = [];
+        for (const chunk of chunks) {
+          const system = `You are a concise assistant. Respond ONLY with a single valid JSON object matching: {"cards":[{"front":"...","back":"...","sourceSnippet":"..."}]}. Produce up to ${perChunk} cards derived from the provided source text. Keep back concise (<=300 chars).`;
+          const user = `Source text:\n${chunk}\n\nReturn up to ${perChunk} flashcards.`;
+          try {
+            const result = await generateFlashcardsWithProviders([
+              { role: "system", content: system },
+              { role: "user", content: user },
+            ]);
+            if (result.ok && result.payload?.cards?.length) parts.push(result.payload.cards);
+          } catch {
+            // ignore per-chunk failures
+          }
+          if (parts.flat().length >= effective) break;
+        }
+        if (parts.length > 0) {
+          cards = aggregateFlashcardResults(parts, Math.max(1, effective));
+        }
+      } catch {
+        // fall back to deterministic extractor
+      }
+    }
+
+    if (!cards || cards.length === 0) {
+      cards = extractFlashcards(cleanedText, Math.max(1, effective), language);
+    }
 
     // The extractor has a guaranteed-output fallback now, so if cards is
     // still empty it means the text really had nothing to work with, even
