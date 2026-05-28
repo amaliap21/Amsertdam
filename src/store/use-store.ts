@@ -107,13 +107,13 @@ interface AppState {
     data:
       | { deckName: string; cards: GeneratedFlashcard[] }
       | {
-          deckName: string;
-          kind: "image";
-          imageDataUrl: string;
-          width: number;
-          height: number;
-          regions: ImageOcrRegion[];
-        },
+        deckName: string;
+        kind: "image";
+        imageDataUrl: string;
+        width: number;
+        height: number;
+        regions: ImageOcrRegion[];
+      },
   ) => string;
 
   quizzes: GeneratedQuiz[];
@@ -168,6 +168,9 @@ interface AppState {
     },
   ) => string;
   removeAttempt: (id: string) => void;
+
+  notificationEnabled: boolean;
+  setNotificationEnabled: (enabled: boolean) => void;
 
   fetchInitial: () => Promise<void>;
 }
@@ -317,14 +320,16 @@ export const useStore = create<AppState>()(
             const resp = await fetch('/api/quizzes', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: data.title, course: data.course, source: data.source, questions: data.questions }) })
             if (resp.ok) {
               const body = await resp.json()
-              set((state) => ({ quizzes: [...state.quizzes, {
-                id: body.id,
-                title: body.title,
-                course: body.course,
-                source: body.source,
-                questions: body.questions,
-                createdAt: body.created_at,
-              }] }))
+              set((state) => ({
+                quizzes: [...state.quizzes, {
+                  id: body.id,
+                  title: body.title,
+                  course: body.course,
+                  source: body.source,
+                  questions: body.questions,
+                  createdAt: body.created_at,
+                }]
+              }))
               return body.id
             }
           } catch {
@@ -336,6 +341,9 @@ export const useStore = create<AppState>()(
 
         tasks: [],
         attempts: [],
+        notificationEnabled: false,
+        setNotificationEnabled: (notificationEnabled) =>
+          set({ notificationEnabled }),
         recordAttempt: (attempt) => {
           const id = attempt.id ?? uid("attempt");
           set((state) => {
@@ -366,16 +374,16 @@ export const useStore = create<AppState>()(
           const id = task.id ?? uid('task')
           const localTask = { id, title: task.title, course: task.course, date: task.date, timeEstimate: task.timeEstimate, priority: task.priority, description: task.description, effort: task.effort }
           try {
-            const resp = await fetch('/api/tasks', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: task.title, course: task.course, date: task.date, estimatedHours: task.timeEstimate ? Number(String(task.timeEstimate).replace('h','')) : null, priority: task.priority, description: task.description, effort: task.effort }) })
+            const resp = await fetch('/api/tasks', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: task.title, course: task.course, date: task.date, estimatedHours: task.timeEstimate ? Number(String(task.timeEstimate).replace('h', '')) : null, priority: task.priority, description: task.description, effort: task.effort }) })
             if (resp.ok) {
               const body = await resp.json()
-              set((state) => ({ tasks: [ body, ...state.tasks ] }))
+              set((state) => ({ tasks: [body, ...state.tasks] }))
               return body.id
             }
           } catch {
             // network error — fallback local
           }
-          set((state) => ({ tasks: [ localTask, ...state.tasks ] }))
+          set((state) => ({ tasks: [localTask, ...state.tasks] }))
           return id
         },
         removeTask: async (id) => {
@@ -387,11 +395,11 @@ export const useStore = create<AppState>()(
           }
         },
         removeDeck: async (id) => {
-          try { await fetch(`/api/flashcards?id=${id}`, { method: 'DELETE' }) } catch {}
+          try { await fetch(`/api/flashcards?id=${id}`, { method: 'DELETE' }) } catch { }
           set((state) => ({ decks: state.decks.filter(d => d.id !== id) }))
         },
         removeQuiz: async (id) => {
-          try { await fetch(`/api/quizzes?id=${id}`, { method: 'DELETE' }) } catch {}
+          try { await fetch(`/api/quizzes?id=${id}`, { method: 'DELETE' }) } catch { }
           // Cascade-delete attempts that belong to this quiz so its Study
           // Companion entry disappears automatically. Study Companion is
           // strictly a live mirror of "quizzes you can still take", once
@@ -551,7 +559,7 @@ export const useStore = create<AppState>()(
         name: "realtrack-storage",
         // Bump this whenever the persisted shape changes incompatibly so
         // existing localStorage state runs through `migrate`.
-        version: 2,
+        version: 3,
         migrate: (persisted: unknown, fromVersion: number) => {
           const state = (persisted ?? {}) as Partial<AppState>;
           // v1 → v2: wipe Study Companion history. Attempts are now strictly
@@ -559,6 +567,9 @@ export const useStore = create<AppState>()(
           // would be orphaned. Cleanest fix is to drop them all once.
           if (fromVersion < 2) {
             return { ...state, attempts: [] };
+          }
+          if (fromVersion < 3) {
+            return { ...state, notificationEnabled: false };
           }
           return state;
         },
