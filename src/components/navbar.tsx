@@ -20,9 +20,11 @@ import {
   CheckSquare,
   HelpCircle,
   Menu,
+  Bell,
 } from "lucide-react";
 import { useCurrentUser } from "@/lib/use-current-user";
 import { useStore } from "@/store/use-store";
+import { parseTaskDate, toLocalIsoDate } from "@/lib/task-date";
 import toast from "react-hot-toast";
 
 interface NavbarProps {
@@ -64,6 +66,56 @@ function includesQ(value: string | undefined | null, q: string) {
   return (value ?? "").toLowerCase().includes(q);
 }
 
+const REMINDER_MORNING_HOUR = 9;
+const REMINDER_MORNING_MIN = 0;
+const REMINDER_WINDOW_MS = 60 * 1000;
+const REMINDER_CHECK_MS = 30 * 1000;
+const REMINDER_HISTORY_KEY = "realtrack-reminder-history";
+
+function parseClock(raw: string): { h: number; m: number } | null {
+  const match = raw.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+  if (!match) return null;
+  let h = Number(match[1]);
+  const m = match[2] ? Number(match[2]) : 0;
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  const ampm = match[3]?.toUpperCase();
+  if (ampm === "PM" && h < 12) h += 12;
+  if (ampm === "AM" && h === 12) h = 0;
+  if (!ampm && h >= 24) return null;
+  return { h, m };
+}
+
+function parseTimeRangeStart(raw: string): { h: number; m: number } | null {
+  if (!raw) return null;
+  if (/all\s*day/i.test(raw)) return null;
+  const match = raw.match(/^\s*([^–-]+)\s*[–-]/);
+  if (!match) return null;
+  return parseClock(match[1]);
+}
+
+function dateAtLocalMorning(isoDate: string, dayOffset = 0): Date | null {
+  const parts = isoDate.split("-").map(Number);
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return null;
+  const [y, m, d] = parts;
+  return new Date(y, m - 1, d + dayOffset, REMINDER_MORNING_HOUR, REMINDER_MORNING_MIN, 0, 0);
+}
+
+function loadReminderHistory(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(REMINDER_HISTORY_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, number>;
+    if (!parsed || typeof parsed !== "object") return {};
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
+function saveReminderHistory(map: Record<string, number>) {
+  localStorage.setItem(REMINDER_HISTORY_KEY, JSON.stringify(map));
+}
+
 /* ================================================================== */
 
 const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
@@ -78,6 +130,8 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
   const [editSemester, setEditSemester] = useState("");
   const [saving, setSaving] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
+  const notificationsRef = useRef<HTMLDivElement>(null);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   // Fetch profile on mount (auto-creates if missing via API).
   useEffect(() => {
@@ -173,6 +227,9 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
   const decks = useStore((s) => s.decks);
   const quizzes = useStore((s) => s.quizzes);
   const coursesCache = useStore((s) => s.coursesCache);
+  const plannerEvents = useStore((s) => s.plannerEvents);
+  const notificationEnabled = useStore((s) => s.notificationEnabled);
+  const setNotificationEnabled = useStore((s) => s.setNotificationEnabled);
 
   const quickResults: QuickResult[] = useMemo(() => {
     const q = searchValue.trim().toLowerCase();
@@ -257,6 +314,152 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (notificationsRef.current?.contains(target)) return;
+      setShowNotifications(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  type ReminderTarget = {
+    key: string;
+    title: string;
+    start: Date;
+    hasTime: boolean;
+  };
+
+  const reminderTargets: ReminderTarget[] = useMemo(() => {
+    const out: ReminderTarget[] = [];
+    for (const task of tasks) {
+      const { isoDate, clock } = parseTaskDate(task.date);
+      if (!isoDate) continue;
+      if (clock) {
+        const start = new Date(`${isoDate}T00:00:00`);
+        start.setHours(clock.h, clock.m, 0, 0);
+        out.push({
+          key: `task:${task.id}`,
+          title: `${task.title}${task.course ? ` · ${task.course}` : ""}`,
+          start,
+          hasTime: true,
+        });
+      } else {
+        const morning = dateAtLocalMorning(isoDate);
+        if (!morning) continue;
+        out.push({
+          key: `task:${task.id}`,
+          title: `${task.title}${task.course ? ` · ${task.course}` : ""}`,
+          start: morning,
+          hasTime: false,
+        });
+      }
+    }
+    for (const ev of plannerEvents) {
+      if (!ev?.date) continue;
+      const startClock = parseTimeRangeStart(ev.time || "");
+      if (startClock) {
+        const start = new Date(`${ev.date}T00:00:00`);
+        start.setHours(startClock.h, startClock.m, 0, 0);
+        out.push({
+          key: `planner:${ev.id}`,
+          title: `${ev.label ?? ev.subject}`,
+          start,
+          hasTime: true,
+        });
+      } else {
+        const morning = dateAtLocalMorning(ev.date);
+        if (!morning) continue;
+        out.push({
+          key: `planner:${ev.id}`,
+          title: `${ev.label ?? ev.subject}`,
+          start: morning,
+          hasTime: false,
+        });
+      }
+    }
+    return out;
+  }, [tasks, plannerEvents]);
+
+  useEffect(() => {
+    if (!notificationEnabled) return;
+    if (typeof window === "undefined") return;
+    if (!("Notification" in window)) return;
+    if (Notification.permission !== "granted") return;
+
+    const checkReminders = () => {
+      const now = new Date();
+      const history = loadReminderHistory();
+      const cutoff = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+      let mutated = false;
+
+      for (const [key, ts] of Object.entries(history)) {
+        if (ts < cutoff) {
+          delete history[key];
+          mutated = true;
+        }
+      }
+
+      for (const target of reminderTargets) {
+        const reminders: Array<{ id: string; time: Date; kind: "day-before" | "short" | "day-of" }> = [];
+        if (target.hasTime) {
+          reminders.push({
+            id: `${target.key}:day-before`,
+            time: new Date(target.start.getTime() - 24 * 60 * 60 * 1000),
+            kind: "day-before",
+          });
+          reminders.push({
+            id: `${target.key}:short`,
+            time: new Date(target.start.getTime() - 30 * 60 * 1000),
+            kind: "short",
+          });
+        } else {
+          const iso = toLocalIsoDate(target.start);
+          reminders.push({
+            id: `${target.key}:day-before`,
+            time: dateAtLocalMorning(iso, -1) ?? target.start,
+            kind: "day-before",
+          });
+          reminders.push({
+            id: `${target.key}:day-of`,
+            time: dateAtLocalMorning(iso, 0) ?? target.start,
+            kind: "day-of",
+          });
+        }
+
+        for (const reminder of reminders) {
+          const ts = reminder.time.getTime();
+          if (Number.isNaN(ts)) continue;
+          if (now.getTime() < ts || now.getTime() - ts > REMINDER_WINDOW_MS) continue;
+          if (history[reminder.id]) continue;
+
+          let body = "";
+          if (reminder.kind === "short") {
+            body = `${target.title} starts at ${target.start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}.`;
+          } else if (reminder.kind === "day-before") {
+            body = `${target.title} is coming tomorrow.`;
+            if (target.hasTime) {
+              body = `${target.title} starts tomorrow at ${target.start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}.`;
+            }
+          } else {
+            body = `${target.title} is scheduled for today.`;
+          }
+
+          new Notification("Study reminder", { body });
+          history[reminder.id] = now.getTime();
+          mutated = true;
+        }
+      }
+
+      if (mutated) saveReminderHistory(history);
+    };
+
+    checkReminders();
+    const handle = window.setInterval(checkReminders, REMINDER_CHECK_MS);
+    return () => window.clearInterval(handle);
+  }, [notificationEnabled, reminderTargets]);
 
   const handleSearch = useCallback(
     (e: React.FormEvent) => {
@@ -430,6 +633,73 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
 
       {/* ---- Profile section ---- */}
       <div ref={profileRef} className="relative ml-auto flex items-center gap-2 sm:gap-3 shrink-0">
+        <div ref={notificationsRef} className="relative">
+          <button
+            type="button"
+            aria-label="Notifications"
+            onClick={() => setShowNotifications((v) => !v)}
+            className="flex h-10 w-10 items-center justify-center rounded-full text-gray-primary transition hover:bg-gray-100 hover:text-indigo-primary"
+          >
+            <Bell size={20} />
+            {notificationEnabled && (
+              <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-emerald-500" />
+            )}
+          </button>
+
+          {showNotifications && (
+            <div className="absolute right-0 top-full mt-2 z-50 w-[calc(100vw-1.5rem)] max-w-72 rounded-2xl border border-gray-200 bg-white p-4 shadow-lg">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-black-primary">Notifications</p>
+                <span className="text-[10px] uppercase tracking-wider text-gray-400">
+                  Client only
+                </span>
+              </div>
+              <div className="mt-3 flex items-center justify-between rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
+                <div>
+                  <p className="text-sm font-medium text-black-primary">Study reminders</p>
+                  <p className="text-xs text-gray-primary">1 day + 30 min before</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (typeof window === "undefined") return;
+                    if (!("Notification" in window)) {
+                      toast.error("Notifications aren't supported in this browser.");
+                      return;
+                    }
+                    if (!notificationEnabled) {
+                      let permission = Notification.permission;
+                      if (permission !== "granted") {
+                        permission = await Notification.requestPermission();
+                      }
+                      if (permission !== "granted") {
+                        toast.error("Notification permission denied.");
+                        setNotificationEnabled(false);
+                        return;
+                      }
+                      setNotificationEnabled(true);
+                      toast.success("Notifications enabled");
+                    } else {
+                      setNotificationEnabled(false);
+                      toast("Notifications muted");
+                    }
+                  }}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${notificationEnabled ? "bg-emerald-500" : "bg-gray-300"
+                    }`}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${notificationEnabled ? "translate-x-5" : "translate-x-1"
+                      }`}
+                  />
+                </button>
+              </div>
+              <p className="mt-3 text-[11px] text-gray-500">
+                Reminders use your device time and only fire while the app is open.
+              </p>
+            </div>
+          )}
+        </div>
+
         <button
           type="button"
           title="Replay the onboarding tour"
