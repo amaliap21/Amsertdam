@@ -179,6 +179,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function chatWithFallback(
     messages: ChatMessage[],
     chainOrTier: readonly string[] | Tier = "free",
+    opts: { deadlineMs?: number } = {},
 ): Promise<OpenRouterResult> {
     // Accept either an explicit model chain or a tier (back-compat).
     const chain: readonly string[] = Array.isArray(chainOrTier)
@@ -187,12 +188,17 @@ export async function chatWithFallback(
           ? PREMIUM_MODEL_CHAIN
           : FREE_MODEL_CHAIN;
 
-    // Total time budget shared across all attempts. The route sets
-    // maxDuration=30s; stay under it. Each pass tries every model once; we
-    // retry the whole chain while there's budget and the failures look
-    // transient (429 / 5xx / empty / network) — that's what made a manual
-    // "click again" succeed.
-    const DEADLINE_MS = 24_000;
+    // Total time budget shared across all attempts. Each pass tries every
+    // model once; we retry the whole chain while there's budget and the
+    // failures look transient (429 / 5xx / empty / network) — that's what
+    // made a manual "click again" succeed.
+    //
+    // Callers that fan this out across multiple chunks (quiz/flashcard
+    // generation) MUST pass a shrinking `deadlineMs` so the SUM of all calls
+    // stays under the route's maxDuration — otherwise N chunks × 24s blows
+    // past the Vercel function limit and triggers FUNCTION_INVOCATION_TIMEOUT.
+    // Floor at 3s so a near-exhausted budget still allows one real attempt.
+    const DEADLINE_MS = Math.max(3_000, opts.deadlineMs ?? 24_000);
     const startedAt = Date.now();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), DEADLINE_MS);

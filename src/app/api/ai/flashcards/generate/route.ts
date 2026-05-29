@@ -186,6 +186,16 @@ export async function POST(req: NextRequest) {
         `If a region of the source is genuinely illegible, skip cards from that region rather than fabricating content.`,
       ].join(" ");
 
+    // Global time budget for ALL LLM work in this request (see the quiz route
+    // for the full rationale). Caps every chatWithFallback call and bails the
+    // chunk loop before the budget is exhausted, so multi-chunk PDFs can't
+    // trigger FUNCTION_INVOCATION_TIMEOUT.
+    const ROUTE_DEADLINE_MS = 50_000;
+    const routeStartedAt = Date.now();
+    const MIN_CALL_MS = 6_000;
+    const remainingBudget = () =>
+      ROUTE_DEADLINE_MS - (Date.now() - routeStartedAt);
+
     let cards: any[] = [];
     if (AI_USE_LLM) {
       const chain = resolveChain(requestedModel, tier);
@@ -219,6 +229,7 @@ export async function POST(req: NextRequest) {
                 },
               ],
               chain,
+              { deadlineMs: remainingBudget() },
             );
             const parsed = normalizeOpenRouterFlashcards(resp.content);
             if (parsed && parsed.cards?.length) {
@@ -248,6 +259,8 @@ export async function POST(req: NextRequest) {
           const perChunk = Math.max(1, Math.ceil(effective / chunks.length));
           const parts: any[][] = [];
           for (const chunk of chunks) {
+            // Stop before starting a call the budget can't fund.
+            if (remainingBudget() < MIN_CALL_MS) break;
             const system = buildSystemPrompt(perChunk, language);
             const user = `Source text:\n${chunk}\n\nReturn up to ${perChunk} flashcards.`;
             try {
@@ -257,6 +270,7 @@ export async function POST(req: NextRequest) {
                   { role: "user", content: user },
                 ],
                 chain,
+                { deadlineMs: remainingBudget() },
               );
               const parsed = normalizeOpenRouterFlashcards(resp.content);
               if (parsed && parsed.cards?.length) {

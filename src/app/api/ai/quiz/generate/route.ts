@@ -203,6 +203,18 @@ export async function POST(req: NextRequest) {
         `If a region of the source is illegible, skip questions from that region rather than fabricating content.`,
       ].join(" ");
 
+    // Global time budget for ALL LLM work in this request. maxDuration is 60s;
+    // we target ~50s of model work and leave headroom for request parsing,
+    // the deterministic fallback, and the DB write. Every chatWithFallback
+    // call below is capped to whatever budget remains, and the chunk loop
+    // bails once the budget can't fund another real attempt. This is what
+    // prevents FUNCTION_INVOCATION_TIMEOUT on multi-chunk PDFs.
+    const ROUTE_DEADLINE_MS = 50_000;
+    const routeStartedAt = Date.now();
+    const MIN_CALL_MS = 6_000; // don't start a call we can't meaningfully finish
+    const remainingBudget = () =>
+      ROUTE_DEADLINE_MS - (Date.now() - routeStartedAt);
+
     let questions: QuizQuestion[] = [];
     if (AI_USE_LLM) {
       const chain = resolveChain(requestedModel, tier);
@@ -241,6 +253,7 @@ export async function POST(req: NextRequest) {
                 },
               ],
               chain,
+              { deadlineMs: remainingBudget() },
             );
             const parsed = normalizeOpenRouterQuiz(resp.content);
             if (parsed && parsed.questions?.length) {
@@ -276,6 +289,9 @@ export async function POST(req: NextRequest) {
           const perChunk = Math.max(1, Math.ceil(effective / chunks.length));
           const parts: QuizQuestion[][] = [];
           for (const chunk of chunks) {
+            // Stop before starting a call the time budget can't fund — better
+            // to return the questions we already have than to time out.
+            if (remainingBudget() < MIN_CALL_MS) break;
             const system = buildSystemPrompt(perChunk, language);
             const user = `Source text:\n${chunk}\n\nReturn up to ${perChunk} multiple-choice questions.`;
             try {
@@ -285,6 +301,7 @@ export async function POST(req: NextRequest) {
                   { role: "user", content: user },
                 ],
                 chain,
+                { deadlineMs: remainingBudget() },
               );
               const parsed = normalizeOpenRouterQuiz(resp.content);
               if (parsed && parsed.questions?.length) {
