@@ -4,7 +4,8 @@ import Link from "next/link";
 import { ArrowLeft, Send, Sparkles } from "lucide-react";
 import { use, useEffect, useMemo, useRef, useState } from "react";
 import { useQuizById } from "@/lib/quiz-data";
-import { MODEL_OPTIONS, modelTier } from "@/lib/ai/openrouter";
+import { modelTier } from "@/lib/ai/openrouter";
+import ModelPicker, { DEFAULT_MODEL_ID } from "@/components/ui/model-picker";
 import { useStore } from "@/store/use-store";
 
 type Message = {
@@ -192,7 +193,7 @@ export default function StudyCompanionChat({
     });
   }, [welcomeContent]);
   const [streaming, setStreaming] = useState(false);
-  const [chatModel, setChatModel] = useState(MODEL_OPTIONS[0].id);
+  const [chatModel, setChatModel] = useState(DEFAULT_MODEL_ID);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -383,20 +384,12 @@ export default function StudyCompanionChat({
       >
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           {/* Pick the model. Premium (Opus) charges 1 credit per reply. */}
-          <select
+          <ModelPicker
+            variant="compact"
             value={chatModel}
-            onChange={(e) => setChatModel(e.target.value)}
+            onChange={setChatModel}
             disabled={streaming}
-            title="Choose the AI model"
-            className="w-full rounded-lg border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-black-primary outline-none focus:border-indigo-primary disabled:opacity-50 sm:w-auto"
-          >
-            {MODEL_OPTIONS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-                {m.tier === "premium" ? " (Premium)" : ""}
-              </option>
-            ))}
-          </select>
+          />
           <div className="flex items-center gap-2 sm:flex-1">
             <input
               type="text"

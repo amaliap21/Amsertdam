@@ -79,7 +79,17 @@ export function resolveChain(
 // fractional credit scheme, but for a single Opus tier this stays 1.
 export const PREMIUM_CREDIT_COST = 1;
 
-export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
+// Multimodal content support (OpenAI-compatible). Vision-capable models
+// (Claude Opus 4.7 etc.) accept content arrays with text + image_url blocks.
+// Pure-text callers can keep passing a string as before.
+export type ChatContentPart =
+    | { type: "text"; text: string }
+    | { type: "image_url"; image_url: { url: string } };
+
+export type ChatMessage = {
+    role: "system" | "user" | "assistant";
+    content: string | ChatContentPart[];
+};
 
 export type OpenRouterResult = {
     content: string;

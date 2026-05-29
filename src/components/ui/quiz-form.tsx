@@ -5,6 +5,8 @@ import { X, Upload, CirclePlus, Loader2, AlertCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import LanguagePicker, { type Language } from "@/components/ui/language-picker";
+import ModelPicker, { DEFAULT_MODEL_ID } from "@/components/ui/model-picker";
+import { modelTier } from "@/lib/ai/openrouter";
 
 export type GeneratedQuestion = {
   id: string;
@@ -38,6 +40,7 @@ export default function CreateQuizModal({
   // snapping back to "1". The number is parsed at submit time.
   const [requestedQuestions, setRequestedQuestions] = useState<string>("5");
   const [language, setLanguage] = useState<Language>("en");
+  const [model, setModel] = useState<string>(DEFAULT_MODEL_ID);
   const [recommendedMaxQuestions, setRecommendedMaxQuestions] = useState<number | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -68,7 +71,18 @@ export default function CreateQuizModal({
 
   const MAX_SIZE = 50 * 1024 * 1024;
 
+  const isImageFile = (f: File) =>
+    f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name);
+
   const analyzeFile = async (file: File, title: string, course: string) => {
+    // Skip the text-estimate analyze pass for images. The route returns a
+    // fixed maxQuestions for image input (no source text to count terms in)
+    // and we don't want to burn vision credits estimating.
+    if (isImageFile(file)) {
+      setRecommendedMaxQuestions(8);
+      setAnalyzing(false);
+      return;
+    }
     setAnalyzing(true);
     try {
       const fd = new FormData();
@@ -105,11 +119,19 @@ export default function CreateQuizModal({
       return;
     }
     if (!formData.file) {
-      setError("Please upload a source PDF or image.");
+      setError("Please upload a source PDF, .txt, or image.");
       return;
     }
     if (formData.file.size > MAX_SIZE) {
       setError("File exceeds the 50 MB limit.");
+      return;
+    }
+    // Images need a vision-capable (Premium) model — Tesseract OCR can't
+    // read stacked fractions / exponents / 2D math.
+    if (isImageFile(formData.file) && modelTier(model) !== "premium") {
+      setError(
+        "Image input needs a Premium model (Claude Opus) to read math layouts correctly.",
+      );
       return;
     }
     const parsedQuestions = Math.max(
@@ -133,6 +155,7 @@ export default function CreateQuizModal({
       fd.append("course", formData.course);
       fd.append("requestedQuestions", String(parsedQuestions));
       fd.append("language", language);
+      fd.append("model", model);
       const resp = await fetch("/api/ai/quiz/generate", {
         method: "POST",
         body: fd,
@@ -327,6 +350,19 @@ export default function CreateQuizModal({
             label="Question Language"
           />
 
+          <ModelPicker
+            id="quiz-model"
+            value={model}
+            onChange={setModel}
+            disabled={loading || analyzing}
+            label="AI Model"
+            hint={
+              modelTier(model) === "premium"
+                ? "Premium model — uses 1 credit per generation."
+                : "Free model — rate-limited but no cost."
+            }
+          />
+
           <div>
             <label className="block text-sm font-medium text-black-primary mb-3">
               Source<span className="text-red-500">*</span>
@@ -350,7 +386,7 @@ export default function CreateQuizModal({
                       {formData.file.name}
                     </span>
                   ) : (
-                    "Upload a PDF or text file (max. 50 MB)"
+                    "Upload a PDF, .txt, or image (max. 50 MB)"
                   )}
                 </p>
                 {recommendedMaxQuestions ? (
@@ -363,7 +399,7 @@ export default function CreateQuizModal({
                 id="quiz-source-upload"
                 type="file"
                 className="hidden"
-                accept="application/pdf,.pdf,text/plain,.txt"
+                accept="application/pdf,.pdf,text/plain,.txt,image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
                 onChange={handleFileChange}
               />
             </label>

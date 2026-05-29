@@ -7,12 +7,14 @@ import {
   Loader2,
   PencilLine,
   Trash2,
+  Clock,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import ExportModal from "@/components/ui/export-form";
 import AddScheduleModal, {
   type ScheduleInitial,
 } from "@/components/ui/add-schedule-form";
+import ActiveHoursForm from "@/components/ui/active-hours-form";
 import toast from "react-hot-toast";
 import { useStore, type TaskItem, type GanttBlock } from "@/store/use-store";
 import {
@@ -57,7 +59,7 @@ function fmtClock(h: number, m: number): string {
 function parseTimeRange(raw: string): { start: number; end: number } | null {
   if (!raw) return null;
   const match = raw.match(
-    /^\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*[-–]\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*$/i
+    /^\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*[-–]\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*$/i,
   );
   if (!match) return null;
   const start = parseClock(match[1]);
@@ -93,14 +95,14 @@ export default function PriorityPlanner() {
 
   const extraEvents = plannerEvents as ScheduleEvent[];
   const setExtraEvents = (
-    updater: ScheduleEvent[] | ((prev: ScheduleEvent[]) => ScheduleEvent[])
+    updater: ScheduleEvent[] | ((prev: ScheduleEvent[]) => ScheduleEvent[]),
   ) => {
     const next = typeof updater === "function" ? updater(extraEvents) : updater;
     setPlannerEvents(next);
   };
 
   useEffect(() => {
-    fetchInitial().catch(() => { });
+    fetchInitial().catch(() => {});
   }, [fetchInitial]);
 
   // Derive events from tasks in the Task Value store.
@@ -144,7 +146,7 @@ export default function PriorityPlanner() {
   const addEventReplacingOverlaps = (incoming: ScheduleEvent) => {
     setExtraEvents((prev) => {
       const filtered = prev.filter(
-        (existing) => !eventsOverlap(existing, incoming)
+        (existing) => !eventsOverlap(existing, incoming),
       );
       return [...filtered, incoming];
     });
@@ -171,16 +173,16 @@ export default function PriorityPlanner() {
         prev.map((e) =>
           e.id === editingEvent.id
             ? {
-              ...e,
-              title: data.type,
-              date: data.date,
-              time: data.time,
-              subject: data.title,
-              color: styles.color,
-              bgColor: styles.bgColor,
-            }
-            : e
-        )
+                ...e,
+                title: data.type,
+                date: data.date,
+                time: data.time,
+                subject: data.title,
+                color: styles.color,
+                bgColor: styles.bgColor,
+              }
+            : e,
+        ),
       );
       setEditingEvent(null);
       return;
@@ -205,7 +207,7 @@ export default function PriorityPlanner() {
       let i = 0;
       while (cursor <= endDate && i < MAX_OCCURRENCES) {
         const iso = `${cursor.getFullYear()}-${String(
-          cursor.getMonth() + 1
+          cursor.getMonth() + 1,
         ).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`;
         occurrences.push({
           id: baseId + i,
@@ -233,7 +235,7 @@ export default function PriorityPlanner() {
         // Drop any pre-existing event that overlaps any new occurrence
         // — same "replace overlaps" rule the single-event path uses.
         const filtered = prev.filter(
-          (existing) => !occurrences.some((o) => eventsOverlap(existing, o))
+          (existing) => !occurrences.some((o) => eventsOverlap(existing, o)),
         );
         return [...filtered, ...occurrences];
       });
@@ -244,8 +246,9 @@ export default function PriorityPlanner() {
             ? "weekly"
             : "monthly";
       toast.success(
-        `Added ${occurrences.length} ${cadence} occurrence${occurrences.length === 1 ? "" : "s"
-        }`
+        `Added ${occurrences.length} ${cadence} occurrence${
+          occurrences.length === 1 ? "" : "s"
+        }`,
       );
       return;
     }
@@ -265,7 +268,7 @@ export default function PriorityPlanner() {
   // from here; task-derived events must be managed from Task Value.
   const taskEventIds = useMemo(
     () => new Set(taskEvents.map((e) => e.id)),
-    [taskEvents]
+    [taskEvents],
   );
   const isManualEvent = (e: ScheduleEvent) => !taskEventIds.has(e.id);
 
@@ -284,20 +287,23 @@ export default function PriorityPlanner() {
 
   const editingInitial: ScheduleInitial | null = editingEvent
     ? {
-      title: editingEvent.subject,
-      type: editingEvent.title,
-      date: editingEvent.date,
-      time: editingEvent.time,
-    }
+        title: editingEvent.subject,
+        type: editingEvent.title,
+        date: editingEvent.date,
+        time: editingEvent.time,
+      }
     : null;
 
   const [aiLoading, setAiLoading] = useState(false);
+  const [isActiveHoursOpen, setIsActiveHoursOpen] = useState(false);
   // AI summary + Gantt data are persisted in the store so the chart
   // doesn't vanish when the user refreshes the page.
   const aiSummary = useStore((s) => s.aiSummary);
   const setAiSummary = useStore((s) => s.setAiSummary);
   const ganttData = useStore((s) => s.ganttData);
   const setGanttData = useStore((s) => s.setGanttData);
+  const activeHours = useStore((s) => s.activeHours);
+  const setActiveHours = useStore((s) => s.setActiveHours);
 
   const handleAiSchedule = async () => {
     if (aiLoading) return;
@@ -310,20 +316,23 @@ export default function PriorityPlanner() {
     const t = toast.loading("Building your study schedule…");
 
     try {
-      // Push the planning start to tomorrow when today's last session
-      // window has already passed — otherwise the algorithm allocates
-      // tasks into past slots that get filtered out client-side, and
-      // tight-deadline tasks lose so many slots they end up with zero
-      // recommended blocks ("assignment not determined").
+      // Push the planning start to tomorrow when today's active window
+      // has already closed — otherwise the algorithm allocates tasks into
+      // past slots that get filtered out client-side, and tight-deadline
+      // tasks lose so many slots they end up with zero recommended blocks
+      // ("assignment not determined"). The cutoff comes from the user's
+      // configured active hours.
       const now = new Date();
-      const SESSIONS_END_HOUR = 17; // matches sessions: end_time 17:00
+      const [endH, endM] = activeHours.end.split(":").map(Number);
+      const sessionsEndMinutes = endH * 60 + (endM || 0);
+      const nowMinutes = now.getHours() * 60 + now.getMinutes();
       const planStart = new Date(now);
       planStart.setHours(0, 0, 0, 0);
-      if (now.getHours() >= SESSIONS_END_HOUR) {
+      if (nowMinutes >= sessionsEndMinutes) {
         planStart.setDate(planStart.getDate() + 1);
       }
       const startDateIso = `${planStart.getFullYear()}-${String(
-        planStart.getMonth() + 1
+        planStart.getMonth() + 1,
       ).padStart(2, "0")}-${String(planStart.getDate()).padStart(2, "0")}`;
 
       const parseDeadlineDays = (dateStr: string): number => {
@@ -332,7 +341,7 @@ export default function PriorityPlanner() {
         const candidate = new Date(`${isoDate}T00:00:00`);
         if (Number.isNaN(candidate.getTime())) return 7;
         const diff = Math.round(
-          (candidate.getTime() - planStart.getTime()) / (1000 * 60 * 60 * 24)
+          (candidate.getTime() - planStart.getTime()) / (1000 * 60 * 60 * 24),
         );
         return Math.max(0, diff);
       };
@@ -344,7 +353,7 @@ export default function PriorityPlanner() {
       // land in the MEDIUM band).
 
       const gradeWeightFromPriority = (
-        priority: TaskItem["priority"]
+        priority: TaskItem["priority"],
       ): number =>
         priority === "Focus First"
           ? 25
@@ -352,19 +361,44 @@ export default function PriorityPlanner() {
             ? 12
             : 5;
 
+      // Build session windows from the user's configured active hours.
+      // If they set a break, split the day into two windows around it;
+      // otherwise send one continuous window. The Python scheduler can
+      // consume either shape.
+      const sessions: { start_time: string; end_time: string }[] = [];
+      if (activeHours.breakStart && activeHours.breakEnd) {
+        sessions.push({
+          start_time: activeHours.start,
+          end_time: activeHours.breakStart,
+        });
+        sessions.push({
+          start_time: activeHours.breakEnd,
+          end_time: activeHours.end,
+        });
+      } else {
+        sessions.push({
+          start_time: activeHours.start,
+          end_time: activeHours.end,
+        });
+      }
+
+      // Daily study budget = total available hours from the session windows.
+      const dailyStudyHours = sessions.reduce((acc, s) => {
+        const [sh, sm] = s.start_time.split(":").map(Number);
+        const [eh, em] = s.end_time.split(":").map(Number);
+        return acc + ((eh * 60 + (em || 0)) - (sh * 60 + (sm || 0))) / 60;
+      }, 0);
+
       const resp = await fetch("/api/python/scheduling", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           current_grade: 68,
           passing_grade: 75,
-          daily_study_hours: 6,
+          daily_study_hours: dailyStudyHours,
           start_date: startDateIso,
           analysis_method: "topsis",
-          sessions: [
-            { start_time: "09:00", end_time: "12:00" },
-            { start_time: "13:00", end_time: "17:00" },
-          ],
+          sessions,
           tasks: tasks.map((task: TaskItem) => ({
             task_id: task.id,
             task_name: task.title,
@@ -427,32 +461,31 @@ export default function PriorityPlanner() {
           end_time: block.end_time,
           hours_allocated: block.hours_allocated,
           tier: block.tier,
-        }))
+        })),
       );
 
       // ALSO add the schedule blocks as planner events so the user sees
       // "work on X — Tue 9-11 AM" in the day/week/month views, not just
       // the task deadlines. This is the actual answer to "when should I
       // work on each assignment".
-      const tierToStyle = (
-        tier: "HIGH" | "MEDIUM" | "LOW" | "CLASS" | "TASK" | "SELF STUDY"
-      ) =>
-        tier === "CLASS"
-          ? TYPE_STYLES.Class
-          : tier === "TASK"
-            ? TYPE_STYLES.Task
-            : tier === "SELF STUDY"
-              ? TYPE_STYLES["Self Study"]
-              : tier === "HIGH"
-                ? PRIORITY_STYLES["Focus First"]
-                : tier === "MEDIUM"
-                  ? PRIORITY_STYLES["If You Have Energy"]
-                  : PRIORITY_STYLES["Safe to Minimize"];
+      //
+      // Tier comes straight from the scheduling API's JSON
+      // ("HIGH" | "MEDIUM" | "LOW") per api/python/scheduling.py — no
+      // client-side override against Task Value buckets. The Python scorer
+      // already factors in the user's priority, grade weight, and deadline,
+      // so the planner shows exactly what the API returned.
+      type PythonTier = "HIGH" | "MEDIUM" | "LOW";
+      const tierToStyle = (tier: PythonTier) =>
+        tier === "HIGH"
+          ? PRIORITY_STYLES["Focus First"]
+          : tier === "MEDIUM"
+            ? PRIORITY_STYLES["If You Have Energy"]
+            : PRIORITY_STYLES["Safe to Minimize"];
 
       const isoDate = (d: Date) =>
         `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
           2,
-          "0"
+          "0",
         )}-${String(d.getDate()).padStart(2, "0")}`;
 
       // Any block before today is useless advice — defensive guard in
@@ -460,35 +493,11 @@ export default function PriorityPlanner() {
       const todayMidnight = new Date();
       todayMidnight.setHours(0, 0, 0, 0);
 
-      // Look up the user's chosen priority per task so we can override
-      // whatever tier the Python analyzer guessed. The user's selection
-      // in Task Value is the source of truth for "how urgent is this".
-      const priorityByTaskId = new Map<string, TaskItem["priority"]>();
-      const priorityByName = new Map<string, TaskItem["priority"]>();
-      for (const t of tasks) {
-        priorityByTaskId.set(String(t.id), t.priority);
-        priorityByName.set(t.title, t.priority);
-      }
-      const resolveTier = (block: {
-        task_id?: string;
-        task_name: string;
-        tier: string;
-      }): "HIGH" | "MEDIUM" | "LOW" => {
-        const userPriority =
-          (block.task_id && priorityByTaskId.get(String(block.task_id))) ||
-          priorityByName.get(block.task_name);
-        if (userPriority === "Focus First") return "HIGH";
-        if (userPriority === "If You Have Energy") return "MEDIUM";
-        if (userPriority === "Safe to Minimize") return "LOW";
-        // Fall back to Python's tier if the user-side lookup misses
-        // (renamed task, stale id, etc.).
-        if (
-          block.tier === "HIGH" ||
-          block.tier === "MEDIUM" ||
-          block.tier === "LOW"
-        ) {
-          return block.tier;
-        }
+      // Defensive normaliser: trust the API tier as-is; if it ever drifts
+      // outside the documented enum, fall back to MEDIUM so the planner
+      // doesn't crash on a stylesheet lookup.
+      const normalizeTier = (raw: string | undefined): PythonTier => {
+        if (raw === "HIGH" || raw === "MEDIUM" || raw === "LOW") return raw;
         return "MEDIUM";
       };
 
@@ -504,13 +513,13 @@ export default function PriorityPlanner() {
         const blockDay = new Date(
           start.getFullYear(),
           start.getMonth(),
-          start.getDate()
+          start.getDate(),
         );
         if (blockDay < todayMidnight) {
           droppedPast++;
           return;
         }
-        const tier = resolveTier(block);
+        const tier = normalizeTier(block.tier);
         const style = tierToStyle(tier);
         scheduledTaskNames.add(block.task_name);
         aiEvents.push({
@@ -520,7 +529,7 @@ export default function PriorityPlanner() {
           date: isoDate(start),
           time: `${fmtClock(start.getHours(), start.getMinutes())} - ${fmtClock(
             end.getHours(),
-            end.getMinutes()
+            end.getMinutes(),
           )}`,
           subject: `${block.task_name} · ${tier} (${block.hours_allocated}h)`,
           color: style.color,
@@ -529,7 +538,7 @@ export default function PriorityPlanner() {
       });
       if (droppedPast > 0) {
         console.info(
-          `[plan-with-ai] dropped ${droppedPast} block(s) scheduled before today`
+          `[plan-with-ai] dropped ${droppedPast} block(s) scheduled before today`,
         );
       }
 
@@ -540,13 +549,14 @@ export default function PriorityPlanner() {
       const unscheduled = tasks.filter((t) => !scheduledTaskNames.has(t.title));
       if (unscheduled.length > 0) {
         toast.error(
-          `Couldn't fit ${unscheduled.length} task${unscheduled.length === 1 ? "" : "s"
+          `Couldn't fit ${unscheduled.length} task${
+            unscheduled.length === 1 ? "" : "s"
           } into the plan: ${unscheduled
             .map((t) => t.title)
             .join(
-              ", "
+              ", ",
             )}. Their deadlines may be too close, or estimated hours too high for the available sessions.`,
-          { duration: 8000 }
+          { duration: 8000 },
         );
       }
 
@@ -562,20 +572,22 @@ export default function PriorityPlanner() {
       const taskWord = json.summary.total_tasks === 1 ? "task" : "tasks";
       const dayWord = json.summary.days_needed === 1 ? "day" : "days";
       const warningNote = json.deadline_warnings.length
-        ? ` Warning: ${json.deadline_warnings.length} ${json.deadline_warnings.length === 1 ? "task" : "tasks"
-        } may miss deadlines.`
+        ? ` Warning: ${json.deadline_warnings.length} ${
+            json.deadline_warnings.length === 1 ? "task" : "tasks"
+          } may miss deadlines.`
         : "";
       setAiSummary(
         `Recommended ${json.summary.total_tasks} ${taskWord} across ${json.summary.days_needed} ${dayWord} ` +
-        `(${json.summary.total_hours_needed}h working time). ` +
-        `${json.summary.high_priority} HIGH, ${json.summary.medium_priority} MEDIUM, ${json.summary.low_priority} LOW.${warningNote}`
+          `(${json.summary.total_hours_needed}h working time). ` +
+          `${json.summary.high_priority} HIGH, ${json.summary.medium_priority} MEDIUM, ${json.summary.low_priority} LOW.${warningNote}`,
       );
       toast.success(
         aiEvents.length > 0
-          ? `Added ${aiEvents.length} recommended work block${aiEvents.length === 1 ? "" : "s"
-          }`
+          ? `Added ${aiEvents.length} recommended work block${
+              aiEvents.length === 1 ? "" : "s"
+            }`
           : "Schedule generated",
-        { id: t }
+        { id: t },
       );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed", { id: t });
@@ -711,6 +723,20 @@ export default function PriorityPlanner() {
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center self-auto">
           <button
+            onClick={() => setIsActiveHoursOpen(true)}
+            title={
+              activeHours.breakStart && activeHours.breakEnd
+                ? `Active hours: ${activeHours.start}–${activeHours.breakStart}, ${activeHours.breakEnd}–${activeHours.end}`
+                : `Active hours: ${activeHours.start}–${activeHours.end}`
+            }
+            className="flex flex-row items-center justify-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-black-primary cursor-pointer transition-colors hover:bg-gray-50"
+          >
+            <Clock size={16} />
+            <span>
+              {activeHours.start}–{activeHours.end}
+            </span>
+          </button>
+          <button
             data-tour="plan-with-ai"
             onClick={handleAiSchedule}
             disabled={aiLoading || !tasks.length}
@@ -748,8 +774,9 @@ export default function PriorityPlanner() {
             {["Day", "Week", "Month"].map((label) => (
               <button
                 key={label}
-                className={`px-5 py-1.5 rounded-lg cursor-pointer ${selected === label ? "bg-white" : ""
-                  }`}
+                className={`px-5 py-1.5 rounded-lg cursor-pointer ${
+                  selected === label ? "bg-white" : ""
+                }`}
                 onClick={() => setSelected(label as "Day" | "Week" | "Month")}
               >
                 {label}
@@ -849,12 +876,12 @@ export default function PriorityPlanner() {
               const weekStart = new Date(
                 year,
                 month,
-                selectedDay - mondayOffset
+                selectedDay - mondayOffset,
               );
               const weekEnd = new Date(
                 year,
                 month,
-                selectedDay - mondayOffset + 6
+                selectedDay - mondayOffset + 6,
               );
               return (
                 <>
@@ -1063,6 +1090,18 @@ export default function PriorityPlanner() {
         onAdd={handleAddSchedule}
         initial={editingInitial}
       />
+
+      {isActiveHoursOpen && (
+        <ActiveHoursForm
+          initial={activeHours}
+          onSubmit={(hours) => {
+            setActiveHours(hours);
+            setIsActiveHoursOpen(false);
+            toast.success("Active hours updated");
+          }}
+          onCancel={() => setIsActiveHoursOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -1234,13 +1273,7 @@ function GanttChart({
     }
   } else {
     const labelStep =
-      viewMode === "Month"
-        ? dayCount > 21
-          ? 3
-          : dayCount > 14
-            ? 2
-            : 1
-        : 1;
+      viewMode === "Month" ? (dayCount > 21 ? 3 : dayCount > 14 ? 2 : 1) : 1;
     for (let i = 0; i < dayCount; i++) {
       const tick = new Date(rangeStart);
       tick.setDate(rangeStart.getDate() + i);
@@ -1248,10 +1281,10 @@ function GanttChart({
       const label =
         i % labelStep === 0
           ? tick.toLocaleDateString("en-US", {
-            weekday: viewMode === "Week" ? "short" : undefined,
-            month: "short",
-            day: "numeric",
-          })
+              weekday: viewMode === "Week" ? "short" : undefined,
+              month: "short",
+              day: "numeric",
+            })
           : "";
       ticks.push({
         label,
@@ -1314,7 +1347,7 @@ function GanttChart({
           </div>
 
           <div className="flex-1 min-w-0 relative">
-            <div className="relative" style={{ height: 28 }}>
+            <div className="relative mb-4" style={{ height: 28 }}>
               {ticks.map((t, i) =>
                 t.label ? (
                   <span
@@ -1393,7 +1426,10 @@ function GanttChart({
             </div>
 
             {showToday && (
-              <div className="relative pointer-events-none" style={{ height: 20 }}>
+              <div
+                className="relative pointer-events-none"
+                style={{ height: 20 }}
+              >
                 <span
                   className="absolute -translate-x-1/2 text-[10px] font-bold text-blue-500 whitespace-nowrap leading-none px-1 py-0.5 bg-white rounded shadow-sm border border-blue-100"
                   style={{ left: `${todayPct}%`, top: 4 }}

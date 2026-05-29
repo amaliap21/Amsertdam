@@ -13,37 +13,10 @@ import toast from "react-hot-toast";
 import { useQuizById } from "@/lib/quiz-data";
 import { useAiAnalyze, useAiUsageOnMount } from "@/lib/use-ai-analyze";
 import { MODEL_OPTIONS, modelTier } from "@/lib/ai/openrouter";
+import ModelPicker, { DEFAULT_MODEL_ID } from "@/components/ui/model-picker";
 import { useStore } from "@/store/use-store";
 
-const DEFAULT_MODEL = MODEL_OPTIONS[0].id;
-
-/** Small reusable model dropdown. Shows "(Premium)" on paid models. */
-function ModelPicker({
-  value,
-  onChange,
-  disabled,
-}: {
-  value: string;
-  onChange: (id: string) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      disabled={disabled}
-      className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[11px] font-medium text-black-primary outline-none focus:border-indigo-primary disabled:opacity-50"
-      title="Choose the AI model"
-    >
-      {MODEL_OPTIONS.map((m) => (
-        <option key={m.id} value={m.id}>
-          {m.label}
-          {m.tier === "premium" ? " (Premium)" : ""}
-        </option>
-      ))}
-    </select>
-  );
-}
+const DEFAULT_MODEL = DEFAULT_MODEL_ID;
 
 export default function StudyCompanionReview({
   params,
@@ -242,6 +215,7 @@ export default function StudyCompanionReview({
           <div className="flex items-center gap-2">
             {/* Pick the model for the bulk run */}
             <ModelPicker
+              variant="compact"
               value={bulkModel}
               onChange={setBulkModel}
               disabled={bulkRunning}
@@ -366,7 +340,12 @@ function QuestionReviewCard({
             </h3>
             <div className="flex items-center gap-2 shrink-0">
               {/* Pick any model — free ones are free, Opus charges a credit. */}
-              <ModelPicker value={model} onChange={setModel} disabled={loading} />
+              <ModelPicker
+                variant="compact"
+                value={model}
+                onChange={setModel}
+                disabled={loading}
+              />
               <button
                 type="button"
                 onClick={handleAnalyze}

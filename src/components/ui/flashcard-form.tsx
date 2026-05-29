@@ -4,6 +4,8 @@ import { X, Upload, CirclePlus, Loader2 } from "lucide-react";
 import { useState } from "react";
 import toast from "react-hot-toast";
 import LanguagePicker, { type Language } from "@/components/ui/language-picker";
+import ModelPicker, { DEFAULT_MODEL_ID } from "@/components/ui/model-picker";
+import { modelTier } from "@/lib/ai/openrouter";
 
 export type GeneratedFlashcard = { front: string; back: string };
 
@@ -78,6 +80,7 @@ export default function CreateFlashcardModal({
   });
   const [requestedCards, setRequestedCards] = useState<number | "">(8);
   const [language, setLanguage] = useState<Language>("en");
+  const [model, setModel] = useState<string>(DEFAULT_MODEL_ID);
   const [recommendedMaxCards, setRecommendedMaxCards] = useState<number | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -155,14 +158,41 @@ export default function CreateFlashcardModal({
     const isImage =
       formData.file.type.startsWith("image/") ||
       /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(formData.file.name);
+    const useVision = isImage && modelTier(model) === "premium";
 
     const t = toast.loading(
-      isImage
-        ? "Running OCR on your image…"
-        : "Extracting flashcards…",
+      useVision
+        ? "Reading the image with the Premium model…"
+        : isImage
+          ? "Running OCR on your image…"
+          : "Extracting flashcards…",
     );
     try {
-      if (isImage) {
+      if (useVision) {
+        // Premium model + image → server-side vision LLM that handles
+        // handwriting, stacked fractions, and other 2D math the Tesseract
+        // cover-and-reveal path can't read.
+        const fd = new FormData();
+        fd.append("file", formData.file);
+        fd.append("deckName", formData.deckName);
+        fd.append("requestedCards", String(finalRequestedCards));
+        fd.append("language", language);
+        fd.append("model", model);
+        const resp = await fetch("/api/ai/flashcards/generate", {
+          method: "POST",
+          body: fd,
+        });
+        if (!resp.ok) {
+          const body = await resp.json().catch(() => ({}));
+          throw new Error(body.error || `Failed (${resp.status})`);
+        }
+        const json = (await resp.json()) as {
+          deckName: string;
+          cards: GeneratedFlashcard[];
+        };
+        toast.success(`Generated ${json.cards.length} flashcards`, { id: t });
+        onCreated?.({ deckName: json.deckName, cards: json.cards });
+      } else if (isImage) {
         // Client-side OCR using Tesseract.js, no server/AI API call.
         const file = formData.file;
         const imageDataUrl = await new Promise<string>((resolve, reject) => {
@@ -332,6 +362,7 @@ export default function CreateFlashcardModal({
         fd.append("deckName", formData.deckName);
         fd.append("requestedCards", String(finalRequestedCards));
         fd.append("language", language);
+        fd.append("model", model);
         const resp = await fetch("/api/ai/flashcards/generate", {
           method: "POST",
           body: fd,
@@ -486,6 +517,23 @@ export default function CreateFlashcardModal({
               label="Card Language"
             />
           )}
+
+          <ModelPicker
+            id="flashcard-model"
+            value={model}
+            onChange={setModel}
+            disabled={loading || analyzing}
+            label="AI Model"
+            hint={
+              selectedIsImage
+                ? modelTier(model) === "premium"
+                  ? "Premium model — reads handwriting & math from the image into Q&A cards (1 credit)."
+                  : "Free model on an image — runs Tesseract OCR for cover-and-reveal labels. For handwriting or math, pick a Premium model."
+                : modelTier(model) === "premium"
+                  ? "Premium model — uses 1 credit per generation."
+                  : "Free model — rate-limited but no cost."
+            }
+          />
 
           <div>
             <label className="mb-2 block text-sm font-medium text-black-primary sm:mb-3">

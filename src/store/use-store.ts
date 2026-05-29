@@ -79,6 +79,24 @@ export type GanttBlock = {
   tier: "HIGH" | "MEDIUM" | "LOW";
 };
 
+// The user's daily "I am awake and willing to study" window. The Priority
+// Planner sends this to the Python scheduler instead of the old hardcoded
+// 09:00–17:00 sessions, so the recommended blocks land at times that
+// actually match the user's day. Times are "HH:MM" in local time.
+export type ActiveHours = {
+  start: string;
+  end: string;
+  breakStart: string | null;
+  breakEnd: string | null;
+};
+
+export const DEFAULT_ACTIVE_HOURS: ActiveHours = {
+  start: "09:00",
+  end: "17:00",
+  breakStart: "12:00",
+  breakEnd: "13:00",
+};
+
 // Mirrors AnalysisResult from @/lib/ai/prompt (kept local so the store
 // doesn't pull in server-side AI code).
 export type AiAnalysis = {
@@ -171,6 +189,9 @@ interface AppState {
 
   notificationEnabled: boolean;
   setNotificationEnabled: (enabled: boolean) => void;
+
+  activeHours: ActiveHours;
+  setActiveHours: (hours: ActiveHours) => void;
 
   fetchInitial: () => Promise<void>;
 }
@@ -344,6 +365,8 @@ export const useStore = create<AppState>()(
         notificationEnabled: false,
         setNotificationEnabled: (notificationEnabled) =>
           set({ notificationEnabled }),
+        activeHours: DEFAULT_ACTIVE_HOURS,
+        setActiveHours: (activeHours) => set({ activeHours }),
         recordAttempt: (attempt) => {
           const id = attempt.id ?? uid("attempt");
           set((state) => {
@@ -559,17 +582,20 @@ export const useStore = create<AppState>()(
         name: "realtrack-storage",
         // Bump this whenever the persisted shape changes incompatibly so
         // existing localStorage state runs through `migrate`.
-        version: 3,
+        version: 4,
         migrate: (persisted: unknown, fromVersion: number) => {
-          const state = (persisted ?? {}) as Partial<AppState>;
+          let state = (persisted ?? {}) as Partial<AppState>;
           // v1 → v2: wipe Study Companion history. Attempts are now strictly
           // tied to live quizzes, so stale attempts (whose quiz is gone)
           // would be orphaned. Cleanest fix is to drop them all once.
           if (fromVersion < 2) {
-            return { ...state, attempts: [] };
+            state = { ...state, attempts: [] };
           }
           if (fromVersion < 3) {
-            return { ...state, notificationEnabled: false };
+            state = { ...state, notificationEnabled: false };
+          }
+          if (fromVersion < 4) {
+            state = { ...state, activeHours: DEFAULT_ACTIVE_HOURS };
           }
           return state;
         },
