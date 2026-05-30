@@ -118,6 +118,7 @@ async function callModel(
     model: string,
     messages: ChatMessage[],
     signal: AbortSignal,
+    maxTokens: number,
 ): Promise<{ ok: true; result: OpenRouterResult } | { ok: false; status: number; retryable: boolean }> {
     if (!process.env.OPENROUTER_API_KEY) {
         console.error("[openrouter] OPENROUTER_API_KEY is not set");
@@ -138,7 +139,11 @@ async function callModel(
             model,
             messages,
             temperature: 0.2, // low → consistent, fewer wasted tokens
-            max_tokens: 500, // hard cap on cost
+            // Caller-controlled output cap. The analyze route wants this small
+            // (single verdict, keep cost down); the quiz/flashcard generators
+            // need it large enough to fit a full JSON ARRAY — a 500-token cap
+            // truncates the array mid-way and silently drops questions/cards.
+            max_tokens: maxTokens,
             // NOTE: response_format is intentionally omitted. Several
             // OpenRouter free models 400 on it; the prompt already asks for
             // JSON and parseAnalysis() extracts it defensively.
@@ -179,8 +184,12 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function chatWithFallback(
     messages: ChatMessage[],
     chainOrTier: readonly string[] | Tier = "free",
-    opts: { deadlineMs?: number } = {},
+    opts: { deadlineMs?: number; maxTokens?: number } = {},
 ): Promise<OpenRouterResult> {
+    // Output token cap. Default 500 keeps the analyze route cheap; generators
+    // pass a larger value sized to the requested item count so the JSON array
+    // isn't truncated. Floor at 256, ceil at 8000 to bound cost.
+    const maxTokens = Math.min(8000, Math.max(256, opts.maxTokens ?? 500));
     // Accept either an explicit model chain or a tier (back-compat).
     const chain: readonly string[] = Array.isArray(chainOrTier)
         ? chainOrTier
@@ -216,7 +225,7 @@ export async function chatWithFallback(
                     throw new AllModelsFailedError(lastStatus || 503);
                 }
                 try {
-                    const r = await callModel(model, messages, controller.signal);
+                    const r = await callModel(model, messages, controller.signal, maxTokens);
                     if (r.ok) return r.result;
                     lastStatus = r.status;
                     if (r.retryable) sawRetryable = true;

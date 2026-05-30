@@ -19,7 +19,6 @@ import { spendCredit, refundCredit, getCredits } from "@/lib/ai/credits";
 import { normalizeOpenRouterFlashcards } from "@/lib/ai/normalizers";
 import { validateFlashcardPayload } from "@/lib/ai/validator";
 import { splitTextIntoChunks } from "@/lib/ai/splitter";
-import { aggregateFlashcardResults } from "@/lib/ai/aggregator";
 import { polishFlashcardPayload } from "@/lib/ai/polish";
 
 export const runtime = "nodejs";
@@ -177,7 +176,7 @@ export async function POST(req: NextRequest) {
         `Use ${lang === "id" ? "Indonesian" : "English"} for all cards; do not mix languages unless the source text is mixed.`,
         `Identify the core concepts and important context in the source, and write cards that capture those key points rather than trivial details.`,
         `Respond ONLY with a single valid JSON object matching: {"cards":[{"front":"...","back":"...","sourceSnippet":"..."}]}.`,
-        `Produce up to ${n} cards derived from the provided source. Keep back concise (<=300 chars).`,
+        `Produce ${n} distinct cards derived from the provided source — aim for the full count, only producing fewer if the source genuinely lacks enough material. Keep back concise (<=300 chars).`,
         `Read everything visible in the source: typed text, handwritten notes, diagrams, equations, and any mathematical or scientific symbols. Do not skip a section because it is handwritten or stylized — read it.`,
         `When the source contains math: transcribe stacked fractions as "a/b", superscripts as "x^n", subscripts as "x_n", square roots as "sqrt(x)", integrals as "integral", limits as "lim", Greek letters by name (alpha, beta, pi), and inequalities exactly as drawn ("<", ">", "<=", ">=").`,
         `For formulas: name/statement on the front, the formula + one-line meaning on the back (e.g. front: "Quadratic formula", back: "x = (-b ± sqrt(b^2 - 4ac)) / (2a). Solves ax^2 + bx + c = 0").`,
@@ -196,9 +195,58 @@ export async function POST(req: NextRequest) {
     const remainingBudget = () =>
       ROUTE_DEADLINE_MS - (Date.now() - routeStartedAt);
 
-    let cards: any[] = [];
+    const target = Math.max(1, effective);
+    let cards: { front: string; back: string }[] = [];
     if (AI_USE_LLM) {
       const chain = resolveChain(requestedModel, tier);
+
+      // Accumulate UNIQUE cards across calls. A single request usually under-
+      // delivers (model returns fewer than asked) and the polisher drops
+      // malformed/placeholder cards — so we over-request and run top-up
+      // passes until we reach `target`, exhaust the budget, or hit the cap.
+      const seenFronts = new Set<string>();
+      const collected: { front: string; back: string }[] = [];
+      const frontKey = (f: string) =>
+        f.toLowerCase().replace(/\s+/g, " ").trim();
+      const pushUnique = (cs: { front: string; back: string }[]) => {
+        for (const c of cs) {
+          if (collected.length >= target) break;
+          const key = frontKey(c.front);
+          if (seenFronts.has(key)) continue;
+          seenFronts.add(key);
+          collected.push(c);
+        }
+      };
+      const overAsk = (want: number) =>
+        Math.min(maxCards, want + Math.ceil(want * 0.5) + 1);
+      const avoidClause = () => {
+        if (!collected.length) return "";
+        const recent = collected
+          .slice(-15)
+          .map((c) => `- ${c.front}`)
+          .join("\n");
+        return `\n\nDo NOT repeat or rephrase any of these already-created card fronts:\n${recent}`;
+      };
+
+      // `want` sizes the output token cap so the JSON array for that many
+      // cards isn't truncated (~130 tokens per card + overhead).
+      const runCall = async (
+        messages: Parameters<typeof chatWithFallback>[0],
+        want: number,
+      ): Promise<{ front: string; back: string }[]> => {
+        const resp = await chatWithFallback(messages, chain, {
+          deadlineMs: remainingBudget(),
+          maxTokens: 400 + want * 140,
+        });
+        const parsed = normalizeOpenRouterFlashcards(resp.content);
+        if (!parsed || !parsed.cards?.length) return [];
+        // LLM JSON → regex polish (markdown / Q-A labels / numbering / smart
+        // quotes / trailing punctuation; reject placeholders), then validate.
+        const polished = polishFlashcardPayload(parsed);
+        if (!polished.length || !validateFlashcardPayload({ cards: polished }))
+          return [];
+        return polished;
+      };
 
       try {
         if (isImage) {
@@ -208,44 +256,45 @@ export async function POST(req: NextRequest) {
           const base64 = Buffer.from(arrayBuf).toString("base64");
           const mime = file.type || "image/png";
           const dataUrl = `data:${mime};base64,${base64}`;
-          const system = buildSystemPrompt(effective, language);
-          const userInstruction =
-            `Look at the image and produce up to ${effective} flashcards from ` +
-            `what it shows. Read EVERYTHING visible: typed text, handwriting, ` +
-            `printed math, diagrams. Render stacked fractions inline as "a/b", ` +
-            `superscripts as "x^n", and preserve inequality direction. Treat ` +
-            `any clearly written symbol as readable — never skip math just ` +
-            `because it is handwritten.`;
-          try {
-            const resp = await chatWithFallback(
-              [
-                { role: "system", content: system },
-                {
-                  role: "user",
-                  content: [
-                    { type: "text", text: userInstruction },
-                    { type: "image_url", image_url: { url: dataUrl } },
+          const MAX_VISION_PASSES = 3;
+          for (let pass = 0; pass < MAX_VISION_PASSES; pass++) {
+            if (collected.length >= target) break;
+            if (remainingBudget() < MIN_CALL_MS) break;
+            const want = overAsk(target - collected.length);
+            const system = buildSystemPrompt(want, language);
+            const userInstruction =
+              `Look at the image and produce ${want} flashcards from ` +
+              `what it shows. Read EVERYTHING visible: typed text, handwriting, ` +
+              `printed math, diagrams. Render stacked fractions inline as "a/b", ` +
+              `superscripts as "x^n", and preserve inequality direction. Treat ` +
+              `any clearly written symbol as readable — never skip math just ` +
+              `because it is handwritten.` + avoidClause();
+            try {
+              pushUnique(
+                await runCall(
+                  [
+                    { role: "system", content: system },
+                    {
+                      role: "user",
+                      content: [
+                        { type: "text", text: userInstruction },
+                        { type: "image_url", image_url: { url: dataUrl } },
+                      ],
+                    },
                   ],
-                },
-              ],
-              chain,
-              { deadlineMs: remainingBudget() },
-            );
-            const parsed = normalizeOpenRouterFlashcards(resp.content);
-            if (parsed && parsed.cards?.length) {
-              const polished = polishFlashcardPayload(parsed);
-              if (polished.length && validateFlashcardPayload({ cards: polished })) {
-                cards = polished.slice(0, Math.max(1, effective));
-              }
-            }
-          } catch (err) {
-            if (isPremium && err instanceof AllModelsFailedError) {
-              await refundCredit(userId, PREMIUM_CREDIT_COST);
-              spentCredit = false;
-              return NextResponse.json(
-                { error: err.message, credits: await getCredits(userId) },
-                { status: 503 },
+                  want,
+                ),
               );
+            } catch (err) {
+              if (isPremium && err instanceof AllModelsFailedError) {
+                await refundCredit(userId, PREMIUM_CREDIT_COST);
+                spentCredit = false;
+                return NextResponse.json(
+                  { error: err.message, credits: await getCredits(userId) },
+                  { status: 503 },
+                );
+              }
+              break;
             }
           }
         } else {
@@ -256,33 +305,26 @@ export async function POST(req: NextRequest) {
             cleanedText.length > CHUNK_SIZE
               ? splitTextIntoChunks(cleanedText, CHUNK_SIZE, CHUNK_OVERLAP)
               : [cleanedText];
-          const perChunk = Math.max(1, Math.ceil(effective / chunks.length));
-          const parts: any[][] = [];
-          for (const chunk of chunks) {
-            // Stop before starting a call the budget can't fund.
+          const MAX_ATTEMPTS = chunks.length + 4;
+          for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+            if (collected.length >= target) break;
             if (remainingBudget() < MIN_CALL_MS) break;
-            const system = buildSystemPrompt(perChunk, language);
-            const user = `Source text:\n${chunk}\n\nReturn up to ${perChunk} flashcards.`;
+            const chunk = chunks[attempt % chunks.length];
+            const want = overAsk(target - collected.length);
+            const system = buildSystemPrompt(want, language);
+            const user =
+              `Source text:\n${chunk}\n\nProduce ${want} flashcards.` +
+              avoidClause();
             try {
-              const resp = await chatWithFallback(
-                [
-                  { role: "system", content: system },
-                  { role: "user", content: user },
-                ],
-                chain,
-                { deadlineMs: remainingBudget() },
+              pushUnique(
+                await runCall(
+                  [
+                    { role: "system", content: system },
+                    { role: "user", content: user },
+                  ],
+                  want,
+                ),
               );
-              const parsed = normalizeOpenRouterFlashcards(resp.content);
-              if (parsed && parsed.cards?.length) {
-                // Two-stage pipeline: LLM emits JSON, regex polisher strips
-                // markdown / Q-A labels / leading numbering / smart quotes
-                // / trailing punctuation on bare-term fronts, and rejects
-                // placeholder content. Validate the polished payload.
-                const polished = polishFlashcardPayload(parsed);
-                if (polished.length && validateFlashcardPayload({ cards: polished })) {
-                  parts.push(polished);
-                }
-              }
             } catch (err) {
               if (isPremium && err instanceof AllModelsFailedError) {
                 await refundCredit(userId, PREMIUM_CREDIT_COST);
@@ -293,15 +335,13 @@ export async function POST(req: NextRequest) {
                 );
               }
             }
-            if (parts.flat().length >= effective) break;
-          }
-          if (parts.length > 0) {
-            cards = aggregateFlashcardResults(parts, Math.max(1, effective));
           }
         }
       } catch {
         // fall back to deterministic extractor (text path only)
       }
+
+      cards = collected.slice(0, target);
     }
 
     if (!cards || cards.length === 0) {

@@ -20,7 +20,6 @@ import { spendCredit, refundCredit, getCredits } from "@/lib/ai/credits";
 import { normalizeOpenRouterQuiz } from "@/lib/ai/normalizers";
 import { validateQuizPayload } from "@/lib/ai/validator";
 import { splitTextIntoChunks } from "@/lib/ai/splitter";
-import { aggregateQuizResults } from "@/lib/ai/aggregator";
 import { polishQuizPayload } from "@/lib/ai/polish";
 
 export const runtime = "nodejs";
@@ -195,7 +194,7 @@ export async function POST(req: NextRequest) {
         `Use ${lang === "id" ? "Indonesian" : "English"} for all questions and options; do not mix languages unless the source text is mixed.`,
         `Identify the core concepts and important context in the source, and write questions that test understanding of those key points rather than trivial details.`,
         `Respond ONLY with a single valid JSON object matching: {"questions":[{"prompt":"...","options":[{"letter":"A","text":"..."}],"correctAnswer":"A"}]}.`,
-        `Produce up to ${n} multiple-choice questions derived from the provided source. Always include exactly 4 options A/B/C/D. Keep options plausible and the correct answer grounded in the source.`,
+        `Produce ${n} distinct multiple-choice questions derived from the provided source — aim for the full count, only producing fewer if the source genuinely lacks enough material. Always include exactly 4 options A/B/C/D. Keep options plausible and the correct answer grounded in the source.`,
         `Read everything visible in the source: typed text, handwritten notes, diagrams, equations, and any mathematical or scientific symbols. Do not skip a section because it is handwritten or stylized — read it.`,
         `When the source contains math: transcribe stacked fractions as "a/b", superscripts as "x^n", subscripts as "x_n", square roots as "sqrt(x)", integrals as "integral", limits as "lim", Greek letters by name (alpha, beta, pi), and inequalities exactly as drawn (preserve "<", ">", "<=", ">=" direction).`,
         `Solve every math problem yourself before emitting it: the marked correctAnswer MUST be the mathematically correct option. Do not guess.`,
@@ -215,66 +214,123 @@ export async function POST(req: NextRequest) {
     const remainingBudget = () =>
       ROUTE_DEADLINE_MS - (Date.now() - routeStartedAt);
 
+    const target = Math.max(1, effective);
     let questions: QuizQuestion[] = [];
     if (AI_USE_LLM) {
       const chain = resolveChain(requestedModel, tier);
+
+      // Accumulate UNIQUE questions across calls. The model routinely under-
+      // delivers on a single request (returns fewer than asked), and the
+      // polisher drops any malformed ones — so one call rarely yields the
+      // full count (this is why "ask 10, get 6" happened). We over-request
+      // each call and run top-up passes until we reach `target`, exhaust the
+      // time budget, or hit the attempt cap.
+      const seenPrompts = new Set<string>();
+      const collected: QuizQuestion[] = [];
+      const promptKey = (p: string) =>
+        p.toLowerCase().replace(/\s+/g, " ").trim();
+      const pushUnique = (qs: QuizQuestion[]) => {
+        for (const q of qs) {
+          if (collected.length >= target) break;
+          const key = promptKey(q.prompt);
+          if (seenPrompts.has(key)) continue;
+          seenPrompts.add(key);
+          collected.push(q);
+        }
+      };
+      // Over-request so polish drops + dedup still leave enough. Capped at the
+      // source's estimated max so we never ask for more than it can support.
+      const overAsk = (want: number) =>
+        Math.min(maxQuestions, want + Math.ceil(want * 0.5) + 1);
+      // Tell the model which prompts already exist so top-up calls add NEW
+      // questions instead of repeating.
+      const avoidClause = () => {
+        if (!collected.length) return "";
+        const recent = collected
+          .slice(-12)
+          .map((q) => `- ${q.prompt}`)
+          .join("\n");
+        return `\n\nDo NOT repeat or rephrase any of these already-created questions:\n${recent}`;
+      };
+
+      // Run one call → polish → validate, returning the usable questions.
+      // `want` sizes the output token cap so the JSON array for that many
+      // questions isn't truncated (~170 tokens per MCQ + overhead).
+      const runCall = async (
+        messages: Parameters<typeof chatWithFallback>[0],
+        want: number,
+      ): Promise<QuizQuestion[]> => {
+        const resp = await chatWithFallback(messages, chain, {
+          deadlineMs: remainingBudget(),
+          maxTokens: 400 + want * 180,
+        });
+        const parsed = normalizeOpenRouterQuiz(resp.content);
+        if (!parsed || !parsed.questions?.length) return [];
+        // Two-stage pipeline: LLM JSON → regex polish (strip option prefixes,
+        // markdown, numbering, smart quotes; reassign A/B/C/D; re-resolve
+        // correctAnswer). Anything unsalvageable is dropped here.
+        const polished = polishQuizPayload(parsed).map((q, idx) => ({
+          id: `llm_${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 6)}`,
+          prompt: q.prompt,
+          options: q.options,
+          correctAnswer: q.correctAnswer,
+        })) as QuizQuestion[];
+        if (!polished.length || !validateQuizPayload({ questions: polished }))
+          return [];
+        return polished;
+      };
 
       try {
         if (isImage) {
           // ── Vision path ──────────────────────────────────────────────
           // Stacked fractions, exponents, and integrals are 2D layouts that
           // Tesseract can't read. A vision-capable model reads the image
-          // directly and emits the same JSON contract the text path uses,
-          // so the polish/validate/aggregate pipeline below is unchanged.
+          // directly and emits the same JSON contract the text path uses.
           const arrayBuf = await file.arrayBuffer();
           const base64 = Buffer.from(arrayBuf).toString("base64");
           const mime = file.type || "image/png";
           const dataUrl = `data:${mime};base64,${base64}`;
-          const system = buildSystemPrompt(effective, language);
-          const userInstruction =
-            `Look at the image and produce up to ${effective} multiple-choice questions ` +
-            `from what it shows. Read EVERYTHING visible: typed text, handwriting, ` +
-            `printed math, diagrams. If a fraction is drawn stacked, render it inline ` +
-            `as "a/b". If you see an exponent as a superscript, write it as "x^n". ` +
-            `Preserve inequality direction exactly ("<" stays "<", ">=" stays ">="). ` +
-            `Treat any clearly written symbol as readable — never skip math just ` +
-            `because it is handwritten. If a region is genuinely illegible, skip ` +
-            `questions from it instead of guessing.`;
-          try {
-            const resp = await chatWithFallback(
-              [
-                { role: "system", content: system },
-                {
-                  role: "user",
-                  content: [
-                    { type: "text", text: userInstruction },
-                    { type: "image_url", image_url: { url: dataUrl } },
+          const MAX_VISION_PASSES = 3;
+          for (let pass = 0; pass < MAX_VISION_PASSES; pass++) {
+            if (collected.length >= target) break;
+            if (remainingBudget() < MIN_CALL_MS) break;
+            const want = overAsk(target - collected.length);
+            const system = buildSystemPrompt(want, language);
+            const userInstruction =
+              `Look at the image and produce ${want} multiple-choice questions ` +
+              `from what it shows. Read EVERYTHING visible: typed text, handwriting, ` +
+              `printed math, diagrams. If a fraction is drawn stacked, render it inline ` +
+              `as "a/b". If you see an exponent as a superscript, write it as "x^n". ` +
+              `Preserve inequality direction exactly ("<" stays "<", ">=" stays ">="). ` +
+              `Treat any clearly written symbol as readable — never skip math just ` +
+              `because it is handwritten. If a region is genuinely illegible, skip ` +
+              `questions from it instead of guessing.` + avoidClause();
+            try {
+              pushUnique(
+                await runCall(
+                  [
+                    { role: "system", content: system },
+                    {
+                      role: "user",
+                      content: [
+                        { type: "text", text: userInstruction },
+                        { type: "image_url", image_url: { url: dataUrl } },
+                      ],
+                    },
                   ],
-                },
-              ],
-              chain,
-              { deadlineMs: remainingBudget() },
-            );
-            const parsed = normalizeOpenRouterQuiz(resp.content);
-            if (parsed && parsed.questions?.length) {
-              const polished = polishQuizPayload(parsed).map((q, idx) => ({
-                id: `llm_${Date.now()}_${idx}`,
-                prompt: q.prompt,
-                options: q.options,
-                correctAnswer: q.correctAnswer,
-              })) as QuizQuestion[];
-              if (polished.length && validateQuizPayload({ questions: polished })) {
-                questions = polished.slice(0, Math.max(1, effective));
-              }
-            }
-          } catch (err) {
-            if (isPremium && err instanceof AllModelsFailedError) {
-              await refundCredit(userId, PREMIUM_CREDIT_COST);
-              spentCredit = false;
-              return NextResponse.json(
-                { error: err.message, credits: await getCredits(userId) },
-                { status: 503 },
+                  want,
+                ),
               );
+            } catch (err) {
+              if (isPremium && err instanceof AllModelsFailedError) {
+                await refundCredit(userId, PREMIUM_CREDIT_COST);
+                spentCredit = false;
+                return NextResponse.json(
+                  { error: err.message, credits: await getCredits(userId) },
+                  { status: 503 },
+                );
+              }
+              break;
             }
           }
         } else {
@@ -286,47 +342,33 @@ export async function POST(req: NextRequest) {
             cleaned.length > threshold
               ? splitTextIntoChunks(cleaned, CHUNK_SIZE, CHUNK_OVERLAP)
               : [cleaned];
-          const perChunk = Math.max(1, Math.ceil(effective / chunks.length));
-          const parts: QuizQuestion[][] = [];
-          for (const chunk of chunks) {
-            // Stop before starting a call the time budget can't fund — better
-            // to return the questions we already have than to time out.
+          // Cycle through chunks, topping up until we reach target / run out
+          // of budget. Allow a few passes beyond chunk count for top-ups.
+          const MAX_ATTEMPTS = chunks.length + 4;
+          for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+            if (collected.length >= target) break;
+            // Stop before starting a call the budget can't fund — better to
+            // return what we have than to time out.
             if (remainingBudget() < MIN_CALL_MS) break;
-            const system = buildSystemPrompt(perChunk, language);
-            const user = `Source text:\n${chunk}\n\nReturn up to ${perChunk} multiple-choice questions.`;
+            const chunk = chunks[attempt % chunks.length];
+            const want = overAsk(target - collected.length);
+            const system = buildSystemPrompt(want, language);
+            const user =
+              `Source text:\n${chunk}\n\nProduce ${want} multiple-choice questions.` +
+              avoidClause();
             try {
-              const resp = await chatWithFallback(
-                [
-                  { role: "system", content: system },
-                  { role: "user", content: user },
-                ],
-                chain,
-                { deadlineMs: remainingBudget() },
+              pushUnique(
+                await runCall(
+                  [
+                    { role: "system", content: system },
+                    { role: "user", content: user },
+                  ],
+                  want,
+                ),
               );
-              const parsed = normalizeOpenRouterQuiz(resp.content);
-              if (parsed && parsed.questions?.length) {
-                // Two-stage pipeline:
-                //   1) LLM emits raw JSON (may have option prefixes, markdown,
-                //      leading numbering, smart quotes, etc.)
-                //   2) Regex polisher strips those artifacts and reassigns
-                //      letters positionally, then re-resolves correctAnswer
-                //      against the cleaned options.
-                // Anything that doesn't survive the polisher (fewer than 4
-                // distinct options, no resolvable correct answer) is dropped
-                // here instead of poisoning the aggregate.
-                const polished = polishQuizPayload(parsed).map((q, idx) => ({
-                  id: `llm_${Date.now()}_${idx}`,
-                  prompt: q.prompt,
-                  options: q.options,
-                  correctAnswer: q.correctAnswer,
-                })) as QuizQuestion[];
-                if (polished.length && validateQuizPayload({ questions: polished })) {
-                  parts.push(polished);
-                }
-              }
             } catch (err) {
               // Premium errors should surface (we'll refund below); free
-              // errors fall through to the deterministic extractor.
+              // errors fall through to the next attempt / extractor.
               if (isPremium && err instanceof AllModelsFailedError) {
                 await refundCredit(userId, PREMIUM_CREDIT_COST);
                 spentCredit = false;
@@ -336,15 +378,13 @@ export async function POST(req: NextRequest) {
                 );
               }
             }
-            if (parts.flat().length >= effective) break;
-          }
-          if (parts.length > 0) {
-            questions = aggregateQuizResults(parts, Math.max(1, effective));
           }
         }
       } catch {
         // fall back to extractor below (text path) or hard error (image)
       }
+
+      questions = collected.slice(0, target);
     }
 
     if (!questions || questions.length === 0) {
