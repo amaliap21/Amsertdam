@@ -44,6 +44,11 @@ export default function TaskValue() {
   const setTasks = useStore((s) => s.setTasks);
   const addTask = useStore((s) => s.addTask);
   const removeTask = useStore((s) => s.removeTask);
+  // Real inputs for the priority analysis (instead of hardcoded constants):
+  // course grades/weights come from the saved courses, and study capacity
+  // comes from the user's Active Hours setting.
+  const coursesCache = useStore((s) => s.coursesCache);
+  const activeHours = useStore((s) => s.activeHours);
 
   // Build the datetime-local string ("YYYY-MM-DDTHH:MM") from a task's stored
   // display date ("May 17, 11:22 PM") using the shared parser.
@@ -208,22 +213,145 @@ export default function TaskValue() {
         return "generic";
       };
 
+      // Build a per-course lookup from the saved courses so each task's
+      // grade_weight / current_grade / passing_grade reflect REAL data
+      // instead of fixed constants.
+      type RawAssessment = { name?: string; weight?: number; score?: number };
+      type CachedCourse = {
+        title?: string;
+        course_payload?: {
+          threshold?: number | null;
+          credits?: number | null;
+          assessments?: RawAssessment[];
+        };
+        threshold?: number | null;
+        credits?: number | null;
+        assessments?: RawAssessment[];
+      };
+      const normName = (s: string) => s.trim().toLowerCase();
+
+      type CourseInfo = {
+        passingGrade: number;
+        currentGrade: number | null;
+        credits: number;
+        assessments: RawAssessment[];
+      };
+      const courseByName = new Map<string, CourseInfo>();
+      const courseList = Array.isArray(coursesCache)
+        ? (coursesCache as CachedCourse[])
+        : [];
+      for (const co of courseList) {
+        const payload = co.course_payload ?? {};
+        const assessments = Array.isArray(payload.assessments)
+          ? payload.assessments
+          : Array.isArray(co.assessments)
+            ? co.assessments
+            : [];
+        const thresholdRaw =
+          payload.threshold != null ? payload.threshold : co.threshold;
+        const passingGrade = Number(thresholdRaw);
+        const creditsRaw =
+          payload.credits != null ? payload.credits : co.credits;
+        const credits = Number(creditsRaw);
+        // Current grade = weighted average over assessments that already have
+        // a score. Null when nothing is graded yet (we fall back to passing
+        // grade so an ungraded course contributes no artificial grade gap).
+        let scoredWeight = 0;
+        let weightedScore = 0;
+        for (const a of assessments) {
+          const w = Number(a.weight);
+          const s = a.score;
+          if (Number.isFinite(w) && w > 0 && s != null && Number.isFinite(Number(s))) {
+            scoredWeight += w;
+            weightedScore += Number(s) * w;
+          }
+        }
+        const currentGrade =
+          scoredWeight > 0 ? weightedScore / scoredWeight : null;
+        if (co.title) {
+          courseByName.set(normName(co.title), {
+            passingGrade: Number.isFinite(passingGrade) ? passingGrade : 75,
+            currentGrade,
+            credits: Number.isFinite(credits) ? credits : 0,
+            assessments,
+          });
+        }
+      }
+
+      // Resolve the grade weight for a specific task from its course's
+      // assessment list (the task's assessment name lives in its description).
+      const gradeWeightForTask = (task: TaskItem, info?: CourseInfo): number => {
+        if (!info || !info.assessments.length) return 15;
+        const assessmentName = extractAssessmentName(task.description);
+        if (assessmentName) {
+          const match = info.assessments.find(
+            (a) => a.name && normName(a.name) === normName(assessmentName),
+          );
+          if (match && Number.isFinite(Number(match.weight))) {
+            return Number(match.weight);
+          }
+        }
+        // No specific match — use the average assessment weight as a proxy.
+        const weights = info.assessments
+          .map((a) => Number(a.weight))
+          .filter((w) => Number.isFinite(w) && w > 0);
+        if (weights.length) {
+          return weights.reduce((sum, w) => sum + w, 0) / weights.length;
+        }
+        return 15;
+      };
+
+      // Weekly study capacity from the user's Active Hours window (daily
+      // available hours minus break, × 7). Falls back to 30 if unset.
+      const toMin = (t?: string | null): number | null => {
+        if (!t || typeof t !== "string" || !t.includes(":")) return null;
+        const [h, m] = t.split(":").map(Number);
+        if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+        return h * 60 + m;
+      };
+      const dailyMinutes = (() => {
+        const start = toMin(activeHours?.start);
+        const end = toMin(activeHours?.end);
+        if (start == null || end == null || end <= start) return null;
+        let mins = end - start;
+        const bStart = toMin(activeHours?.breakStart);
+        const bEnd = toMin(activeHours?.breakEnd);
+        if (bStart != null && bEnd != null && bEnd > bStart) {
+          mins -= bEnd - bStart;
+        }
+        return Math.max(0, mins);
+      })();
+      const weeklyCapacityHours =
+        dailyMinutes != null && dailyMinutes > 0
+          ? Math.round((dailyMinutes / 60) * 7)
+          : 30;
+
       const resp = await fetch("/api/python/priority_analysis", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           method: "topsis",
-          tasks: tasks.map((task) => ({
-            task_id: task.id,
-            task_name: task.title,
-            task_type: inferTaskType(task.title, task.course),
-            grade_weight: 15,
-            estimated_hours: parseFloat(task.timeEstimate) || 2,
-            deadline_days: parseDeadlineDays(task.date),
-            current_grade: 65,
-            passing_grade: 75,
-            weekly_capacity_hours: 30,
-          })),
+          tasks: tasks.map((task) => {
+            const info = courseByName.get(normName(task.course));
+            const passingGrade = info?.passingGrade ?? 75;
+            // Ungraded course → use passing grade so the grade gap is neutral.
+            const currentGrade = info?.currentGrade ?? passingGrade;
+            return {
+              task_id: task.id,
+              task_name: task.title,
+              task_type: inferTaskType(task.title, task.course),
+              // SKS (course credits) — read by the Python's SKS-load
+              // criterion. Matches the `sks` field in priority_analysis.py's
+              // expected task JSON.
+              sks: info?.credits ?? 0,
+              grade_weight: gradeWeightForTask(task, info),
+              estimated_hours: parseFloat(task.timeEstimate) || 2,
+              deadline_days: parseDeadlineDays(task.date),
+              current_grade: currentGrade,
+              passing_grade: passingGrade,
+              weekly_capacity_hours: weeklyCapacityHours,
+            };
+          }),
         }),
       });
       if (!resp.ok) {

@@ -303,6 +303,7 @@ export default function PriorityPlanner() {
   const ganttData = useStore((s) => s.ganttData);
   const setGanttData = useStore((s) => s.setGanttData);
   const activeHours = useStore((s) => s.activeHours);
+  const coursesCache = useStore((s) => s.coursesCache);
   const setActiveHours = useStore((s) => s.setActiveHours);
 
   const handleAiSchedule = async () => {
@@ -389,12 +390,69 @@ export default function PriorityPlanner() {
         return acc + ((eh * 60 + (em || 0)) - (sh * 60 + (sm || 0))) / 60;
       }, 0);
 
+      // The scheduling endpoint takes a single current_grade / passing_grade
+      // for the whole batch (the grade-gap boost). Derive them from the saved
+      // courses instead of hardcoding: passing = average course threshold,
+      // current = average of each course's weighted achieved grade. Falls
+      // back to sensible defaults when no course data exists yet.
+      type RawAssessment = { weight?: number; score?: number };
+      type CachedCourse = {
+        course_payload?: {
+          threshold?: number | null;
+          assessments?: RawAssessment[];
+        };
+        threshold?: number | null;
+        assessments?: RawAssessment[];
+      };
+      const courseList = Array.isArray(coursesCache)
+        ? (coursesCache as CachedCourse[])
+        : [];
+      const thresholds: number[] = [];
+      const currentGrades: number[] = [];
+      for (const co of courseList) {
+        const payload = co.course_payload ?? {};
+        const thresholdRaw =
+          payload.threshold != null ? payload.threshold : co.threshold;
+        const threshold = Number(thresholdRaw);
+        if (Number.isFinite(threshold) && threshold > 0) {
+          thresholds.push(threshold);
+        }
+        const assessments = Array.isArray(payload.assessments)
+          ? payload.assessments
+          : Array.isArray(co.assessments)
+            ? co.assessments
+            : [];
+        let scoredWeight = 0;
+        let weightedScore = 0;
+        for (const a of assessments) {
+          const w = Number(a.weight);
+          const s = a.score;
+          if (
+            Number.isFinite(w) &&
+            w > 0 &&
+            s != null &&
+            Number.isFinite(Number(s))
+          ) {
+            scoredWeight += w;
+            weightedScore += Number(s) * w;
+          }
+        }
+        if (scoredWeight > 0) currentGrades.push(weightedScore / scoredWeight);
+      }
+      const avg = (xs: number[]) =>
+        xs.reduce((sum, x) => sum + x, 0) / xs.length;
+      const passingGrade = thresholds.length ? avg(thresholds) : 75;
+      // No graded work yet → use passing grade so the gap is neutral.
+      const currentGrade = currentGrades.length
+        ? avg(currentGrades)
+        : passingGrade;
+
       const resp = await fetch("/api/python/scheduling", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          current_grade: 68,
-          passing_grade: 75,
+          current_grade: currentGrade,
+          passing_grade: passingGrade,
           daily_study_hours: dailyStudyHours,
           start_date: startDateIso,
           analysis_method: "topsis",
