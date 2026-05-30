@@ -267,7 +267,7 @@ export default function TaskValue() {
           }
         }
         const currentGrade =
-          scoredWeight > 0 ? weightedScore / scoredWeight : null;
+          scoredWeight > 0 ? weightedScore / 100 : null;
         if (co.title) {
           courseByName.set(normName(co.title), {
             passingGrade: Number.isFinite(passingGrade) ? passingGrade : 75,
