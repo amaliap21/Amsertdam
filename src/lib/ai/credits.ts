@@ -46,16 +46,25 @@ export async function spendCredit(
 }
 
 /** Refund `amount` credits (e.g. the premium AI call failed). Best-effort. */
+/** Refund `amount` credits (e.g. the premium AI call failed). Best-effort. */
 export async function refundCredit(userId: string, amount = 1): Promise<void> {
-  await admin
-    .rpc("add_ai_credits", {
+  try {
+    const { error } = await admin.rpc("add_ai_credits", {
       p_user_id: userId,
       p_amount: amount,
       p_reason: "refund",
       p_ref: null,
-    })
-    .catch(() => undefined);
+    });
+    
+    if (error) {
+      console.error("Refund failed via PostgREST error:", error);
+    }
+  } catch (err) {
+    // Menangkap error network atau error eksekusi tak terduga lainnya
+    console.error("Refund network error:", err);
+  }
 }
+
 
 /**
  * Grant credits (purchase / admin grant). Idempotent on `ref` — pass the
