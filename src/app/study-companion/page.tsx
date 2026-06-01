@@ -1,13 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { FileText, MessagesSquare, Sparkles, Zap } from "lucide-react";
+import { FileText, MessagesSquare, Sparkles } from "lucide-react";
 import toast from "react-hot-toast";
 import { useStore } from "@/store/use-store";
 import { useAiUsageOnMount } from "@/lib/use-ai-analyze";
-import BuyCreditsModal from "@/components/ui/buy-credits-modal";
 
 export default function StudyCompanion() {
   return (
@@ -21,8 +20,9 @@ function StudyCompanionInner() {
   const attempts = useStore((s) => s.attempts);
   const liveQuizzes = useStore((s) => s.quizzes);
   const coursesCache = useStore((s) => s.coursesCache);
-  const { remaining, credits, refresh } = useAiUsageOnMount();
-  const [buyOpen, setBuyOpen] = useState(false);
+  // Credits are shown in the navbar now; we still refresh here to catch the
+  // balance update after returning from a successful purchase.
+  const { refresh } = useAiUsageOnMount();
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -112,37 +112,13 @@ function StudyCompanionInner() {
   return (
     <div className="min-h-dvh bg-white px-4 sm:px-6 md:px-10 lg:px-14.75 py-6 md:py-11.5">
       {/* Header */}
-      <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <h1 className="text-[28px] font-semibold text-black-primary mb-2">
-            Study Companion
-          </h1>
-          <p className="text-gray-primary">
-            AI that reviews your answers, explains mistakes, and helps you improve.
-          </p>
-        </div>
-
-        {/* Usage + buy credits */}
-        <div
-          data-tour="ai-credits"
-          className="flex flex-wrap items-center gap-2"
-        >
-          <span className="rounded-full bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-700">
-            {remaining ?? "…"} free today
-          </span>
-          <span className="flex items-center gap-1 rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-primary">
-            <Zap size={12} />
-            {credits ?? "…"} premium credits
-          </span>
-          <button
-            type="button"
-            data-tour="buy-credits"
-            onClick={() => setBuyOpen(true)}
-            className="rounded-lg bg-indigo-primary px-3 py-1.5 text-xs font-medium text-white transition hover:bg-indigo-600"
-          >
-            Buy credits
-          </button>
-        </div>
+      <div className="mb-8">
+        <h1 className="text-[28px] font-semibold text-black-primary mb-2">
+          Study Companion
+        </h1>
+        <p className="text-gray-primary">
+          AI that reviews your answers, explains mistakes, and helps you improve.
+        </p>
       </div>
 
       {/* Course Readiness — pass/at-risk based on quiz performance */}
@@ -280,8 +256,6 @@ function StudyCompanionInner() {
           </div>
         )}
       </div>
-
-      <BuyCreditsModal isOpen={buyOpen} onClose={() => setBuyOpen(false)} />
     </div>
   );
 }

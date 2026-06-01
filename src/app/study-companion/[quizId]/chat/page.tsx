@@ -1,18 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, Send, Sparkles } from "lucide-react";
+import { ArrowLeft, Send, Sparkles, Trash2 } from "lucide-react";
 import { use, useEffect, useMemo, useRef, useState } from "react";
 import { useQuizById } from "@/lib/quiz-data";
 import { modelTier } from "@/lib/ai/openrouter";
 import ModelPicker, { DEFAULT_MODEL_ID } from "@/components/ui/model-picker";
 import { useStore } from "@/store/use-store";
-
-type Message = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-};
+import { useAiAnalyze } from "@/lib/use-ai-analyze";
+import type { ChatMessage as Message } from "@/store/use-store";
 
 // Inline-format a single line: **bold**, *italic*, _italic_, `code`.
 function renderInline(text: string, keyBase: string): React.ReactNode[] {
@@ -125,6 +121,11 @@ export default function StudyCompanionChat({
   const { quizId } = use(params);
   const liveQuiz = useQuizById(quizId);
   const attempts = useStore((s) => s.attempts);
+  const setChatSession = useStore((s) => s.setChatSession);
+  const clearChatSession = useStore((s) => s.clearChatSession);
+  // Refreshes the shared free/premium counters (shown in the navbar) after a
+  // premium reply spends a credit.
+  const { refresh: refreshUsage } = useAiAnalyze();
 
   // Latest attempt for this quiz (so the AI sees what the user actually answered).
   const attempt = useMemo(() => {
@@ -182,6 +183,32 @@ export default function StudyCompanionChat({
   const [messages, setMessages] = useState<Message[]>([
     { id: "welcome", role: "assistant", content: welcomeContent },
   ]);
+  const [streaming, setStreaming] = useState(false);
+  const [chatModel, setChatModel] = useState(DEFAULT_MODEL_ID);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  // Gate persistence until we've loaded any saved transcript, so the initial
+  // welcome-only render can't overwrite a stored conversation.
+  const hydratedRef = useRef(false);
+
+  // Hydrate the saved transcript once (client-only, to avoid an SSR mismatch).
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    const stored = useStore.getState().chatSessions[quizId];
+    if (stored && stored.length > 0) {
+      setMessages(stored);
+    }
+    hydratedRef.current = true;
+  }, [quizId]);
+
+  // Persist the transcript whenever it settles (not mid-stream). A chat that's
+  // only the welcome message isn't worth saving — clearing it removes the
+  // stored entry entirely so a deleted chat stays deleted.
+  useEffect(() => {
+    if (!hydratedRef.current || streaming) return;
+    const hasConversation = messages.some((m) => m.id !== "welcome");
+    if (hasConversation) setChatSession(quizId, messages);
+    else clearChatSession(quizId);
+  }, [messages, streaming, quizId, setChatSession, clearChatSession]);
 
   // If the attempt loads after first render (e.g. from persisted store), refresh
   // the welcome message so the AI's opener reflects the real score.
@@ -192,13 +219,22 @@ export default function StudyCompanionChat({
       return [{ ...prev[0], content: welcomeContent }, ...prev.slice(1)];
     });
   }, [welcomeContent]);
-  const [streaming, setStreaming] = useState(false);
-  const [chatModel, setChatModel] = useState(DEFAULT_MODEL_ID);
-  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  const handleClearChat = () => {
+    if (
+      typeof window !== "undefined" &&
+      messages.some((m) => m.id !== "welcome") &&
+      !window.confirm("Delete this chat? This can't be undone.")
+    ) {
+      return;
+    }
+    clearChatSession(quizId);
+    setMessages([{ id: "welcome", role: "assistant", content: welcomeContent }]);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -317,6 +353,9 @@ export default function StudyCompanionChat({
       );
     } finally {
       setStreaming(false);
+      // A premium reply just spent a credit server-side; pull the fresh
+      // balance so the navbar counter updates without a page reload.
+      if (modelTier(chatModel) === "premium") refreshUsage();
     }
   };
 
@@ -330,10 +369,21 @@ export default function StudyCompanionChat({
           <ArrowLeft size={18} />
           <span className="text-sm">Back to Study Companion</span>
         </Link>
-        <span className="self-start sm:self-auto flex items-center gap-1 px-3 py-1 bg-indigo-50 text-indigo-primary text-xs font-medium rounded-full">
-          <Sparkles size={12} />
-          Powered by AI
-        </span>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={handleClearChat}
+            disabled={streaming}
+            className="flex items-center gap-1.5 rounded-full border border-gray-200 px-3 py-1 text-xs font-medium text-gray-primary transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+          >
+            <Trash2 size={12} />
+            Delete chat
+          </button>
+          <span className="flex items-center gap-1 px-3 py-1 bg-indigo-50 text-indigo-primary text-xs font-medium rounded-full">
+            <Sparkles size={12} />
+            Powered by AI
+          </span>
+        </div>
       </div>
 
       <div className="mb-8">
