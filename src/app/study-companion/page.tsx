@@ -32,8 +32,31 @@ function StudyCompanionInner() {
     const purchase = searchParams.get("purchase");
     if (!purchase) return;
     if (purchase === "success") {
-      toast.success("Payment received — adding your credits…");
-      // Webhook may land a beat after redirect; refresh a few times.
+      // Midtrans appends transaction_status to the finish redirect URL. The
+      // finish callback fires for PENDING payments too (QRIS / virtual account
+      // aren't settled instantly), so only claim "received" when Midtrans
+      // actually settled/captured it — otherwise the money isn't in yet.
+      const status = (searchParams.get("transaction_status") ?? "").toLowerCase();
+      const failed = ["deny", "cancel", "expire", "failure"].includes(status);
+      const pending = status === "pending";
+
+      if (failed) {
+        toast.error("Payment was not completed.");
+        router.replace("/study-companion");
+        return;
+      }
+
+      if (pending) {
+        // Payment created but NOT yet received — don't promise credits.
+        toast("Payment pending — we'll add your credits once it's confirmed.", {
+          icon: "⏳",
+        });
+      } else {
+        // settlement / capture (or a finish callback without a status param).
+        toast.success("Payment received — adding your credits…");
+      }
+      // Either way refresh a few times: a pending QRIS can settle within
+      // seconds, and the webhook may land a beat after the redirect.
       refresh();
       const t1 = setTimeout(refresh, 2000);
       const t2 = setTimeout(refresh, 5000);
