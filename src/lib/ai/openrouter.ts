@@ -118,7 +118,7 @@ async function callModel(
     model: string,
     messages: ChatMessage[],
     signal: AbortSignal,
-    maxTokens: number,
+    maxTokens: number | undefined,
 ): Promise<{ ok: true; result: OpenRouterResult } | { ok: false; status: number; retryable: boolean }> {
     if (!process.env.OPENROUTER_API_KEY) {
         console.error("[openrouter] OPENROUTER_API_KEY is not set");
@@ -140,10 +140,12 @@ async function callModel(
             messages,
             temperature: 0.2, // low → consistent, fewer wasted tokens
             // Caller-controlled output cap. The analyze route wants this small
-            // (single verdict, keep cost down); the quiz/flashcard generators
-            // need it large enough to fit a full JSON ARRAY — a 500-token cap
-            // truncates the array mid-way and silently drops questions/cards.
-            max_tokens: maxTokens,
+            // (single verdict, keep cost down). The quiz/flashcard generators
+            // pass `undefined` here so NO cap is sent — the model returns as
+            // many tokens as it wants, so a long JSON ARRAY is never truncated
+            // mid-way (which used to silently drop questions/cards). The time
+            // budget (deadlineMs / maxDuration) still bounds total runtime.
+            ...(maxTokens != null ? { max_tokens: maxTokens } : {}),
             // NOTE: response_format is intentionally omitted. Several
             // OpenRouter free models 400 on it; the prompt already asks for
             // JSON and parseAnalysis() extracts it defensively.
@@ -186,10 +188,14 @@ export async function chatWithFallback(
     chainOrTier: readonly string[] | Tier = "free",
     opts: { deadlineMs?: number; maxTokens?: number } = {},
 ): Promise<OpenRouterResult> {
-    // Output token cap. Default 500 keeps the analyze route cheap; generators
-    // pass a larger value sized to the requested item count so the JSON array
-    // isn't truncated. Floor at 256, ceil at 8000 to bound cost.
-    const maxTokens = Math.min(8000, Math.max(256, opts.maxTokens ?? 500));
+    // Output token cap. Default 500 keeps the analyze route cheap. Pass
+    // `maxTokens: 0` to send NO cap at all — the model then returns as many
+    // tokens as it wants (used by the quiz/flashcard generators so a long
+    // JSON array is never truncated). Otherwise floor at 256, ceil at 8000.
+    const maxTokens =
+        opts.maxTokens === 0
+            ? undefined
+            : Math.min(8000, Math.max(256, opts.maxTokens ?? 500));
     // Accept either an explicit model chain or a tier (back-compat).
     const chain: readonly string[] = Array.isArray(chainOrTier)
         ? chainOrTier

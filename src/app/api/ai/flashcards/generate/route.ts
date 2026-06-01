@@ -228,15 +228,16 @@ export async function POST(req: NextRequest) {
         return `\n\nDo NOT repeat or rephrase any of these already-created card fronts:\n${recent}`;
       };
 
-      // `want` sizes the output token cap so the JSON array for that many
-      // cards isn't truncated (~130 tokens per card + overhead).
+      // No output token cap (`maxTokens: 0`) — the model returns as many
+      // tokens as it wants, so the JSON array is never truncated mid-way
+      // regardless of how many cards it produces. Runtime is still bounded by
+      // the per-call `deadlineMs` and the route's maxDuration.
       const runCall = async (
         messages: Parameters<typeof chatWithFallback>[0],
-        want: number,
       ): Promise<{ front: string; back: string }[]> => {
         const resp = await chatWithFallback(messages, chain, {
           deadlineMs: remainingBudget(),
-          maxTokens: 400 + want * 140,
+          maxTokens: 0,
         });
         const parsed = normalizeOpenRouterFlashcards(resp.content);
         if (!parsed || !parsed.cards?.length) return [];
@@ -271,19 +272,16 @@ export async function POST(req: NextRequest) {
               `because it is handwritten.` + avoidClause();
             try {
               pushUnique(
-                await runCall(
-                  [
-                    { role: "system", content: system },
-                    {
-                      role: "user",
-                      content: [
-                        { type: "text", text: userInstruction },
-                        { type: "image_url", image_url: { url: dataUrl } },
-                      ],
-                    },
-                  ],
-                  want,
-                ),
+                await runCall([
+                  { role: "system", content: system },
+                  {
+                    role: "user",
+                    content: [
+                      { type: "text", text: userInstruction },
+                      { type: "image_url", image_url: { url: dataUrl } },
+                    ],
+                  },
+                ]),
               );
             } catch (err) {
               if (isPremium && err instanceof AllModelsFailedError) {
@@ -317,13 +315,10 @@ export async function POST(req: NextRequest) {
               avoidClause();
             try {
               pushUnique(
-                await runCall(
-                  [
-                    { role: "system", content: system },
-                    { role: "user", content: user },
-                  ],
-                  want,
-                ),
+                await runCall([
+                  { role: "system", content: system },
+                  { role: "user", content: user },
+                ]),
               );
             } catch (err) {
               if (isPremium && err instanceof AllModelsFailedError) {

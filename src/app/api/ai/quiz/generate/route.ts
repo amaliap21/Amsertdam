@@ -254,15 +254,16 @@ export async function POST(req: NextRequest) {
       };
 
       // Run one call → polish → validate, returning the usable questions.
-      // `want` sizes the output token cap so the JSON array for that many
-      // questions isn't truncated (~170 tokens per MCQ + overhead).
+      // No output token cap (`maxTokens: 0`) — the model returns as many
+      // tokens as it wants, so the JSON array is never truncated mid-way
+      // regardless of how many questions it produces. Runtime is still bounded
+      // by the per-call `deadlineMs` and the route's maxDuration.
       const runCall = async (
         messages: Parameters<typeof chatWithFallback>[0],
-        want: number,
       ): Promise<QuizQuestion[]> => {
         const resp = await chatWithFallback(messages, chain, {
           deadlineMs: remainingBudget(),
-          maxTokens: 400 + want * 180,
+          maxTokens: 0,
         });
         const parsed = normalizeOpenRouterQuiz(resp.content);
         if (!parsed || !parsed.questions?.length) return [];
@@ -307,19 +308,16 @@ export async function POST(req: NextRequest) {
               `questions from it instead of guessing.` + avoidClause();
             try {
               pushUnique(
-                await runCall(
-                  [
-                    { role: "system", content: system },
-                    {
-                      role: "user",
-                      content: [
-                        { type: "text", text: userInstruction },
-                        { type: "image_url", image_url: { url: dataUrl } },
-                      ],
-                    },
-                  ],
-                  want,
-                ),
+                await runCall([
+                  { role: "system", content: system },
+                  {
+                    role: "user",
+                    content: [
+                      { type: "text", text: userInstruction },
+                      { type: "image_url", image_url: { url: dataUrl } },
+                    ],
+                  },
+                ]),
               );
             } catch (err) {
               if (isPremium && err instanceof AllModelsFailedError) {
@@ -358,13 +356,10 @@ export async function POST(req: NextRequest) {
               avoidClause();
             try {
               pushUnique(
-                await runCall(
-                  [
-                    { role: "system", content: system },
-                    { role: "user", content: user },
-                  ],
-                  want,
-                ),
+                await runCall([
+                  { role: "system", content: system },
+                  { role: "user", content: user },
+                ]),
               );
             } catch (err) {
               // Premium errors should surface (we'll refund below); free
