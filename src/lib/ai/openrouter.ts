@@ -104,14 +104,117 @@ export class AllModelsFailedError extends Error {
         const message =
             lastStatus === 401 || lastStatus === 403
                 ? "AI is not configured correctly (auth failed). Please contact support."
-                : lastStatus === 400 || lastStatus === 404
-                  ? "AI request was rejected by every model. The model list may be out of date."
-                  : lastStatus === 429
-                    ? "Free AI quota is exhausted for now. Try again later, or use a Premium credit (Claude) for instant analysis."
-                    : "All AI models are busy right now. Please try again in a minute.";
+                : lastStatus === 402
+                  ? "Premium AI is temporarily unavailable: the OpenRouter account has insufficient credits. Please top it up at openrouter.ai/settings/credits."
+                  : lastStatus === 400 || lastStatus === 404
+                    ? "AI request was rejected by every model. The model list may be out of date."
+                    : lastStatus === 429
+                      ? "Free AI quota is exhausted for now. Try again later, or use a Premium credit (Claude) for instant analysis."
+                      : "All AI models are busy right now. Please try again in a minute.";
         super(message);
         this.name = "AllModelsFailedError";
     }
+}
+
+// ── Direct Anthropic (Claude) API ─────────────────────────────────────────
+// Premium models are paid Claude models. We bill them against the user's
+// OWN funded Anthropic account (ANTHROPIC_API_KEY), NOT OpenRouter — routing
+// Claude through an unfunded OpenRouter account just yields 402s that surface
+// as "all models busy". Anthropic uses a different request shape (top-level
+// `system`, base64 image blocks) and REQUIRES max_tokens, so we translate.
+const ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_VERSION = "2023-06-01";
+
+/** True for the premium Claude models that should hit Anthropic directly. */
+function isAnthropicModel(model: string): boolean {
+    return model.startsWith("anthropic/") || model.startsWith("claude");
+}
+
+/** Translate an OpenRouter-style message content into Anthropic's shape. */
+function toAnthropicContent(content: ChatMessage["content"]) {
+    if (typeof content === "string") return content;
+    return content.map((part) => {
+        if (part.type === "text") return { type: "text", text: part.text };
+        // OpenRouter sends images as a data URL; Anthropic wants a base64
+        // image block (or a url source). Parse the data URL when present.
+        const url = part.image_url.url;
+        const m = url.match(/^data:([^;]+);base64,(.*)$/);
+        if (m) {
+            return { type: "image", source: { type: "base64", media_type: m[1], data: m[2] } };
+        }
+        return { type: "image", source: { type: "url", url } };
+    });
+}
+
+async function callAnthropic(
+    model: string,
+    messages: ChatMessage[],
+    signal: AbortSignal,
+    maxTokens: number,
+): Promise<{ ok: true; result: OpenRouterResult } | { ok: false; status: number; retryable: boolean }> {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+        console.error("[anthropic] ANTHROPIC_API_KEY is not set");
+        return { ok: false, status: 401, retryable: false };
+    }
+    // Strip the OpenRouter "anthropic/" prefix → bare Anthropic model id.
+    const anthropicModel = model.replace(/^anthropic\//, "");
+    const system = messages
+        .filter((m) => m.role === "system")
+        .map((m) => (typeof m.content === "string" ? m.content : ""))
+        .join("\n\n")
+        .trim();
+    const convo = messages
+        .filter((m) => m.role !== "system")
+        .map((m) => ({ role: m.role, content: toAnthropicContent(m.content) }));
+
+    const resp = await fetch(ANTHROPIC_ENDPOINT, {
+        method: "POST",
+        signal,
+        headers: {
+            "Content-Type": "application/json",
+            "x-api-key": apiKey,
+            "anthropic-version": ANTHROPIC_VERSION,
+        },
+        body: JSON.stringify({
+            // NOTE: `temperature` is intentionally omitted — newer Claude
+            // models (e.g. claude-opus-4-7) reject it ("temperature is
+            // deprecated for this model") and 400 the whole request.
+            model: anthropicModel,
+            max_tokens: maxTokens,
+            ...(system ? { system } : {}),
+            messages: convo,
+        }),
+    });
+
+    if (!resp.ok) {
+        const bodyText = await resp.text().catch(() => "");
+        console.error(`[anthropic] ${anthropicModel} → ${resp.status}: ${bodyText.slice(0, 300)}`);
+        if (resp.status === 429) return { ok: false, status: 429, retryable: true };
+        if (resp.status >= 500) return { ok: false, status: resp.status, retryable: true };
+        return { ok: false, status: resp.status, retryable: false };
+    }
+
+    const json = await resp.json();
+    const blocks: Array<{ type: string; text?: string }> = json?.content ?? [];
+    const content = blocks
+        .filter((b) => b.type === "text" && typeof b.text === "string")
+        .map((b) => b.text as string)
+        .join("");
+    if (!content) {
+        console.error(`[anthropic] ${anthropicModel} → empty content`, JSON.stringify(json).slice(0, 300));
+        return { ok: false, status: 502, retryable: true };
+    }
+    return {
+        ok: true,
+        result: {
+            content,
+            model,
+            usage: json?.usage
+                ? { prompt_tokens: json.usage.input_tokens, completion_tokens: json.usage.output_tokens }
+                : undefined,
+        },
+    };
 }
 
 async function callModel(
@@ -120,6 +223,12 @@ async function callModel(
     signal: AbortSignal,
     maxTokens: number | undefined,
 ): Promise<{ ok: true; result: OpenRouterResult } | { ok: false; status: number; retryable: boolean }> {
+    // Premium Claude models go DIRECT to the Anthropic API (funded), bypassing
+    // OpenRouter entirely. Anthropic requires a max_tokens, so default it.
+    if (isAnthropicModel(model)) {
+        return callAnthropic(model, messages, signal, maxTokens ?? 4096);
+    }
+
     if (!process.env.OPENROUTER_API_KEY) {
         console.error("[openrouter] OPENROUTER_API_KEY is not set");
         return { ok: false, status: 401, retryable: false };
@@ -139,12 +248,10 @@ async function callModel(
             model,
             messages,
             temperature: 0.2, // low → consistent, fewer wasted tokens
-            // Caller-controlled output cap. The analyze route wants this small
-            // (single verdict, keep cost down). The quiz/flashcard generators
-            // pass `undefined` here so NO cap is sent — the model returns as
-            // many tokens as it wants, so a long JSON ARRAY is never truncated
-            // mid-way (which used to silently drop questions/cards). The time
-            // budget (deadlineMs / maxDuration) still bounds total runtime.
+            // Caller-controlled output cap (always a number here). The analyze
+            // route keeps it small; the generators pass a generous bound so a
+            // long JSON array isn't truncated. We never omit it — OpenRouter
+            // would otherwise assume the model max and 402 paid requests.
             ...(maxTokens != null ? { max_tokens: maxTokens } : {}),
             // NOTE: response_format is intentionally omitted. Several
             // OpenRouter free models 400 on it; the prompt already asks for
@@ -189,12 +296,17 @@ export async function chatWithFallback(
     opts: { deadlineMs?: number; maxTokens?: number } = {},
 ): Promise<OpenRouterResult> {
     // Output token cap. Default 500 keeps the analyze route cheap. Pass
-    // `maxTokens: 0` to send NO cap at all — the model then returns as many
-    // tokens as it wants (used by the quiz/flashcard generators so a long
-    // JSON array is never truncated). Otherwise floor at 256, ceil at 8000.
+    // `maxTokens: 0` for "uncapped" — we send a generous bound (16000) rather
+    // than omitting the field, because (a) Anthropic REQUIRES max_tokens and
+    // (b) omitting it makes OpenRouter assume the model max (65536) and reject
+    // paid requests up front with a 402. Anthropic bills only the tokens it
+    // actually emits, so a high ceiling never costs more than the real output.
+    // The quiz/flashcard generators use this so a long JSON array isn't
+    // truncated. Otherwise floor at 256, ceil at 8000.
+    const UNCAPPED_MAX_TOKENS = 16000;
     const maxTokens =
         opts.maxTokens === 0
-            ? undefined
+            ? UNCAPPED_MAX_TOKENS
             : Math.min(8000, Math.max(256, opts.maxTokens ?? 500));
     // Accept either an explicit model chain or a tier (back-compat).
     const chain: readonly string[] = Array.isArray(chainOrTier)

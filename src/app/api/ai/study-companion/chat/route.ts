@@ -3,7 +3,9 @@ import {
   resolveChain,
   modelTier,
   PREMIUM_CREDIT_COST,
+  PREMIUM_MODEL_CHAIN,
 } from "@/lib/ai/openrouter";
+import { streamClaude } from "@/lib/anthropic";
 import { spendCredit, refundCredit } from "@/lib/ai/credits";
 import { requireUserId } from "@/lib/get-user-id";
 
@@ -241,8 +243,21 @@ export async function POST(req: NextRequest) {
           ...messages,
         ];
 
+        // Premium → stream DIRECTLY from the funded Anthropic API (not the
+        // unfunded OpenRouter account). Free → OpenRouter free-model chain.
+        const deltaSource = isPremium
+          ? streamClaude(allMessages, {
+              // No `temperature` — newer Claude models reject it and 400.
+              model: (requestedModel ?? PREMIUM_MODEL_CHAIN[0]).replace(
+                /^anthropic\//,
+                "",
+              ),
+              maxTokens: 700,
+            })
+          : streamWithFallback(allMessages, chain);
+
         let streamed = false;
-        for await (const delta of streamWithFallback(allMessages, chain)) {
+        for await (const delta of deltaSource) {
           streamed = true;
           controller.enqueue(
             encoder.encode(
