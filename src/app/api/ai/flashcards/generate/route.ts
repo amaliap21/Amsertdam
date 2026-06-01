@@ -12,7 +12,6 @@ import {
   AllModelsFailedError,
   resolveChain,
   modelTier,
-  PREMIUM_CREDIT_COST,
   type Tier,
 } from "@/lib/ai/openrouter";
 import { spendCredit, refundCredit, getCredits } from "@/lib/ai/credits";
@@ -142,23 +141,38 @@ export async function POST(req: NextRequest) {
     }
 
     const requested = Number.isFinite(requestedCardsRaw) ? requestedCardsRaw : 0;
-    const effective = requested > 0 ? Math.min(requested, maxCards) : maxCards;
+    let effective = requested > 0 ? Math.min(requested, maxCards) : maxCards;
 
-    // Premium picks bill ONE credit per generation job (not per chunk).
-    let spentCredit = false;
+    // Premium picks bill ONE credit per CARD generated. We reserve credits
+    // up front for the full target (capped to the user's balance so they can
+    // never overspend), then refund any cards we don't end up producing.
+    let reservedCredits = 0;
     if (isPremium) {
-      const balance = await spendCredit(userId, PREMIUM_CREDIT_COST);
-      if (balance === null) {
+      const balance = await getCredits(userId);
+      if (balance <= 0) {
         return NextResponse.json(
           {
             error: `Not enough premium credits. Buy a credit pack to generate with this model.`,
             needsCredits: true,
-            cost: PREMIUM_CREDIT_COST,
+            cost: 1,
           },
           { status: 402 },
         );
       }
-      spentCredit = true;
+      // Can't generate (or charge for) more cards than the user can afford.
+      effective = Math.max(1, Math.min(effective, balance));
+      const newBalance = await spendCredit(userId, effective);
+      if (newBalance === null) {
+        return NextResponse.json(
+          {
+            error: `Not enough premium credits. Buy a credit pack to generate with this model.`,
+            needsCredits: true,
+            cost: effective,
+          },
+          { status: 402 },
+        );
+      }
+      reservedCredits = effective;
     }
 
     // Shared system prompt — same contract for text and vision so the polish
@@ -285,8 +299,10 @@ export async function POST(req: NextRequest) {
               );
             } catch (err) {
               if (isPremium && err instanceof AllModelsFailedError) {
-                await refundCredit(userId, PREMIUM_CREDIT_COST);
-                spentCredit = false;
+                if (reservedCredits > 0) {
+                  await refundCredit(userId, reservedCredits);
+                  reservedCredits = 0;
+                }
                 return NextResponse.json(
                   { error: err.message, credits: await getCredits(userId) },
                   { status: 503 },
@@ -322,8 +338,10 @@ export async function POST(req: NextRequest) {
               );
             } catch (err) {
               if (isPremium && err instanceof AllModelsFailedError) {
-                await refundCredit(userId, PREMIUM_CREDIT_COST);
-                spentCredit = false;
+                if (reservedCredits > 0) {
+                  await refundCredit(userId, reservedCredits);
+                  reservedCredits = 0;
+                }
                 return NextResponse.json(
                   { error: err.message, credits: await getCredits(userId) },
                   { status: 503 },
@@ -339,13 +357,15 @@ export async function POST(req: NextRequest) {
       cards = collected.slice(0, target);
     }
 
+    // Premium bills 1 credit per card actually produced. Refund the gap
+    // between what we reserved up front and what we generated (covers the
+    // zero-card case too — the extractor fallback below is free).
+    if (isPremium && reservedCredits > cards.length) {
+      await refundCredit(userId, reservedCredits - cards.length);
+      reservedCredits = cards.length;
+    }
+
     if (!cards || cards.length === 0) {
-      // Refund any premium credit since the user didn't actually consume the
-      // paid model.
-      if (spentCredit) {
-        await refundCredit(userId, PREMIUM_CREDIT_COST);
-        spentCredit = false;
-      }
       if (isImage) {
         // No deterministic fallback for images — vision is the only path.
         return NextResponse.json(

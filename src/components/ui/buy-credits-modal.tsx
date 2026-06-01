@@ -70,14 +70,15 @@ export default function BuyCreditsModal({ isOpen, onClose }: Props) {
           </h2>
         </div>
         <p className="mb-5 text-sm text-gray-primary">
-          Premium analyses use Claude Opus for deeper, more accurate feedback.
-          1 credit = 1 premium analysis. Pay with QRIS, GoPay, VA, or card.
+          Premium uses Claude Opus for deeper, more accurate results. 1 credit =
+          1 generated flashcard or quiz question (or 1 Claude analysis / chat
+          reply). Pay with QRIS, GoPay, VA, or card.
         </p>
 
         <div className="flex flex-col gap-3">
           {packs.map((pack) => {
             const active = selected === pack.id;
-            const perAnalysis = Math.round(pack.amountIdr / pack.credits);
+            const perCredit = Math.round(pack.amountIdr / pack.credits);
             return (
               <button
                 key={pack.id}
@@ -90,9 +91,11 @@ export default function BuyCreditsModal({ isOpen, onClose }: Props) {
                 }`}
               >
                 <div className="min-w-0">
-                  <p className="font-medium text-black-primary">{pack.label}</p>
+                  <p className="font-medium text-black-primary">
+                    {pack.label} · {pack.credits} credits
+                  </p>
                   <p className="text-xs text-gray-primary">
-                    {formatIdr(perAnalysis)} per analysis
+                    {formatIdr(perCredit)} per credit
                   </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">

@@ -17,8 +17,9 @@ type ModelPickerProps = {
 
 /**
  * Single source of truth for picking which OpenRouter model an AI call uses.
- * Premium models are marked with "(Premium)" — selecting one bills 1 credit
- * per generation. Free models are no-charge but rate-limited.
+ * Premium models are marked with "(Premium)" — selecting one spends credits
+ * (1 per generated flashcard/quiz question, or 1 per analysis/chat reply).
+ * Free models are no-charge but rate-limited.
  */
 export default function ModelPicker({
   value,
@@ -69,7 +70,7 @@ export default function ModelPicker({
         {MODEL_OPTIONS.map((m) => (
           <option key={m.id} value={m.id}>
             {m.label}
-            {m.tier === "premium" ? " — Premium (1 credit)" : " — Free"}
+            {m.tier === "premium" ? " — Premium (uses credits)" : " — Free"}
           </option>
         ))}
       </select>

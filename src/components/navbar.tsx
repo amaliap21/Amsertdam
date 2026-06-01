@@ -641,24 +641,29 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
       </div>
 
       {/* ---- AI usage + buy credits ---- */}
+      {/* Responsive: on mobile this collapses to a compact credits pill + a
+          short "Buy" button so it stays usable next to the search and icons;
+          the full labels and the "free today" pill expand at sm / lg. */}
       <div
         data-tour="ai-credits"
-        className="ml-auto hidden items-center gap-2 sm:flex shrink-0"
+        className="ml-auto flex items-center gap-1.5 shrink-0 sm:gap-2"
       >
         <span className="hidden rounded-full bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-700 lg:inline-flex">
           {remaining ?? "…"} free today
         </span>
-        <span className="flex items-center gap-1 rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-primary">
-          <Zap size={12} />
-          {credits ?? "…"} premium credits
+        <span className="flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-1.5 text-xs font-medium text-indigo-primary sm:px-3">
+          <Zap size={12} className="shrink-0" />
+          <span>{credits ?? "…"}</span>
+          <span className="hidden sm:inline">premium credits</span>
         </span>
         <button
           type="button"
           data-tour="buy-credits"
           onClick={() => setBuyOpen(true)}
-          className="rounded-lg bg-indigo-primary px-3 py-1.5 text-xs font-medium text-white transition hover:bg-indigo-600"
+          className="rounded-lg bg-indigo-primary px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-indigo-600 sm:px-3"
         >
-          Buy credits
+          <span className="sm:hidden">Buy</span>
+          <span className="hidden sm:inline">Buy credits</span>
         </button>
       </div>
 

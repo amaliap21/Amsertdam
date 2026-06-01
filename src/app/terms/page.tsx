@@ -68,10 +68,11 @@ export default function TermsPage() {
           <h2 className="text-xl font-semibold">6. Premium credits &amp; payments</h2>
           <p>
             RealTrack offers an optional paid tier. You may purchase
-            <strong> Premium Credits</strong>, a digital good that lets you run
-            answer analyses using a higher-quality AI model (Claude). One credit
-            equals one premium analysis. Credits are added to your account
-            automatically once payment is confirmed.
+            <strong> Premium Credits</strong>, a digital good that lets you use a
+            higher-quality AI model (Claude). One credit equals one generated
+            flashcard or quiz question, or one answer analysis / chat reply.
+            Credits are added to your account automatically once payment is
+            confirmed.
           </p>
           <p className="mt-2">
             Payments are processed by <strong>Midtrans</strong> (PT Midtrans), a
