@@ -358,7 +358,7 @@ export default function CreateQuizModal({
             label="AI Model"
             hint={
               modelTier(model) === "premium"
-                ? "Premium model — uses 1 credit per generation."
+                ? "Premium model — uses 1 credit per question generated."
                 : "Free model — rate-limited but no cost."
             }
           />

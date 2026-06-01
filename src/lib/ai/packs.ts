@@ -1,7 +1,8 @@
 // Credit packs — the single source of truth for what a user can buy.
 // Defined server-side so the client can never tamper with price/amount.
-// `amountIdr` is what Xendit charges (whole rupiah); `credits` is what we
-// grant. With PREMIUM_CREDIT_COST = 1, 1 credit = 1 Claude Opus analysis.
+// `amountIdr` is what Midtrans charges (whole rupiah); `credits` is what we
+// grant. 1 credit = 1 premium unit: one generated flashcard / quiz question,
+// or one Claude analysis / chat reply.
 
 export type CreditPack = {
   id: string;
@@ -10,21 +11,23 @@ export type CreditPack = {
   amountIdr: number; // whole rupiah
 };
 
-// Priced against Opus's worst-case cost (~$0.045 ≈ Rp720/analysis), after
-// Xendit fees (QRIS ~0.7%, no fixed fee). Local IDR pricing keeps it
-// affordable for Indonesian students while holding ~55–60% margin.
+// Each pack budgets ~40% of its price to model cost and sells the rest as
+// margin. Credits are priced so the budget covers worst-case Opus usage.
 //
-//   pack      price        analyses  cost(IDR)  Xendit~0.7%  net profit   margin
-//   starter   Rp 25.000    15        ~Rp10.800  ~Rp175       ~Rp14.000    56%
-//   plus      Rp 50.000    35        ~Rp25.200  ~Rp350       ~Rp24.500    49%
-//   pro       Rp 100.000   80        ~Rp57.600  ~Rp700       ~Rp41.700    42%
+//   pack      price        budget(40%)  credits
+//   starter   Rp 25.000    Rp 10.000    6
+//   basic     Rp 50.000    Rp 20.000    12
+//   standard  Rp 100.000   Rp 40.000    24
+//   pro       Rp 200.000   Rp 80.000    49
+//   premium   Rp 500.000   Rp 200.000   123
 //
-// Typical (non-worst-case) Opus cost is ~$0.025 ≈ Rp400/analysis, so real
-// margins run higher. Users prepay → you're never cash-negative.
+// Users prepay → you're never cash-negative.
 export const CREDIT_PACKS: Record<string, CreditPack> = {
-  starter: { id: "starter", label: "15 Opus analyses", credits: 15, amountIdr: 25_000 },
-  plus: { id: "plus", label: "35 Opus analyses", credits: 35, amountIdr: 50_000 },
-  pro: { id: "pro", label: "80 Opus analyses", credits: 80, amountIdr: 100_000 },
+  starter: { id: "starter", label: "Starter", credits: 6, amountIdr: 25_000 },
+  basic: { id: "basic", label: "Basic", credits: 12, amountIdr: 50_000 },
+  standard: { id: "standard", label: "Standard", credits: 24, amountIdr: 100_000 },
+  pro: { id: "pro", label: "Pro", credits: 49, amountIdr: 200_000 },
+  premium: { id: "premium", label: "Premium", credits: 123, amountIdr: 500_000 },
 };
 
 export function getPack(id: string): CreditPack | null {

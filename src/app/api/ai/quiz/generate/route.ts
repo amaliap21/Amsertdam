@@ -13,7 +13,6 @@ import {
   AllModelsFailedError,
   resolveChain,
   modelTier,
-  PREMIUM_CREDIT_COST,
   type Tier,
 } from "@/lib/ai/openrouter";
 import { spendCredit, refundCredit, getCredits } from "@/lib/ai/credits";
@@ -156,26 +155,40 @@ export async function POST(req: NextRequest) {
     const requested = Number.isFinite(requestedQuestionsRaw)
       ? requestedQuestionsRaw
       : 0;
-    const effective =
+    let effective =
       requested > 0 ? Math.min(requested, maxQuestions) : maxQuestions;
 
-    // Premium picks bill ONE credit per generation job (not per chunk).
-    // The credit is reserved up front and refunded if we fall back to the
-    // deterministic extractor without producing any AI cards.
-    let spentCredit = false;
+    // Premium picks bill ONE credit per QUESTION generated. We reserve
+    // credits up front for the full target (capped to the user's balance so
+    // they can never overspend), then refund any questions we don't end up
+    // producing (including the deterministic-extractor fallback, which is free).
+    let reservedCredits = 0;
     if (isPremium) {
-      const balance = await spendCredit(userId, PREMIUM_CREDIT_COST);
-      if (balance === null) {
+      const balance = await getCredits(userId);
+      if (balance <= 0) {
         return NextResponse.json(
           {
             error: `Not enough premium credits. Buy a credit pack to generate with this model.`,
             needsCredits: true,
-            cost: PREMIUM_CREDIT_COST,
+            cost: 1,
           },
           { status: 402 },
         );
       }
-      spentCredit = true;
+      // Can't generate (or charge for) more questions than the user can afford.
+      effective = Math.max(1, Math.min(effective, balance));
+      const newBalance = await spendCredit(userId, effective);
+      if (newBalance === null) {
+        return NextResponse.json(
+          {
+            error: `Not enough premium credits. Buy a credit pack to generate with this model.`,
+            needsCredits: true,
+            cost: effective,
+          },
+          { status: 402 },
+        );
+      }
+      reservedCredits = effective;
     }
 
     // Shared system prompt — used by both text and vision paths so the
@@ -321,8 +334,10 @@ export async function POST(req: NextRequest) {
               );
             } catch (err) {
               if (isPremium && err instanceof AllModelsFailedError) {
-                await refundCredit(userId, PREMIUM_CREDIT_COST);
-                spentCredit = false;
+                if (reservedCredits > 0) {
+                  await refundCredit(userId, reservedCredits);
+                  reservedCredits = 0;
+                }
                 return NextResponse.json(
                   { error: err.message, credits: await getCredits(userId) },
                   { status: 503 },
@@ -365,8 +380,10 @@ export async function POST(req: NextRequest) {
               // Premium errors should surface (we'll refund below); free
               // errors fall through to the next attempt / extractor.
               if (isPremium && err instanceof AllModelsFailedError) {
-                await refundCredit(userId, PREMIUM_CREDIT_COST);
-                spentCredit = false;
+                if (reservedCredits > 0) {
+                  await refundCredit(userId, reservedCredits);
+                  reservedCredits = 0;
+                }
                 return NextResponse.json(
                   { error: err.message, credits: await getCredits(userId) },
                   { status: 503 },
@@ -382,13 +399,15 @@ export async function POST(req: NextRequest) {
       questions = collected.slice(0, target);
     }
 
+    // Premium bills 1 credit per question actually produced. Refund the gap
+    // between what we reserved up front and what we generated (covers the
+    // zero-question case too — the extractor fallback below is free).
+    if (isPremium && reservedCredits > questions.length) {
+      await refundCredit(userId, reservedCredits - questions.length);
+      reservedCredits = questions.length;
+    }
+
     if (!questions || questions.length === 0) {
-      // Refund any premium credit since the user didn't actually consume the
-      // paid model.
-      if (spentCredit) {
-        await refundCredit(userId, PREMIUM_CREDIT_COST);
-        spentCredit = false;
-      }
       if (isImage) {
         // No deterministic fallback for images — the vision model is the
         // only path that can read 2D math layouts. Surface a clear error.

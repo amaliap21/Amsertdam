@@ -14,32 +14,31 @@ export async function getCredits(userId: string): Promise<number> {
 }
 
 /**
- * Atomically spend one credit via the Postgres function. Returns the new
- * balance, or null when the user has no credits (no partial spend; the row
- * lock makes it safe against double-spend races).
+ * Atomically spend `amount` credits via a Postgres function. Returns the new
+ * balance, or null when the user can't afford the whole amount (no partial
+ * spend; the row lock makes it safe against double-spend races).
  *
- * IMPORTANT: the deployed `spend_ai_credit` takes ONLY `p_user_id` and always
- * deducts a single credit. We must NOT pass `p_amount` — the (uuid, int)
- * overload from migration 010 was never applied to prod, so passing it makes
- * PostgREST fail to resolve the function (PGRST202) and the whole premium
- * request 500s with "Unknown error". Calling with just `p_user_id` also
- * resolves correctly against the migration's (uuid, int default 1) version,
- * so this is safe whether or not the DB is later reconciled (see
- * migration 011). Premium cost is always 1 today; guard against any future
- * caller assuming multi-credit spends work here.
+ * Two RPCs, by design:
+ *  - amount === 1 → `spend_ai_credit(p_user_id)`. This is the prod-proven
+ *    single-arg path. We must NOT pass `p_amount` to it — the (uuid, int)
+ *    overload from migration 010 drifted out of prod, so passing it makes
+ *    PostgREST fail to resolve the function (PGRST202) and the request 500s
+ *    with "Unknown error" (see migration 011).
+ *  - amount > 1 → `spend_ai_credits(p_user_id, p_amount)` (migration 012), a
+ *    DISTINCT, unambiguous function used for per-card/question billing where
+ *    one generation job spends one credit per item produced.
  */
 export async function spendCredit(
   userId: string,
   amount = 1,
 ): Promise<number | null> {
-  if (amount !== 1) {
-    throw new Error(
-      `spendCredit: the deployed spend_ai_credit RPC only supports single-credit spends (got amount=${amount}).`,
-    );
-  }
-  const { data, error } = await admin.rpc("spend_ai_credit", {
-    p_user_id: userId,
-  });
+  const { data, error } =
+    amount <= 1
+      ? await admin.rpc("spend_ai_credit", { p_user_id: userId })
+      : await admin.rpc("spend_ai_credits", {
+          p_user_id: userId,
+          p_amount: amount,
+        });
   if (error) throw error;
   const balance = Number(data);
   return balance < 0 ? null : balance;
