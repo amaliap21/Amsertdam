@@ -21,9 +21,12 @@ import {
   HelpCircle,
   Menu,
   Bell,
+  Zap,
 } from "lucide-react";
 import { useCurrentUser } from "@/lib/use-current-user";
 import { useStore } from "@/store/use-store";
+import { useAiUsageOnMount } from "@/lib/use-ai-analyze";
+import BuyCreditsModal from "@/components/ui/buy-credits-modal";
 import { parseTaskDate, toLocalIsoDate } from "@/lib/task-date";
 import toast from "react-hot-toast";
 
@@ -121,6 +124,12 @@ function saveReminderHistory(map: Record<string, number>) {
 const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
   const router = useRouter();
   const { user } = useCurrentUser();
+
+  /* ---------- AI usage (free + premium credits) ---------- */
+  // Lives in the navbar so the counters sit beside the search bar and bell on
+  // every page, and stay in sync from one global store pool.
+  const { remaining, credits } = useAiUsageOnMount();
+  const [buyOpen, setBuyOpen] = useState(false);
 
   /* ---------- profile state ---------- */
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -631,8 +640,30 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
         )}
       </div>
 
+      {/* ---- AI usage + buy credits ---- */}
+      <div
+        data-tour="ai-credits"
+        className="ml-auto hidden items-center gap-2 sm:flex shrink-0"
+      >
+        <span className="hidden rounded-full bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-700 lg:inline-flex">
+          {remaining ?? "…"} free today
+        </span>
+        <span className="flex items-center gap-1 rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-primary">
+          <Zap size={12} />
+          {credits ?? "…"} premium credits
+        </span>
+        <button
+          type="button"
+          data-tour="buy-credits"
+          onClick={() => setBuyOpen(true)}
+          className="rounded-lg bg-indigo-primary px-3 py-1.5 text-xs font-medium text-white transition hover:bg-indigo-600"
+        >
+          Buy credits
+        </button>
+      </div>
+
       {/* ---- Profile section ---- */}
-      <div ref={profileRef} className="relative ml-auto flex items-center gap-2 sm:gap-3 shrink-0">
+      <div ref={profileRef} className="relative flex items-center gap-2 sm:gap-3 shrink-0">
         <div ref={notificationsRef} className="relative">
           <button
             type="button"
@@ -849,6 +880,8 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
           </div>
         )}
       </div>
+
+      <BuyCreditsModal isOpen={buyOpen} onClose={() => setBuyOpen(false)} />
     </nav>
   );
 };
