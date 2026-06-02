@@ -50,8 +50,58 @@ function renderInline(text: string, keyBase: string): React.ReactNode[] {
   return tokens;
 }
 
+// Convert LaTeX/TeX math into readable plain text. The model is told to write
+// plain-text math, but Claude often slips into LaTeX for equations — which
+// renders as unreadable raw "\[ \frac{a}{b} \]" in a plain chat bubble. This
+// normalizes the common constructs so the math stays legible regardless.
+function texToPlain(input: string): string {
+  let s = input;
+  // Drop math-mode delimiters, keep the inner content.
+  s = s.replace(/\$\$([\s\S]*?)\$\$/g, "$1"); // $$ ... $$
+  s = s.replace(/\\\[|\\\]|\\\(|\\\)/g, " "); // \[ \] \( \)
+  s = s.replace(/\$([^$\n]+)\$/g, "$1"); // $ ... $
+  // Resolve superscripts/subscripts FIRST so their braces don't break the
+  // \frac / \boxed matchers below: x^{n} -> x^n (single char) or x^(n+1).
+  s = s.replace(/([\^_])\{([^{}]+)\}/g, (_m, op, inner) =>
+    inner.length === 1 ? `${op}${inner}` : `${op}(${inner})`,
+  );
+  // Peel \sqrt{...} -> sqrt(...) and \frac{a}{b} -> (a)/(b) together, a few
+  // passes, so nesting in either direction (frac-in-sqrt or sqrt-in-frac,
+  // e.g. the quadratic formula) resolves one level per pass.
+  for (let i = 0; i < 4; i++) {
+    const before = s;
+    s = s.replace(/\\sqrt\s*\{([^{}]*)\}/g, "sqrt($1)");
+    s = s.replace(/\\d?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, "($1)/($2)");
+    if (s === before) break;
+  }
+  // Wrappers — run after \frac/\sqrt so nested content inside is already plain.
+  s = s.replace(/\\(?:boxed|text|mathrm|mathbf|operatorname)\s*\{([^{}]*)\}/g, "$1");
+  // Operators / symbols.
+  s = s
+    .replace(/\\int/g, "∫")
+    .replace(/\\sum/g, "Σ")
+    .replace(/\\cdot/g, "·")
+    .replace(/\\times/g, "×")
+    .replace(/\\div/g, "÷")
+    .replace(/\\pm/g, "±")
+    .replace(/\\infty/g, "∞")
+    .replace(/\\leq/g, "<=")
+    .replace(/\\geq/g, ">=")
+    .replace(/\\neq/g, "≠")
+    .replace(/\\(?:Longrightarrow|Rightarrow|implies)/g, "=>")
+    .replace(/\\to/g, "->")
+    .replace(/\\(?:quad|qquad|,|;|:|!)/g, " ");
+  // Spacing/sizing commands with no plain-text equivalent.
+  s = s.replace(/\\(?:left|right|big|bigg|Big|Bigg|displaystyle)\b/g, "");
+  // Any leftover "\command" -> keep the word (covers greek: \pi -> pi, etc.).
+  s = s.replace(/\\([a-zA-Z]+)/g, "$1");
+  // Stray braces left from grouping.
+  s = s.replace(/[{}]/g, "");
+  return s;
+}
+
 function renderMarkdown(content: string): React.ReactNode {
-  const lines = content.split(/\r?\n/);
+  const lines = texToPlain(content).split(/\r?\n/);
   const blocks: React.ReactNode[] = [];
   let listBuffer: { ordered: boolean; items: string[] } | null = null;
   let blockKey = 0;
@@ -353,9 +403,9 @@ export default function StudyCompanionChat({
       );
     } finally {
       setStreaming(false);
-      // A premium reply just spent a credit server-side; pull the fresh
-      // balance so the navbar counter updates without a page reload.
-      if (modelTier(chatModel) === "premium") refreshUsage();
+      // Every reply spends a unit server-side (premium → 1 credit, free → 1
+      // daily-quota unit), so refresh both navbar counters without a reload.
+      refreshUsage();
     }
   };
 
