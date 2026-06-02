@@ -66,7 +66,7 @@ const STREAM_TIMEOUT_MS = 20000;
 // REQUIRES max_tokens (can't be omitted) but bills only the tokens it actually
 // emits, so a high cap is free headroom; a chat reply almost never approaches
 // this. The old 700 was truncating longer step-by-step explanations.
-const CHAT_MAX_TOKENS = 8192;
+const CHAT_MAX_TOKENS = 128000;
 
 async function fetchOpenRouterStream(
   model: string,
