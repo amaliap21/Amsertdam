@@ -16,6 +16,7 @@ import {
   type Tier,
 } from "@/lib/ai/openrouter";
 import { spendCredit, refundCredit, getCredits } from "@/lib/ai/credits";
+import { peekQuota, consumeQuotaN, refundQuotaN } from "@/lib/ai/limits";
 import { normalizeOpenRouterQuiz } from "@/lib/ai/normalizers";
 import { validateQuizPayload } from "@/lib/ai/validator";
 import { splitTextIntoChunks } from "@/lib/ai/splitter";
@@ -158,11 +159,13 @@ export async function POST(req: NextRequest) {
     let effective =
       requested > 0 ? Math.min(requested, maxQuestions) : maxQuestions;
 
-    // Premium picks bill ONE credit per QUESTION generated. We reserve
-    // credits up front for the full target (capped to the user's balance so
-    // they can never overspend), then refund any questions we don't end up
-    // producing (including the deterministic-extractor fallback, which is free).
+    // Billing: ONE unit per QUESTION generated, on BOTH tiers — premium spends
+    // durable credits, free spends the daily free quota. We reserve units up
+    // front for the full target (capped to what the user can afford), then
+    // refund any questions we don't end up producing (the deterministic-
+    // extractor fallback is free).
     let reservedCredits = 0;
+    let reservedFree = 0;
     if (isPremium) {
       const balance = await getCredits(userId);
       if (balance <= 0) {
@@ -189,6 +192,32 @@ export async function POST(req: NextRequest) {
         );
       }
       reservedCredits = effective;
+    } else {
+      const remaining = await peekQuota(userId);
+      if (remaining <= 0) {
+        return NextResponse.json(
+          {
+            error:
+              "Daily free limit reached (resets at midnight UTC). Use premium credits to generate more.",
+            quotaExceeded: true,
+          },
+          { status: 429 },
+        );
+      }
+      // Don't generate (or charge for) more than the remaining daily quota.
+      effective = Math.max(1, Math.min(effective, remaining));
+      reservedFree = await consumeQuotaN(userId, effective);
+      if (reservedFree < 1) {
+        return NextResponse.json(
+          {
+            error:
+              "Daily free limit reached (resets at midnight UTC). Use premium credits to generate more.",
+            quotaExceeded: true,
+          },
+          { status: 429 },
+        );
+      }
+      effective = reservedFree;
     }
 
     // Shared system prompt — used by both text and vision paths so the
@@ -399,12 +428,16 @@ export async function POST(req: NextRequest) {
       questions = collected.slice(0, target);
     }
 
-    // Premium bills 1 credit per question actually produced. Refund the gap
-    // between what we reserved up front and what we generated (covers the
-    // zero-question case too — the extractor fallback below is free).
+    // Bill 1 unit per question actually produced. Refund the gap between what
+    // we reserved up front and what we generated (covers the zero-question case
+    // too — the extractor fallback below is free).
     if (isPremium && reservedCredits > questions.length) {
       await refundCredit(userId, reservedCredits - questions.length);
       reservedCredits = questions.length;
+    }
+    if (!isPremium && reservedFree > questions.length) {
+      await refundQuotaN(userId, reservedFree - questions.length);
+      reservedFree = questions.length;
     }
 
     if (!questions || questions.length === 0) {

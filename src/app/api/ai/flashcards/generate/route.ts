@@ -15,6 +15,7 @@ import {
   type Tier,
 } from "@/lib/ai/openrouter";
 import { spendCredit, refundCredit, getCredits } from "@/lib/ai/credits";
+import { peekQuota, consumeQuotaN, refundQuotaN } from "@/lib/ai/limits";
 import { normalizeOpenRouterFlashcards } from "@/lib/ai/normalizers";
 import { validateFlashcardPayload } from "@/lib/ai/validator";
 import { splitTextIntoChunks } from "@/lib/ai/splitter";
@@ -143,10 +144,12 @@ export async function POST(req: NextRequest) {
     const requested = Number.isFinite(requestedCardsRaw) ? requestedCardsRaw : 0;
     let effective = requested > 0 ? Math.min(requested, maxCards) : maxCards;
 
-    // Premium picks bill ONE credit per CARD generated. We reserve credits
-    // up front for the full target (capped to the user's balance so they can
-    // never overspend), then refund any cards we don't end up producing.
+    // Billing: ONE unit per CARD generated, on BOTH tiers — premium spends
+    // durable credits, free spends the daily free quota. We reserve units up
+    // front for the full target (capped to what the user can afford), then
+    // refund any cards we don't end up producing.
     let reservedCredits = 0;
+    let reservedFree = 0;
     if (isPremium) {
       const balance = await getCredits(userId);
       if (balance <= 0) {
@@ -173,6 +176,32 @@ export async function POST(req: NextRequest) {
         );
       }
       reservedCredits = effective;
+    } else {
+      const remaining = await peekQuota(userId);
+      if (remaining <= 0) {
+        return NextResponse.json(
+          {
+            error:
+              "Daily free limit reached (resets at midnight UTC). Use premium credits to generate more.",
+            quotaExceeded: true,
+          },
+          { status: 429 },
+        );
+      }
+      // Don't generate (or charge for) more than the remaining daily quota.
+      effective = Math.max(1, Math.min(effective, remaining));
+      reservedFree = await consumeQuotaN(userId, effective);
+      if (reservedFree < 1) {
+        return NextResponse.json(
+          {
+            error:
+              "Daily free limit reached (resets at midnight UTC). Use premium credits to generate more.",
+            quotaExceeded: true,
+          },
+          { status: 429 },
+        );
+      }
+      effective = reservedFree;
     }
 
     // Shared system prompt — same contract for text and vision so the polish
@@ -357,12 +386,16 @@ export async function POST(req: NextRequest) {
       cards = collected.slice(0, target);
     }
 
-    // Premium bills 1 credit per card actually produced. Refund the gap
-    // between what we reserved up front and what we generated (covers the
-    // zero-card case too — the extractor fallback below is free).
+    // Bill 1 unit per card actually produced. Refund the gap between what we
+    // reserved up front and what we generated (covers the zero-card case too —
+    // the extractor fallback below is free).
     if (isPremium && reservedCredits > cards.length) {
       await refundCredit(userId, reservedCredits - cards.length);
       reservedCredits = cards.length;
+    }
+    if (!isPremium && reservedFree > cards.length) {
+      await refundQuotaN(userId, reservedFree - cards.length);
+      reservedFree = cards.length;
     }
 
     if (!cards || cards.length === 0) {
