@@ -579,12 +579,12 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
           button at every breakpoint. */}
       <div
         data-tour="ai-credits"
-        className="order-3 flex items-center gap-1.5 shrink-0 sm:order-none sm:ml-auto sm:gap-2"
+        className="order-3 w-full flex items-center justify-center gap-2 sm:order-none sm:w-auto sm:ml-auto sm:shrink-0 sm:justify-end"
       >
-        <span className="inline-flex items-center whitespace-nowrap rounded-full bg-gray-100 px-2.5 py-1.5 text-xs font-medium text-gray-700 sm:px-3">
+        <span className="inline-flex flex-1 sm:flex-none items-center justify-center whitespace-nowrap rounded-full bg-gray-100 px-3 py-2 text-sm font-medium text-gray-700 sm:py-1.5 sm:text-xs">
           {remaining ?? "…"} free today
         </span>
-        <span className="flex items-center gap-1 whitespace-nowrap rounded-full bg-indigo-50 px-2.5 py-1.5 text-xs font-medium text-indigo-primary sm:px-3">
+        <span className="flex flex-1 sm:flex-none items-center justify-center gap-1 whitespace-nowrap rounded-full bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-primary sm:py-1.5 sm:text-xs">
           <Zap size={12} className="shrink-0" />
           {credits ?? "…"} premium credits
         </span>
@@ -592,7 +592,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
           type="button"
           data-tour="buy-credits"
           onClick={() => setBuyOpen(true)}
-          className="whitespace-nowrap rounded-lg bg-indigo-primary px-3 py-1.5 text-xs font-medium text-white transition hover:bg-indigo-600"
+          className="flex-1 sm:flex-none whitespace-nowrap rounded-lg bg-indigo-primary px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-600 sm:px-3 sm:py-1.5 sm:text-xs"
         >
           Buy credits
         </button>
