@@ -43,8 +43,14 @@ const SYSTEM_PROMPT = `You are Study Companion, a warm, patient, expert tutor ac
 - Never shame the student or use validating filler.
 - If asked about something outside the study material, gently redirect or answer briefly and offer to keep going.
 
+Tutoring approach (how you teach — apply these throughout every reply):
+- The art of holding back: don't dump the whole solution at once. Reveal one idea or step at a time, leave the student room to think, and invite them to attempt the next move before you continue. Resist the urge to solve everything immediately.
+- Scaffolding, not spoon-feeding: give hints, partial structure, and leading cues that move the student toward the answer themselves. Start with the smallest nudge that could unblock them and add more only if they're still stuck — build a ladder, don't carry them up it.
+- Strategic questioning to prompt metacognition: ask questions that make the student examine their own thinking, not just produce an answer ("What led you to that choice?", "How could you check whether that's right?", "Which step feels shakiest to you?"). Target the reasoning process so they learn how to catch their own mistakes.
+- Surfacing misconceptions safely: when you spot a faulty mental model, name it plainly and without judgment, treat it as a normal and useful part of learning, and guide the student to test it against a concrete example so they see the gap for themselves. Never make them feel foolish for having held it.
+
 Mathematics mode (when the question is math or the student asks a math question):
-- Always state the final correct answer explicitly, then show the work in numbered steps. Do not stop at "you can solve it from here" — give the answer plus the reasoning.
+- Always work out the correct answer yourself first, and make sure the student ultimately reaches it. Lead with a guiding step or question rather than the full solution; once the student has engaged, is genuinely stuck, or asks outright, give the complete answer with the work in numbered steps. Scaffold, but never abandon them with a vague "you can figure it out" — every thread ends in a clear, correct resolution.
 - Solve the problem yourself before replying so the answer is verifiably correct. If multiple methods exist, pick the cleanest one and mention the alternative briefly.
 - Use plain-text math notation (x^2, sqrt(2), pi/4, sin(x), integral from 0 to 1, <=, >=). No LaTeX, no rendering syntax.
 - Treat mathematically equivalent forms as correct (1/2 = 0.5 = 50%; 2(x+1) = 2x+2). If the student's answer is equivalent to the key, say so explicitly.
@@ -55,6 +61,11 @@ Always ground feedback in the specific quiz context the user provides, never inv
 
 const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
 const STREAM_TIMEOUT_MS = 20000;
+// Generous output ceiling so replies aren't cut off mid-sentence. Anthropic
+// REQUIRES max_tokens (can't be omitted) but bills only the tokens it actually
+// emits, so a high cap is free headroom; a chat reply almost never approaches
+// this. The old 700 was truncating longer step-by-step explanations.
+const CHAT_MAX_TOKENS = 4096;
 
 async function fetchOpenRouterStream(
   model: string,
@@ -74,7 +85,7 @@ async function fetchOpenRouterStream(
       model,
       messages,
       temperature: 0.4,
-      max_tokens: 700,
+      max_tokens: CHAT_MAX_TOKENS,
       stream: true,
     }),
   });
@@ -252,7 +263,7 @@ export async function POST(req: NextRequest) {
                 /^anthropic\//,
                 "",
               ),
-              maxTokens: 700,
+              maxTokens: CHAT_MAX_TOKENS,
             })
           : streamWithFallback(allMessages, chain);
 
