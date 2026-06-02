@@ -224,13 +224,9 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
   /* ---------- instant search ---------- */
   const [searchValue, setSearchValue] = useState("");
   const [showResults, setShowResults] = useState(false);
-  // Two refs: desktop and mobile search render side-by-side (each hidden
-  // at the other breakpoint). Sharing one ref made `searchRef.current`
-  // point to whichever rendered last (mobile), so the outside-click
-  // handler thought the desktop dropdown's anchors were "outside" and
-  // closed it on mousedown — before the click could navigate.
-  const desktopSearchRef = useRef<HTMLDivElement>(null);
-  const mobileSearchRef = useRef<HTMLDivElement>(null);
+  // One search element, made responsive via CSS (full-width second row on
+  // mobile, inline on sm+), so a single ref drives the outside-click handler.
+  const searchRef = useRef<HTMLDivElement>(null);
 
   const tasks = useStore((s) => s.tasks);
   const decks = useStore((s) => s.decks);
@@ -314,9 +310,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       const target = e.target as Node;
-      const insideDesktop = desktopSearchRef.current?.contains(target) ?? false;
-      const insideMobile = mobileSearchRef.current?.contains(target) ?? false;
-      if (!insideDesktop && !insideMobile) {
+      if (!(searchRef.current?.contains(target) ?? false)) {
         setShowResults(false);
       }
     };
@@ -482,7 +476,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
 
   return (
     <nav
-      className={`sticky top-0 z-20 flex w-full items-center gap-2 bg-white px-3 pb-3 sm:px-4 md:px-7.25 ${className}`}
+      className={`sticky top-0 z-20 flex w-full flex-wrap items-center gap-x-2 gap-y-2 bg-white px-3 pb-3 sm:flex-nowrap sm:px-4 md:px-7.25 ${className}`}
       style={{ paddingTop: "max(1rem, env(safe-area-inset-top))" }}
     >
       {/* Mobile hamburger, opens the sidebar drawer */}
@@ -490,7 +484,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
         type="button"
         onClick={onToggleSidebar}
         aria-label="Open menu"
-        className="lg:hidden flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-black-primary hover:bg-gray-100"
+        className="order-1 lg:hidden flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-black-primary hover:bg-gray-100 sm:order-none"
       >
         <Menu size={22} />
       </button>
@@ -506,13 +500,19 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
         />
       </section>
 
-      {/* ---- Search bar with instant dropdown ---- */}
-      <div ref={desktopSearchRef} className="relative hidden min-w-0 flex-1 max-w-126.25 sm:block">
+      {/* ---- Search bar with instant dropdown ----
+          One element, made responsive: on mobile it's `order-last w-full` so
+          flex-wrap drops it onto its own row below the controls; on sm+ it sits
+          inline and grows (flex-1). */}
+      <div
+        ref={searchRef}
+        className="relative order-last w-full min-w-0 sm:order-none sm:w-auto sm:flex-1 sm:max-w-126.25"
+      >
         <form
           className="flex h-11 md:h-14 items-center gap-3 rounded-[100px] bg-[#F5F5F5] px-4"
           onSubmit={handleSearch}
         >
-          <Search size={20} />
+          <Search size={20} className="shrink-0" />
           <input
             type="text"
             id="search-input"
@@ -524,74 +524,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
             }}
             onFocus={() => searchValue.trim() && setShowResults(true)}
             placeholder="Search courses, tasks, flashcards, quizzes"
-            className="bg-transparent outline-none w-full"
-            autoComplete="off"
-          />
-        </form>
-
-        {showResults && searchValue.trim() && (
-          <div className="absolute top-full left-0 right-0 mt-2 z-50 rounded-2xl border border-gray-200 bg-white shadow-lg max-h-96 overflow-y-auto">
-            {quickResults.length === 0 ? (
-              <div className="p-4 text-sm text-gray-primary text-center">
-                No matches, press Enter for full search
-              </div>
-            ) : (
-              <div className="py-2">
-                {quickResults.map((r) => (
-                  <Link
-                    key={`${r.type}-${r.id}`}
-                    href={r.href}
-                    onClick={() => setShowResults(false)}
-                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-indigo-primary/5 transition-colors"
-                  >
-                    <span className="text-indigo-primary">
-                      {TYPE_ICON[r.type]}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-black-primary truncate">
-                        {r.title}
-                      </p>
-                      <p className="text-xs text-gray-primary truncate">
-                        {r.subtitle}
-                      </p>
-                    </div>
-                    <span className="text-[10px] uppercase tracking-wider text-gray-400 shrink-0">
-                      {r.type}
-                    </span>
-                  </Link>
-                ))}
-                <button
-                  type="button"
-                  onClick={handleSearch as unknown as React.MouseEventHandler}
-                  className="w-full px-4 py-2 text-xs text-indigo-primary hover:bg-indigo-primary/5 border-t border-gray-100"
-                >
-                  View all results
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Mobile search, compact so it can sit between the hamburger and the help/profile area */}
-      <div ref={mobileSearchRef} className="relative flex min-w-0 flex-1 sm:hidden">
-        <form
-          className="flex h-10 w-full items-center gap-2 rounded-full bg-[#F5F5F5] px-3"
-          onSubmit={handleSearch}
-        >
-          <Search size={16} className="shrink-0" />
-          <input
-            type="text"
-            id="search-input-mobile"
-            name="search-mobile"
-            value={searchValue}
-            onChange={(e) => {
-              setSearchValue(e.target.value);
-              setShowResults(true);
-            }}
-            onFocus={() => searchValue.trim() && setShowResults(true)}
-            placeholder="Search"
-            className="w-full bg-transparent text-sm outline-none placeholder:text-gray-primary"
+            className="w-full bg-transparent outline-none"
             autoComplete="off"
           />
         </form>
@@ -641,34 +574,37 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
       </div>
 
       {/* ---- AI usage + buy credits ---- */}
-      {/* Responsive: on mobile this collapses to a compact credits pill + a
-          short "Buy" button so it stays usable next to the search and icons;
-          the full labels and the "free today" pill expand at sm / lg. */}
+      {/* Now that search drops to its own row on mobile, there's room to show
+          the full "free today" / "premium credits" labels and the "Buy credits"
+          button at every breakpoint. */}
       <div
         data-tour="ai-credits"
-        className="ml-auto flex items-center gap-1.5 shrink-0 sm:gap-2"
+        className="order-3 flex items-center gap-1.5 shrink-0 sm:order-none sm:ml-auto sm:gap-2"
       >
-        <span className="hidden rounded-full bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-700 lg:inline-flex">
+        <span className="inline-flex items-center whitespace-nowrap rounded-full bg-gray-100 px-2.5 py-1.5 text-xs font-medium text-gray-700 sm:px-3">
           {remaining ?? "…"} free today
         </span>
-        <span className="flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-1.5 text-xs font-medium text-indigo-primary sm:px-3">
+        <span className="flex items-center gap-1 whitespace-nowrap rounded-full bg-indigo-50 px-2.5 py-1.5 text-xs font-medium text-indigo-primary sm:px-3">
           <Zap size={12} className="shrink-0" />
-          <span>{credits ?? "…"}</span>
-          <span className="hidden sm:inline">premium credits</span>
+          {credits ?? "…"} premium credits
         </span>
         <button
           type="button"
           data-tour="buy-credits"
           onClick={() => setBuyOpen(true)}
-          className="rounded-lg bg-indigo-primary px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-indigo-600 sm:px-3"
+          className="whitespace-nowrap rounded-lg bg-indigo-primary px-3 py-1.5 text-xs font-medium text-white transition hover:bg-indigo-600"
         >
-          <span className="sm:hidden">Buy</span>
-          <span className="hidden sm:inline">Buy credits</span>
+          Buy credits
         </button>
       </div>
 
       {/* ---- Profile section ---- */}
-      <div ref={profileRef} className="relative flex items-center gap-2 sm:gap-3 shrink-0">
+      {/* order-2 + ml-auto keeps the bell/help/avatar on the top-right row on
+          mobile (next to the hamburger); reset on sm+ so it sits inline. */}
+      <div
+        ref={profileRef}
+        className="order-2 ml-auto relative flex items-center gap-2 shrink-0 sm:order-none sm:ml-0 sm:gap-3"
+      >
         <div ref={notificationsRef} className="relative">
           <button
             type="button"
