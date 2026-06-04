@@ -118,6 +118,14 @@ export type QuizAttempt = {
   completedAt: string;
 };
 
+// A single Study Companion chat message. Persisted per quiz so the
+// conversation survives refreshes and navigation.
+export type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+};
+
 interface AppState {
   decks: FlashcardDeck[];
   setDecks: (d: FlashcardDeck[]) => void;
@@ -186,6 +194,13 @@ interface AppState {
     },
   ) => string;
   removeAttempt: (id: string) => void;
+
+  // Study Companion chat transcripts, keyed by quizId. Persisted so a chat
+  // survives a refresh; only removed when the user clears it (or the quiz it
+  // belongs to is deleted).
+  chatSessions: Record<string, ChatMessage[]>;
+  setChatSession: (quizId: string, messages: ChatMessage[]) => void;
+  clearChatSession: (quizId: string) => void;
 
   notificationEnabled: boolean;
   setNotificationEnabled: (enabled: boolean) => void;
@@ -392,6 +407,18 @@ export const useStore = create<AppState>()(
         removeAttempt: (id) => {
           set((state) => ({ attempts: state.attempts.filter((a) => a.id !== id) }));
         },
+        chatSessions: {},
+        setChatSession: (quizId, messages) =>
+          set((state) => ({
+            chatSessions: { ...state.chatSessions, [quizId]: messages },
+          })),
+        clearChatSession: (quizId) =>
+          set((state) => {
+            if (!(quizId in state.chatSessions)) return {};
+            const next = { ...state.chatSessions };
+            delete next[quizId];
+            return { chatSessions: next };
+          }),
         setDecks: (d) => set({ decks: d }),
         addTask: async (task) => {
           const id = task.id ?? uid('task')
@@ -427,10 +454,15 @@ export const useStore = create<AppState>()(
           // Companion entry disappears automatically. Study Companion is
           // strictly a live mirror of "quizzes you can still take", once
           // the quiz is gone, the review/chat for it should be gone too.
-          set((state) => ({
-            quizzes: state.quizzes.filter((q) => q.id !== id),
-            attempts: state.attempts.filter((a) => a.quizId !== id),
-          }))
+          set((state) => {
+            const nextChats = { ...state.chatSessions };
+            delete nextChats[id];
+            return {
+              quizzes: state.quizzes.filter((q) => q.id !== id),
+              attempts: state.attempts.filter((a) => a.quizId !== id),
+              chatSessions: nextChats,
+            };
+          })
         },
         setTasks: (tasks) => set({ tasks }),
         plannerEvents: [],

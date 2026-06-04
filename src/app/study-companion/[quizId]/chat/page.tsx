@@ -1,18 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, Send, Sparkles } from "lucide-react";
+import { ArrowLeft, Send, Sparkles, Trash2 } from "lucide-react";
 import { use, useEffect, useMemo, useRef, useState } from "react";
 import { useQuizById } from "@/lib/quiz-data";
 import { modelTier } from "@/lib/ai/openrouter";
 import ModelPicker, { DEFAULT_MODEL_ID } from "@/components/ui/model-picker";
 import { useStore } from "@/store/use-store";
-
-type Message = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-};
+import { useAiAnalyze } from "@/lib/use-ai-analyze";
+import type { ChatMessage as Message } from "@/store/use-store";
 
 // Inline-format a single line: **bold**, *italic*, _italic_, `code`.
 function renderInline(text: string, keyBase: string): React.ReactNode[] {
@@ -54,8 +50,58 @@ function renderInline(text: string, keyBase: string): React.ReactNode[] {
   return tokens;
 }
 
+// Convert LaTeX/TeX math into readable plain text. The model is told to write
+// plain-text math, but Claude often slips into LaTeX for equations — which
+// renders as unreadable raw "\[ \frac{a}{b} \]" in a plain chat bubble. This
+// normalizes the common constructs so the math stays legible regardless.
+function texToPlain(input: string): string {
+  let s = input;
+  // Drop math-mode delimiters, keep the inner content.
+  s = s.replace(/\$\$([\s\S]*?)\$\$/g, "$1"); // $$ ... $$
+  s = s.replace(/\\\[|\\\]|\\\(|\\\)/g, " "); // \[ \] \( \)
+  s = s.replace(/\$([^$\n]+)\$/g, "$1"); // $ ... $
+  // Resolve superscripts/subscripts FIRST so their braces don't break the
+  // \frac / \boxed matchers below: x^{n} -> x^n (single char) or x^(n+1).
+  s = s.replace(/([\^_])\{([^{}]+)\}/g, (_m, op, inner) =>
+    inner.length === 1 ? `${op}${inner}` : `${op}(${inner})`,
+  );
+  // Peel \sqrt{...} -> sqrt(...) and \frac{a}{b} -> (a)/(b) together, a few
+  // passes, so nesting in either direction (frac-in-sqrt or sqrt-in-frac,
+  // e.g. the quadratic formula) resolves one level per pass.
+  for (let i = 0; i < 4; i++) {
+    const before = s;
+    s = s.replace(/\\sqrt\s*\{([^{}]*)\}/g, "sqrt($1)");
+    s = s.replace(/\\d?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, "($1)/($2)");
+    if (s === before) break;
+  }
+  // Wrappers — run after \frac/\sqrt so nested content inside is already plain.
+  s = s.replace(/\\(?:boxed|text|mathrm|mathbf|operatorname)\s*\{([^{}]*)\}/g, "$1");
+  // Operators / symbols.
+  s = s
+    .replace(/\\int/g, "∫")
+    .replace(/\\sum/g, "Σ")
+    .replace(/\\cdot/g, "·")
+    .replace(/\\times/g, "×")
+    .replace(/\\div/g, "÷")
+    .replace(/\\pm/g, "±")
+    .replace(/\\infty/g, "∞")
+    .replace(/\\leq/g, "<=")
+    .replace(/\\geq/g, ">=")
+    .replace(/\\neq/g, "≠")
+    .replace(/\\(?:Longrightarrow|Rightarrow|implies)/g, "=>")
+    .replace(/\\to/g, "->")
+    .replace(/\\(?:quad|qquad|,|;|:|!)/g, " ");
+  // Spacing/sizing commands with no plain-text equivalent.
+  s = s.replace(/\\(?:left|right|big|bigg|Big|Bigg|displaystyle)\b/g, "");
+  // Any leftover "\command" -> keep the word (covers greek: \pi -> pi, etc.).
+  s = s.replace(/\\([a-zA-Z]+)/g, "$1");
+  // Stray braces left from grouping.
+  s = s.replace(/[{}]/g, "");
+  return s;
+}
+
 function renderMarkdown(content: string): React.ReactNode {
-  const lines = content.split(/\r?\n/);
+  const lines = texToPlain(content).split(/\r?\n/);
   const blocks: React.ReactNode[] = [];
   let listBuffer: { ordered: boolean; items: string[] } | null = null;
   let blockKey = 0;
@@ -125,6 +171,11 @@ export default function StudyCompanionChat({
   const { quizId } = use(params);
   const liveQuiz = useQuizById(quizId);
   const attempts = useStore((s) => s.attempts);
+  const setChatSession = useStore((s) => s.setChatSession);
+  const clearChatSession = useStore((s) => s.clearChatSession);
+  // Refreshes the shared free/premium counters (shown in the navbar) after a
+  // premium reply spends a credit.
+  const { refresh: refreshUsage } = useAiAnalyze();
 
   // Latest attempt for this quiz (so the AI sees what the user actually answered).
   const attempt = useMemo(() => {
@@ -182,6 +233,32 @@ export default function StudyCompanionChat({
   const [messages, setMessages] = useState<Message[]>([
     { id: "welcome", role: "assistant", content: welcomeContent },
   ]);
+  const [streaming, setStreaming] = useState(false);
+  const [chatModel, setChatModel] = useState(DEFAULT_MODEL_ID);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  // Gate persistence until we've loaded any saved transcript, so the initial
+  // welcome-only render can't overwrite a stored conversation.
+  const hydratedRef = useRef(false);
+
+  // Hydrate the saved transcript once (client-only, to avoid an SSR mismatch).
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    const stored = useStore.getState().chatSessions[quizId];
+    if (stored && stored.length > 0) {
+      setMessages(stored);
+    }
+    hydratedRef.current = true;
+  }, [quizId]);
+
+  // Persist the transcript whenever it settles (not mid-stream). A chat that's
+  // only the welcome message isn't worth saving — clearing it removes the
+  // stored entry entirely so a deleted chat stays deleted.
+  useEffect(() => {
+    if (!hydratedRef.current || streaming) return;
+    const hasConversation = messages.some((m) => m.id !== "welcome");
+    if (hasConversation) setChatSession(quizId, messages);
+    else clearChatSession(quizId);
+  }, [messages, streaming, quizId, setChatSession, clearChatSession]);
 
   // If the attempt loads after first render (e.g. from persisted store), refresh
   // the welcome message so the AI's opener reflects the real score.
@@ -192,13 +269,22 @@ export default function StudyCompanionChat({
       return [{ ...prev[0], content: welcomeContent }, ...prev.slice(1)];
     });
   }, [welcomeContent]);
-  const [streaming, setStreaming] = useState(false);
-  const [chatModel, setChatModel] = useState(DEFAULT_MODEL_ID);
-  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  const handleClearChat = () => {
+    if (
+      typeof window !== "undefined" &&
+      messages.some((m) => m.id !== "welcome") &&
+      !window.confirm("Delete this chat? This can't be undone.")
+    ) {
+      return;
+    }
+    clearChatSession(quizId);
+    setMessages([{ id: "welcome", role: "assistant", content: welcomeContent }]);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -317,6 +403,9 @@ export default function StudyCompanionChat({
       );
     } finally {
       setStreaming(false);
+      // Every reply spends a unit server-side (premium → 1 credit, free → 1
+      // daily-quota unit), so refresh both navbar counters without a reload.
+      refreshUsage();
     }
   };
 
@@ -330,10 +419,21 @@ export default function StudyCompanionChat({
           <ArrowLeft size={18} />
           <span className="text-sm">Back to Study Companion</span>
         </Link>
-        <span className="self-start sm:self-auto flex items-center gap-1 px-3 py-1 bg-indigo-50 text-indigo-primary text-xs font-medium rounded-full">
-          <Sparkles size={12} />
-          Powered by AI
-        </span>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={handleClearChat}
+            disabled={streaming}
+            className="flex items-center gap-1.5 rounded-full border border-gray-200 px-3 py-1 text-xs font-medium text-gray-primary transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+          >
+            <Trash2 size={12} />
+            Delete chat
+          </button>
+          <span className="flex items-center gap-1 px-3 py-1 bg-indigo-50 text-indigo-primary text-xs font-medium rounded-full">
+            <Sparkles size={12} />
+            Powered by AI
+          </span>
+        </div>
       </div>
 
       <div className="mb-8">

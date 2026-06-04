@@ -527,10 +527,10 @@ export default function CreateFlashcardModal({
             hint={
               selectedIsImage
                 ? modelTier(model) === "premium"
-                  ? "Premium model — reads handwriting & math from the image into Q&A cards (1 credit)."
+                  ? "Premium model — reads handwriting & math from the image into Q&A cards (1 credit per card)."
                   : "Free model on an image — runs Tesseract OCR for cover-and-reveal labels. For handwriting or math, pick a Premium model."
                 : modelTier(model) === "premium"
-                  ? "Premium model — uses 1 credit per generation."
+                  ? "Premium model — uses 1 credit per card generated."
                   : "Free model — rate-limited but no cost."
             }
           />

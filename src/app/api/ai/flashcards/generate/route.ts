@@ -12,10 +12,10 @@ import {
   AllModelsFailedError,
   resolveChain,
   modelTier,
-  PREMIUM_CREDIT_COST,
   type Tier,
 } from "@/lib/ai/openrouter";
 import { spendCredit, refundCredit, getCredits } from "@/lib/ai/credits";
+import { peekQuota, consumeQuotaN, refundQuotaN } from "@/lib/ai/limits";
 import { normalizeOpenRouterFlashcards } from "@/lib/ai/normalizers";
 import { validateFlashcardPayload } from "@/lib/ai/validator";
 import { splitTextIntoChunks } from "@/lib/ai/splitter";
@@ -142,23 +142,66 @@ export async function POST(req: NextRequest) {
     }
 
     const requested = Number.isFinite(requestedCardsRaw) ? requestedCardsRaw : 0;
-    const effective = requested > 0 ? Math.min(requested, maxCards) : maxCards;
+    let effective = requested > 0 ? Math.min(requested, maxCards) : maxCards;
 
-    // Premium picks bill ONE credit per generation job (not per chunk).
-    let spentCredit = false;
+    // Billing: ONE unit per CARD generated, on BOTH tiers — premium spends
+    // durable credits, free spends the daily free quota. We reserve units up
+    // front for the full target (capped to what the user can afford), then
+    // refund any cards we don't end up producing.
+    let reservedCredits = 0;
+    let reservedFree = 0;
     if (isPremium) {
-      const balance = await spendCredit(userId, PREMIUM_CREDIT_COST);
-      if (balance === null) {
+      const balance = await getCredits(userId);
+      if (balance <= 0) {
         return NextResponse.json(
           {
             error: `Not enough premium credits. Buy a credit pack to generate with this model.`,
             needsCredits: true,
-            cost: PREMIUM_CREDIT_COST,
+            cost: 1,
           },
           { status: 402 },
         );
       }
-      spentCredit = true;
+      // Can't generate (or charge for) more cards than the user can afford.
+      effective = Math.max(1, Math.min(effective, balance));
+      const newBalance = await spendCredit(userId, effective);
+      if (newBalance === null) {
+        return NextResponse.json(
+          {
+            error: `Not enough premium credits. Buy a credit pack to generate with this model.`,
+            needsCredits: true,
+            cost: effective,
+          },
+          { status: 402 },
+        );
+      }
+      reservedCredits = effective;
+    } else {
+      const remaining = await peekQuota(userId);
+      if (remaining <= 0) {
+        return NextResponse.json(
+          {
+            error:
+              "Daily free limit reached (resets at midnight UTC). Use premium credits to generate more.",
+            quotaExceeded: true,
+          },
+          { status: 429 },
+        );
+      }
+      // Don't generate (or charge for) more than the remaining daily quota.
+      effective = Math.max(1, Math.min(effective, remaining));
+      reservedFree = await consumeQuotaN(userId, effective);
+      if (reservedFree < 1) {
+        return NextResponse.json(
+          {
+            error:
+              "Daily free limit reached (resets at midnight UTC). Use premium credits to generate more.",
+            quotaExceeded: true,
+          },
+          { status: 429 },
+        );
+      }
+      effective = reservedFree;
     }
 
     // Shared system prompt — same contract for text and vision so the polish
@@ -228,15 +271,16 @@ export async function POST(req: NextRequest) {
         return `\n\nDo NOT repeat or rephrase any of these already-created card fronts:\n${recent}`;
       };
 
-      // `want` sizes the output token cap so the JSON array for that many
-      // cards isn't truncated (~130 tokens per card + overhead).
+      // No output token cap (`maxTokens: 0`) — the model returns as many
+      // tokens as it wants, so the JSON array is never truncated mid-way
+      // regardless of how many cards it produces. Runtime is still bounded by
+      // the per-call `deadlineMs` and the route's maxDuration.
       const runCall = async (
         messages: Parameters<typeof chatWithFallback>[0],
-        want: number,
       ): Promise<{ front: string; back: string }[]> => {
         const resp = await chatWithFallback(messages, chain, {
           deadlineMs: remainingBudget(),
-          maxTokens: 400 + want * 140,
+          maxTokens: 0,
         });
         const parsed = normalizeOpenRouterFlashcards(resp.content);
         if (!parsed || !parsed.cards?.length) return [];
@@ -271,24 +315,23 @@ export async function POST(req: NextRequest) {
               `because it is handwritten.` + avoidClause();
             try {
               pushUnique(
-                await runCall(
-                  [
-                    { role: "system", content: system },
-                    {
-                      role: "user",
-                      content: [
-                        { type: "text", text: userInstruction },
-                        { type: "image_url", image_url: { url: dataUrl } },
-                      ],
-                    },
-                  ],
-                  want,
-                ),
+                await runCall([
+                  { role: "system", content: system },
+                  {
+                    role: "user",
+                    content: [
+                      { type: "text", text: userInstruction },
+                      { type: "image_url", image_url: { url: dataUrl } },
+                    ],
+                  },
+                ]),
               );
             } catch (err) {
               if (isPremium && err instanceof AllModelsFailedError) {
-                await refundCredit(userId, PREMIUM_CREDIT_COST);
-                spentCredit = false;
+                if (reservedCredits > 0) {
+                  await refundCredit(userId, reservedCredits);
+                  reservedCredits = 0;
+                }
                 return NextResponse.json(
                   { error: err.message, credits: await getCredits(userId) },
                   { status: 503 },
@@ -317,18 +360,17 @@ export async function POST(req: NextRequest) {
               avoidClause();
             try {
               pushUnique(
-                await runCall(
-                  [
-                    { role: "system", content: system },
-                    { role: "user", content: user },
-                  ],
-                  want,
-                ),
+                await runCall([
+                  { role: "system", content: system },
+                  { role: "user", content: user },
+                ]),
               );
             } catch (err) {
               if (isPremium && err instanceof AllModelsFailedError) {
-                await refundCredit(userId, PREMIUM_CREDIT_COST);
-                spentCredit = false;
+                if (reservedCredits > 0) {
+                  await refundCredit(userId, reservedCredits);
+                  reservedCredits = 0;
+                }
                 return NextResponse.json(
                   { error: err.message, credits: await getCredits(userId) },
                   { status: 503 },
@@ -344,13 +386,19 @@ export async function POST(req: NextRequest) {
       cards = collected.slice(0, target);
     }
 
+    // Bill 1 unit per card actually produced. Refund the gap between what we
+    // reserved up front and what we generated (covers the zero-card case too —
+    // the extractor fallback below is free).
+    if (isPremium && reservedCredits > cards.length) {
+      await refundCredit(userId, reservedCredits - cards.length);
+      reservedCredits = cards.length;
+    }
+    if (!isPremium && reservedFree > cards.length) {
+      await refundQuotaN(userId, reservedFree - cards.length);
+      reservedFree = cards.length;
+    }
+
     if (!cards || cards.length === 0) {
-      // Refund any premium credit since the user didn't actually consume the
-      // paid model.
-      if (spentCredit) {
-        await refundCredit(userId, PREMIUM_CREDIT_COST);
-        spentCredit = false;
-      }
       if (isImage) {
         // No deterministic fallback for images — vision is the only path.
         return NextResponse.json(
