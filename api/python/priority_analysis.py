@@ -25,12 +25,12 @@ from datetime import datetime
 # MCDA Engine
 # ---------------------------------------------------------------------------
 
-WEIGHT_IMPACT = 0.22
-WEIGHT_SKS = 0.08
-WEIGHT_URGENCY = 0.30
-WEIGHT_GAP = 0.18
-WEIGHT_EFFICIENCY = 0.14  # grade-per-hour benefit: same grade in less time wins
-WEIGHT_EFFORT = 0.08      # remaining cost penalty for genuinely overwhelming tasks
+WEIGHT_IMPACT       = 0.22      # how much the task affects the final grade
+WEIGHT_SKS          = 0.08      # course credit weight: a high-grade-impact
+WEIGHT_URGENCY      = 0.30      # how close is the deadline?
+WEIGHT_GAP          = 0.18      # how critical it is relative to passing threshold
+WEIGHT_EFFICIENCY   = 0.14      # grade-per-hour benefit: same grade in less time wins
+WEIGHT_EFFORT       = 0.08      # remaining cost penalty for genuinely overwhelming tasks
 
 HIGH_THRESHOLD = 0.5
 MEDIUM_THRESHOLD = 0.3
@@ -38,24 +38,31 @@ MEDIUM_THRESHOLD = 0.3
 # Criteria order used in TOPSIS and matrix construction. Efficiency is a
 # benefit criterion (higher → better); effort_penalty is the only cost.
 CRITERIA_KEYS = [
+    "urgency",
     "grade_impact",
     "sks_score",
-    "urgency",
     "gap_factor",
     "efficiency",
     "effort_penalty",
 ]
 CRITERIA_WEIGHTS = [
+    WEIGHT_URGENCY,
     WEIGHT_IMPACT,
     WEIGHT_SKS,
-    WEIGHT_URGENCY,
     WEIGHT_GAP,
     WEIGHT_EFFICIENCY,
     WEIGHT_EFFORT,
 ]
-CRITERIA_BENEFIT = [True, True, True, True, True, False]
+CRITERIA_BENEFIT = [
+    True,   # urgency: more urgent is better to prioritize
+    True,   # grade_impact: higher impact is better
+    True,   # sks_score: more credits is generally more important
+    True,   # gap_factor: bigger gap to passing threshold is more critical
+    True,   # efficiency: higher grade-per-hour is better
+    False,  # effort_penalty: higher effort cost should reduce priority
+]
 
-TYPE_MULTIPLIER = { "exam": 1.30, "project": 1.15, "quiz": 1.15, "homework": 0.95, "generic": 1.00 }
+TYPE_MULTIPLIER = { "exam": 1.00, "project": 1.15, "quiz": 1.00, "homework": 0.95, "generic": 1.00 }
 
 
 def _normalize(value: float, min_val: float, max_val: float) -> float:
@@ -120,20 +127,21 @@ def _effort_score(
 
 
 def _clamp01(x: float) -> float:
+    """Clamp a float to the [0, 1] range."""
     return max(0.0, min(1.0, float(x)))
 
 
 def compute_breakdown(data: dict) -> dict:
     """Compute normalized criteria values and the composite score for one task."""
-    grade_weight = float(data.get("grade_weight", 0))
-    sks = float(data.get("sks", data.get("credits", 0)))
+    grade_weight    = float(data.get("grade_weight", 0))
+    sks             = float(data.get("sks", data.get("credits", 0)))
     estimated_hours = float(data.get("estimated_hours", 1))
-    deadline_days = float(data.get("deadline_days", 7))
-    current_grade = float(data.get("current_grade", 0))
-    passing_grade = float(data.get("passing_grade", 75))
+    deadline_days   = float(data.get("deadline_days", 7))
+    current_grade   = float(data.get("current_grade", 0))
+    passing_grade   = float(data.get("passing_grade", 75))
     weekly_capacity = float(data.get("weekly_capacity_hours", 40))
-    completion_pct = float(data.get("completion_pct", 0))
-    task_type = str(data.get("task_type", "generic")).lower()
+    completion_pct  = float(data.get("completion_pct", 0))
+    task_type       = str(data.get("task_type", "generic")).lower()
 
     # impact adjusted by task type
     multiplier = TYPE_MULTIPLIER.get(task_type, 1.0)
@@ -361,8 +369,10 @@ def analyze_batch(data: dict) -> dict:
 
     # default: sort by composite_score descending
     results.sort(key=lambda r: r["composite_score"], reverse=True)
-    return {"method": "weighted", "tasks": results, "summary": _build_batch_summary(results)}
-
+    return_dict = {"method": "weighted", "tasks": results, "summary": _build_batch_summary(results)}
+    
+    _print_batch_report(return_dict)  # Print the batch report for local demos
+    return return_dict
 
 def record_feedback(feedback: dict) -> dict:
     """Append feedback as JSONL for future calibration."""
@@ -469,207 +479,259 @@ if __name__ == "__main__":
     demo_data = {
         "method": "topsis",
         "tasks": [
+            # {
+            #     "task_name": "Mathematics Midterm Exam",
+            #     "task_type": "exam",
+            #     "sks": 3,
+            #     "grade_weight": 25,
+            #     "estimated_hours": 10,
+            #     "deadline_days": 2,
+            #     "current_grade": 58,
+            #     "passing_grade": 70,
+            #     "weekly_capacity_hours": 20,
+            # },
+            # {
+            #     "task_name": "Physics Lab Report",
+            #     "task_type": "project",
+            #     "sks": 2,
+            #     "grade_weight": 15,
+            #     "estimated_hours": 6,
+            #     "deadline_days": 4,
+            #     "current_grade": 62,
+            #     "passing_grade": 70,
+            #     "weekly_capacity_hours": 18,
+            # },
+            # {
+            #     "task_name": "Programming Quiz 3",
+            #     "task_type": "quiz",
+            #     "sks": 1,
+            #     "grade_weight": 10,
+            #     "estimated_hours": 2,
+            #     "deadline_days": 1,
+            #     "current_grade": 66,
+            #     "passing_grade": 70,
+            #     "weekly_capacity_hours": 16,
+            # },
+            # {
+            #     "task_name": "History Essay Draft",
+            #     "task_type": "assignment",
+            #     "sks": 2,
+            #     "grade_weight": 12,
+            #     "estimated_hours": 5,
+            #     "deadline_days": 7,
+            #     "current_grade": 74,
+            #     "passing_grade": 70,
+            #     "weekly_capacity_hours": 15,
+            # },
+            # {
+            #     "task_name": "Chemistry Problem Set",
+            #     "task_type": "homework",
+            #     "sks": 2,
+            #     "grade_weight": 8,
+            #     "estimated_hours": 4,
+            #     "deadline_days": 3,
+            #     "current_grade": 49,
+            #     "passing_grade": 70,
+            #     "weekly_capacity_hours": 14,
+            # },
+            # {
+            #     "task_name": "Data Structures Project",
+            #     "task_type": "project",
+            #     "sks": 4,
+            #     "grade_weight": 20,
+            #     "estimated_hours": 12,
+            #     "deadline_days": 10,
+            #     "current_grade": 55,
+            #     "passing_grade": 70,
+            #     "weekly_capacity_hours": 18,
+            # },
+            # {
+            #     "task_name": "English Vocabulary Quiz",
+            #     "task_type": "quiz",
+            #     "sks": 1,
+            #     "grade_weight": 5,
+            #     "estimated_hours": 1,
+            #     "deadline_days": 2,
+            #     "current_grade": 78,
+            #     "passing_grade": 70,
+            #     "weekly_capacity_hours": 10,
+            # },
+            # {
+            #     "task_name": "Statistics Assignment 2",
+            #     "task_type": "assignment",
+            #     "sks": 3,
+            #     "grade_weight": 14,
+            #     "estimated_hours": 7,
+            #     "deadline_days": 5,
+            #     "current_grade": 60,
+            #     "passing_grade": 70,
+            #     "weekly_capacity_hours": 16,
+            # },
+            # {
+            #     "task_name": "Biology Practical Exam",
+            #     "task_type": "exam",
+            #     "sks": 3,
+            #     "grade_weight": 18,
+            #     "estimated_hours": 8,
+            #     "deadline_days": 6,
+            #     "current_grade": 68,
+            #     "passing_grade": 70,
+            #     "weekly_capacity_hours": 20,
+            # },
+            # {
+            #     "task_name": "Marketing Case Study",
+            #     "task_type": "project",
+            #     "sks": 2,
+            #     "grade_weight": 12,
+            #     "estimated_hours": 4,
+            #     "deadline_days": 14,
+            #     "current_grade": 72,
+            #     "passing_grade": 70,
+            #     "weekly_capacity_hours": 12,
+            # },
+            # {
+            #     "task_name": "Economics Weekly Homework",
+            #     "task_type": "homework",
+            #     "sks": 1,
+            #     "grade_weight": 6,
+            #     "estimated_hours": 2,
+            #     "deadline_days": 1,
+            #     "current_grade": 40,
+            #     "passing_grade": 70,
+            #     "weekly_capacity_hours": 10,
+            # },
+            # {
+            #     "task_name": "Computer Networks Quiz",
+            #     "task_type": "quiz",
+            #     "sks": 2,
+            #     "grade_weight": 9,
+            #     "estimated_hours": 3,
+            #     "deadline_days": 3,
+            #     "current_grade": 71,
+            #     "passing_grade": 70,
+            #     "weekly_capacity_hours": 14,
+            # },
+            # {
+            #     "task_name": "Sociology Term Paper",
+            #     "task_type": "project",
+            #     "sks": 3,
+            #     "grade_weight": 22,
+            #     "estimated_hours": 15,
+            #     "deadline_days": 20,
+            #     "current_grade": 53,
+            #     "passing_grade": 70,
+            #     "weekly_capacity_hours": 20,
+            # },
+            # {
+            #     "task_name": "Accounting Worksheet",
+            #     "task_type": "assignment",
+            #     "sks": 1,
+            #     "grade_weight": 7,
+            #     "estimated_hours": 3,
+            #     "deadline_days": 2,
+            #     "current_grade": 69,
+            #     "passing_grade": 70,
+            #     "weekly_capacity_hours": 12,
+            # },
+            # {
+            #     "task_name": "Design Portfolio Review",
+            #     "task_type": "project",
+            #     "sks": 2,
+            #     "grade_weight": 16,
+            #     "estimated_hours": 9,
+            #     "deadline_days": 8,
+            #     "current_grade": 76,
+            #     "passing_grade": 70,
+            #     "weekly_capacity_hours": 18,
+            # },
+            # {
+            #     "task_name": "Philosophy Reflection Essay",
+            #     "task_type": "assignment",
+            #     "sks": 2,
+            #     "grade_weight": 10,
+            #     "estimated_hours": 5,
+            #     "deadline_days": 9,
+            #     "current_grade": 61,
+            #     "passing_grade": 70,
+            #     "weekly_capacity_hours": 15,
+            # },
+            # {
+            #     "task_name": "Information Systems Final Exam",
+            #     "task_type": "exam",
+            #     "sks": 4,
+            #     "grade_weight": 30,
+            #     "estimated_hours": 14,
+            #     "deadline_days": 40,
+            #     "current_grade": 64,
+            #     "passing_grade": 70,
+            #     "weekly_capacity_hours": 25,
+            # },
+            # {
+            #     "task_name": "Literature Reading Response",
+            #     "task_type": "homework",
+            #     "sks": 1,
+            #     "grade_weight": 4,
+            #     "estimated_hours": 2,
+            #     "deadline_days": 5,
+            #     "current_grade": 80,
+            #     "passing_grade": 70,
+            #     "weekly_capacity_hours": 8,
+            # },
             {
-                "task_name": "Mathematics Midterm Exam",
-                "task_type": "exam",
+                "task_name": "project",
+                "task_type": "project",
                 "sks": 3,
-                "grade_weight": 25,
-                "estimated_hours": 10,
-                "deadline_days": 2,
-                "current_grade": 58,
-                "passing_grade": 70,
-                "weekly_capacity_hours": 20,
-            },
-            {
-                "task_name": "Physics Lab Report",
-                "task_type": "project",
-                "sks": 2,
-                "grade_weight": 15,
-                "estimated_hours": 6,
-                "deadline_days": 4,
-                "current_grade": 62,
-                "passing_grade": 70,
-                "weekly_capacity_hours": 18,
-            },
-            {
-                "task_name": "Programming Quiz 3",
-                "task_type": "quiz",
-                "sks": 1,
-                "grade_weight": 10,
-                "estimated_hours": 2,
-                "deadline_days": 1,
-                "current_grade": 66,
-                "passing_grade": 70,
-                "weekly_capacity_hours": 16,
-            },
-            {
-                "task_name": "History Essay Draft",
-                "task_type": "assignment",
-                "sks": 2,
-                "grade_weight": 12,
-                "estimated_hours": 5,
-                "deadline_days": 7,
-                "current_grade": 74,
-                "passing_grade": 70,
-                "weekly_capacity_hours": 15,
-            },
-            {
-                "task_name": "Chemistry Problem Set",
-                "task_type": "homework",
-                "sks": 2,
-                "grade_weight": 8,
-                "estimated_hours": 4,
-                "deadline_days": 3,
-                "current_grade": 49,
-                "passing_grade": 70,
-                "weekly_capacity_hours": 14,
-            },
-            {
-                "task_name": "Data Structures Project",
-                "task_type": "project",
-                "sks": 4,
                 "grade_weight": 20,
-                "estimated_hours": 12,
-                "deadline_days": 10,
-                "current_grade": 55,
-                "passing_grade": 70,
-                "weekly_capacity_hours": 18,
-            },
-            {
-                "task_name": "English Vocabulary Quiz",
-                "task_type": "quiz",
-                "sks": 1,
-                "grade_weight": 5,
-                "estimated_hours": 1,
+                "estimated_hours": 20,
                 "deadline_days": 2,
-                "current_grade": 78,
-                "passing_grade": 70,
-                "weekly_capacity_hours": 10,
+                "current_grade": 23,
+                "passing_grade": 75,
+                "weekly_capacity_hours": 8*5,
             },
-            {
-                "task_name": "Statistics Assignment 2",
-                "task_type": "assignment",
-                "sks": 3,
-                "grade_weight": 14,
-                "estimated_hours": 7,
-                "deadline_days": 5,
-                "current_grade": 60,
-                "passing_grade": 70,
-                "weekly_capacity_hours": 16,
-            },
-            {
-                "task_name": "Biology Practical Exam",
-                "task_type": "exam",
-                "sks": 3,
-                "grade_weight": 18,
-                "estimated_hours": 8,
-                "deadline_days": 6,
-                "current_grade": 68,
-                "passing_grade": 70,
-                "weekly_capacity_hours": 20,
-            },
-            {
-                "task_name": "Marketing Case Study",
-                "task_type": "project",
-                "sks": 2,
-                "grade_weight": 12,
-                "estimated_hours": 4,
-                "deadline_days": 14,
-                "current_grade": 72,
-                "passing_grade": 70,
-                "weekly_capacity_hours": 12,
-            },
-            {
-                "task_name": "Economics Weekly Homework",
+                        {
+                "task_name": "homework",
                 "task_type": "homework",
-                "sks": 1,
-                "grade_weight": 6,
-                "estimated_hours": 2,
-                "deadline_days": 1,
-                "current_grade": 40,
-                "passing_grade": 70,
-                "weekly_capacity_hours": 10,
-            },
-            {
-                "task_name": "Computer Networks Quiz",
-                "task_type": "quiz",
-                "sks": 2,
-                "grade_weight": 9,
-                "estimated_hours": 3,
-                "deadline_days": 3,
-                "current_grade": 71,
-                "passing_grade": 70,
-                "weekly_capacity_hours": 14,
-            },
-            {
-                "task_name": "Sociology Term Paper",
-                "task_type": "project",
-                "sks": 3,
-                "grade_weight": 22,
-                "estimated_hours": 15,
-                "deadline_days": 20,
-                "current_grade": 53,
-                "passing_grade": 70,
-                "weekly_capacity_hours": 20,
-            },
-            {
-                "task_name": "Accounting Worksheet",
-                "task_type": "assignment",
-                "sks": 1,
-                "grade_weight": 7,
-                "estimated_hours": 3,
-                "deadline_days": 2,
-                "current_grade": 69,
-                "passing_grade": 70,
-                "weekly_capacity_hours": 12,
-            },
-            {
-                "task_name": "Design Portfolio Review",
-                "task_type": "project",
-                "sks": 2,
-                "grade_weight": 16,
-                "estimated_hours": 9,
-                "deadline_days": 8,
-                "current_grade": 76,
-                "passing_grade": 70,
-                "weekly_capacity_hours": 18,
-            },
-            {
-                "task_name": "Philosophy Reflection Essay",
-                "task_type": "assignment",
                 "sks": 2,
                 "grade_weight": 10,
-                "estimated_hours": 5,
-                "deadline_days": 9,
-                "current_grade": 61,
-                "passing_grade": 70,
-                "weekly_capacity_hours": 15,
-            },
-            {
-                "task_name": "Information Systems Final Exam",
-                "task_type": "exam",
-                "sks": 4,
-                "grade_weight": 30,
-                "estimated_hours": 14,
-                "deadline_days": 40,
-                "current_grade": 64,
-                "passing_grade": 70,
-                "weekly_capacity_hours": 25,
-            },
-            {
-                "task_name": "Literature Reading Response",
-                "task_type": "homework",
-                "sks": 1,
-                "grade_weight": 4,
                 "estimated_hours": 2,
-                "deadline_days": 5,
-                "current_grade": 80,
-                "passing_grade": 70,
-                "weekly_capacity_hours": 8,
+                "deadline_days": 1,
+                "current_grade": 18,
+                "passing_grade": 60,
+                "weekly_capacity_hours": 8*5,
             }
         ],
     }
+    
+    demo_data = {
+            "method": "topsis",
+            "tasks": [
+{
+    "task_id": "ca07bc04-5234-46f4-b2ad-99aff9bf3d38",
+    "task_name": "homework1",
+    "task_type": "homework",
+    "sks": 2,
+    "grade_weight": 10,
+    "estimated_hours": 2,
+    "deadline_days": 2,
+    "current_grade": 18,
+    "passing_grade": 65,
+    "weekly_capacity_hours": 49
+},
+{
+    "task_id": "61f76490-34d4-4649-8afa-9fa7f9f47b15",
+    "task_name": "tes",
+    "task_type": "generic",
+    "sks": 3,
+    "grade_weight": 30,
+    "estimated_hours": 20,
+    "deadline_days": 10,
+    "current_grade": 50,
+    "passing_grade": 75,
+    "weekly_capacity_hours": 49
+}
+            ]
+        }
 
     _print_batch_report(analyze_batch(demo_data))
     
-    # print(json.dumps(analyze_batch(demo_data), indent=2))
+    print(json.dumps(analyze_batch(demo_data), indent=2))
