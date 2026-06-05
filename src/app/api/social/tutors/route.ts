@@ -1,0 +1,68 @@
+import { NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getUserId } from "@/lib/get-user-id";
+
+// profiles/social tables aren't in the generated Database type, so cast.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const db = supabaseAdmin as any;
+
+/** Reputation score: stars dominate, followers and hosted sessions add to it.
+ *  "more followers + more stars + more engagement => higher standing." */
+function reputation(p: { rating_avg?: number; rating_count?: number; follower_count?: number; sessions_hosted?: number }): number {
+  const stars = Number(p.rating_avg ?? 0);
+  const ratings = Number(p.rating_count ?? 0);
+  const followers = Number(p.follower_count ?? 0);
+  const hosted = Number(p.sessions_hosted ?? 0);
+  return Math.round(stars * 20 + Math.min(ratings, 50) + followers + hosted * 5);
+}
+
+// GET /api/social/tutors — ranked tutor directory
+export async function GET() {
+  try {
+    const userId = await getUserId();
+    if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const { data: tutors, error } = await db
+      .from("profiles")
+      .select("id, full_name, avatar_url, headline, bio, tutor_subjects, follower_count, rating_avg, rating_count, sessions_hosted")
+      .eq("is_tutor", true)
+      .limit(100);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    // Who do I already follow? (to render follow state)
+    const { data: myFollows } = await db.from("follows").select("following_id").eq("follower_id", userId);
+    const followingSet = new Set((myFollows ?? []).map((f: { following_id: string }) => f.following_id));
+
+    const ranked = (tutors ?? [])
+      .map((t: Record<string, unknown>) => ({
+        ...t,
+        reputation: reputation(t),
+        is_following: followingSet.has(t.id),
+        is_me: t.id === userId,
+      }))
+      .sort((a: { reputation: number }, b: { reputation: number }) => b.reputation - a.reputation);
+
+    return NextResponse.json({ tutors: ranked });
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+  }
+}
+
+// POST /api/social/tutors — become / update a tutor profile
+export async function POST(req: Request) {
+  try {
+    const userId = await getUserId();
+    if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const body = await req.json();
+    const updates: Record<string, unknown> = { is_tutor: body.is_tutor !== false };
+    if (body.headline !== undefined) updates.headline = String(body.headline).slice(0, 140);
+    if (body.bio !== undefined) updates.bio = String(body.bio).slice(0, 2000);
+    if (Array.isArray(body.tutor_subjects)) updates.tutor_subjects = body.tutor_subjects.slice(0, 12);
+
+    const { data, error } = await db.from("profiles").update(updates).eq("id", userId).select().single();
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json(data);
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+  }
+}
