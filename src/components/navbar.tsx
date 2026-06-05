@@ -51,9 +51,20 @@ type Profile = {
 
 // Suggested interests used both for the profile picker and Study Buddy matching.
 const INTEREST_OPTIONS = [
-  "OS", "OOP", "Math", "Data Structures", "Algorithms", "Databases",
-  "Computer Networks", "Web Dev", "Machine Learning", "Statistics",
-  "Calculus", "Physics", "Cybersecurity", "AI",
+  "OS",
+  "OOP",
+  "Math",
+  "Data Structures",
+  "Algorithms",
+  "Databases",
+  "Computer Networks",
+  "Web Dev",
+  "Machine Learning",
+  "Statistics",
+  "Calculus",
+  "Physics",
+  "Cybersecurity",
+  "AI",
 ];
 
 /* ------------------------------------------------------------------ */
@@ -607,12 +618,12 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
           button at every breakpoint. */}
       <div
         data-tour="ai-credits"
-        className="order-3 w-full flex items-center justify-center gap-2 sm:order-none sm:w-auto sm:ml-auto sm:shrink-0 sm:justify-end"
+        className="order-3 flex items-center justify-center mx-auto gap-2 sm:order-0 w-auto sm:ml-auto sm:shrink-0 sm:justify-end"
       >
-        <span className="inline-flex flex-1 sm:flex-none items-center justify-center whitespace-nowrap rounded-full bg-gray-100 px-3 py-2 text-sm font-medium text-gray-700 sm:py-1.5 sm:text-xs">
+        <span className="inline-flex flex-1 sm:flex-none items-center justify-center whitespace-nowrap rounded-full bg-gray-100 px-3 py-2 text-xs font-medium text-gray-700 sm:py-1.5 sm:text-sm">
           {remaining ?? "…"} free today
         </span>
-        <span className="flex flex-1 sm:flex-none items-center justify-center gap-1 whitespace-nowrap rounded-full bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-primary sm:py-1.5 sm:text-xs">
+        <span className="flex flex-1 sm:flex-none items-center justify-center gap-1 whitespace-nowrap rounded-full bg-indigo-50 px-3 py-2 text-xs font-medium text-indigo-primary sm:py-1.5 sm:text-sm">
           <Zap size={12} className="shrink-0" />
           {credits ?? "…"} premium credits
         </span>
@@ -620,7 +631,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
           type="button"
           data-tour="buy-credits"
           onClick={() => setBuyOpen(true)}
-          className="flex-1 sm:flex-none whitespace-nowrap rounded-full bg-indigo-primary px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-600 sm:px-3 sm:py-1.5 sm:text-xs"
+          className="flex-1 sm:flex-none whitespace-nowrap rounded-full bg-indigo-primary px-4 py-2 text-xs font-medium text-white transition hover:bg-indigo-600 sm:px-3 sm:py-1.5 sm:text-sm"
         >
           Buy credits
         </button>
@@ -733,7 +744,9 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
               setEditSemester(
                 profile.semester != null ? String(profile.semester) : "",
               );
-              setEditInterests(Array.isArray(profile.interests) ? profile.interests : []);
+              setEditInterests(
+                Array.isArray(profile.interests) ? profile.interests : [],
+              );
               setEditPublic(profile.is_public !== false);
             }
           }}
@@ -858,7 +871,9 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
                         type="button"
                         onClick={() =>
                           setEditInterests((prev) =>
-                            prev.includes(opt) ? prev.filter((x) => x !== opt) : [...prev, opt],
+                            prev.includes(opt)
+                              ? prev.filter((x) => x !== opt)
+                              : [...prev, opt],
                           )
                         }
                         className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${

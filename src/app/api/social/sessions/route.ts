@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getUserId } from "@/lib/get-user-id";
+import { getMutualIds } from "@/lib/social";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const db = supabaseAdmin as any;
@@ -13,12 +14,17 @@ export async function GET() {
 
     const { data: sessions, error } = await db
       .from("study_sessions")
-      .select("id, host_id, title, course, description, scheduled_at, meet_url, capacity, participant_count, status, created_at")
+      .select("id, host_id, title, course, description, scheduled_at, meet_url, capacity, participant_count, status, audience, created_at")
       .order("scheduled_at", { ascending: true, nullsFirst: false })
-      .limit(60);
+      .limit(80);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    const list = sessions ?? [];
+    // Mutuals-only sessions are visible to the host and the host's mutuals.
+    const mutuals = await getMutualIds(db, userId);
+    const list = (sessions ?? []).filter(
+      (s: { audience?: string; host_id: string }) =>
+        s.audience !== "mutuals" || s.host_id === userId || mutuals.has(s.host_id),
+    );
     const hostIds = [...new Set(list.map((s: { host_id: string }) => s.host_id))];
     const ids = list.map((s: { id: string }) => s.id);
 
@@ -61,6 +67,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Add your meeting link (Google Meet, Zoom, etc.)" }, { status: 400 });
     }
 
+    // Audience rule: a public ("go global") host can only run GLOBAL sessions.
+    // A private host may choose 'mutuals' (default) or 'global'.
+    const { data: me } = await db.from("profiles").select("is_public").eq("id", userId).maybeSingle();
+    const isPublic = me?.is_public !== false;
+    const requested = body.audience === "mutuals" ? "mutuals" : "global";
+    const audience = isPublic ? "global" : requested;
+
     const capacity = Math.max(2, Math.min(50, Number(body.capacity) || 8));
     const row = {
       host_id: userId,
@@ -70,6 +83,7 @@ export async function POST(req: Request) {
       scheduled_at: body.scheduled_at ? new Date(body.scheduled_at).toISOString() : null,
       meet_url: meetUrl.slice(0, 500),
       capacity,
+      audience,
     };
     const { data, error } = await db.from("study_sessions").insert(row).select().single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getUserId } from "@/lib/get-user-id";
+import { getMutualIds } from "@/lib/social";
 
 // profiles/social tables aren't in the generated Database type, so cast.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -25,7 +26,7 @@ export async function GET() {
 
     const { data: tutors, error } = await db
       .from("profiles")
-      .select("id, full_name, avatar_url, headline, bio, tutor_subjects, interests, follower_count, rating_avg, rating_count, recommend_count, sessions_hosted")
+      .select("id, full_name, avatar_url, headline, bio, tutor_subjects, interests, is_public, follower_count, rating_avg, rating_count, recommend_count, sessions_hosted")
       .eq("is_tutor", true)
       .limit(100);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -34,7 +35,10 @@ export async function GET() {
     const { data: myFollows } = await db.from("follows").select("following_id").eq("follower_id", userId);
     const followingSet = new Set((myFollows ?? []).map((f: { following_id: string }) => f.following_id));
 
+    // Privacy: hide private tutors unless they're my mutual (or me).
+    const mutuals = await getMutualIds(db, userId);
     const ranked = (tutors ?? [])
+      .filter((t: { id: string; is_public?: boolean | null }) => t.is_public !== false || t.id === userId || mutuals.has(t.id))
       .map((t: Record<string, unknown>) => ({
         ...t,
         reputation: reputation(t),

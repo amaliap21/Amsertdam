@@ -24,6 +24,22 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Stars must be 1-5" }, { status: 400 });
     }
 
+    // Attend-first rule: you may only rate a host whose session you joined.
+    const { data: hostSessions } = await db.from("study_sessions").select("id").eq("host_id", tutor_id);
+    const sessionIds = (hostSessions ?? []).map((r: { id: string }) => r.id);
+    if (!sessionIds.length) {
+      return NextResponse.json({ error: "You can only rate a host after attending their session." }, { status: 403 });
+    }
+    const { data: attended } = await db
+      .from("session_participants")
+      .select("session_id")
+      .eq("user_id", userId)
+      .in("session_id", sessionIds)
+      .limit(1);
+    if (!attended || !attended.length) {
+      return NextResponse.json({ error: "Join one of their sessions before rating." }, { status: 403 });
+    }
+
     const { error } = await db.from("tutor_ratings").upsert(
       {
         tutor_id,

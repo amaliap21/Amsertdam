@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getUserId } from "@/lib/get-user-id";
+import { getMutualIds } from "@/lib/social";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const db = supabaseAdmin as any;
@@ -28,12 +29,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ joined: false });
     }
 
-    // Capacity check before joining.
     const { data: session } = await db
       .from("study_sessions")
-      .select("capacity, participant_count")
+      .select("capacity, participant_count, audience, host_id")
       .eq("id", session_id)
       .single();
+
+    // Mutuals-only sessions: only the host's mutuals may join.
+    if (session && session.audience === "mutuals" && session.host_id !== userId) {
+      const mutuals = await getMutualIds(db, userId);
+      if (!mutuals.has(session.host_id)) {
+        return NextResponse.json({ error: "This session is for the host's mutuals only" }, { status: 403 });
+      }
+    }
+
+    // Capacity check before joining.
     if (session && Number(session.participant_count) >= Number(session.capacity)) {
       return NextResponse.json({ error: "This session is full" }, { status: 409 });
     }
