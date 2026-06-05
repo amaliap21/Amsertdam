@@ -17,6 +17,7 @@ import {
   Globe,
   Lock,
   Check,
+  PencilLine,
   X,
 } from "lucide-react";
 import toast from "react-hot-toast";
@@ -28,7 +29,7 @@ import { useStore } from "@/store/use-store";
  * Sessions (audience-scoped) · Articles · Shared (materials between mutuals).
  */
 
-type Tab = "buddies" | "people" | "tutors" | "shared";
+type Tab = "people" | "tutors" | "shared";
 
 type Buddy = {
   user_id: string; name: string; is_tutor: boolean; match_score: number;
@@ -56,10 +57,11 @@ type Share = {
 };
 
 export default function CommunityPage() {
-  const [tab, setTab] = useState<Tab>("buddies");
+  const [tab, setTab] = useState<Tab>("people");
   const [loading, setLoading] = useState(false);
   const [isPublic, setIsPublic] = useState(false);
   const [isTutor, setIsTutor] = useState(false);
+  const [myTutor, setMyTutor] = useState<{ headline: string; subjects: string[] }>({ headline: "", subjects: [] });
 
   const [buddies, setBuddies] = useState<{ matches: Buddy[]; headline: string; my_public: boolean; my_courses: number } | null>(null);
   const [people, setPeople] = useState<{ mutuals: MiniProfile[]; incoming: MiniProfile[]; outgoing: MiniProfile[] }>({ mutuals: [], incoming: [], outgoing: [] });
@@ -69,18 +71,25 @@ export default function CommunityPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [shares, setShares] = useState<{ received: Share[]; sent: Share[] }>({ received: [], sent: [] });
 
-  useEffect(() => {
-    fetch("/api/profile").then((r) => r.json()).then((p) => { setIsPublic(p?.is_public === true); setIsTutor(p?.is_tutor === true); }).catch(() => {});
+  const refreshMe = useCallback(() => {
+    fetch("/api/profile").then((r) => r.json()).then((p) => {
+      setIsPublic(p?.is_public === true);
+      setIsTutor(p?.is_tutor === true);
+      setMyTutor({ headline: p?.headline ?? "", subjects: Array.isArray(p?.tutor_subjects) ? p.tutor_subjects : [] });
+    }).catch(() => {});
   }, []);
+  useEffect(() => { refreshMe(); }, [refreshMe]);
 
   const load = useCallback(async (which: Tab) => {
     setLoading(true);
     try {
-      if (which === "buddies") {
-        const j = await (await fetch("/api/study-buddy")).json();
-        setBuddies({ matches: j.matches ?? [], headline: j.summary?.headline ?? "", my_public: j.summary?.my_public ?? true, my_courses: j.summary?.my_courses ?? 0 });
-      } else if (which === "people") {
-        setPeople(await (await fetch("/api/social/connections")).json());
+      if (which === "people") {
+        const [b, c] = await Promise.all([
+          fetch("/api/study-buddy").then((r) => r.json()),
+          fetch("/api/social/connections").then((r) => r.json()),
+        ]);
+        setBuddies({ matches: b.matches ?? [], headline: b.summary?.headline ?? "", my_public: b.summary?.my_public ?? true, my_courses: b.summary?.my_courses ?? 0 });
+        setPeople(c);
       } else if (which === "tutors") {
         // Tutors tab also hosts sessions now.
         const [t, s] = await Promise.all([
@@ -90,7 +99,12 @@ export default function CommunityPage() {
         setTutors(t.tutors ?? []);
         setSessions(s.sessions ?? []);
       } else if (which === "shared") {
-        setShares(await (await fetch("/api/social/materials")).json());
+        const [m, c] = await Promise.all([
+          fetch("/api/social/materials").then((r) => r.json()),
+          fetch("/api/social/connections").then((r) => r.json()),
+        ]);
+        setShares(m);
+        setPeople(c); // populate mutuals for the share recipient picker
       }
     } catch {
       toast.error("Failed to load");
@@ -133,16 +147,32 @@ export default function CommunityPage() {
     try { await fetch("/api/social/follow", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ target_id: t.id }) }); }
     catch { load("tutors"); }
   };
-  const becomeTutor = async () => {
-    const headline = prompt("Your tutor headline (e.g. 'OS & Databases — I explain with diagrams')");
-    if (headline === null) return;
-    const subjects = prompt("Subjects you tutor (comma-separated)") ?? "";
+  const saveTutorProfile = async (headline: string, subjects: string[]) => {
     try {
-      await fetch("/api/social/tutors", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ is_tutor: true, headline, tutor_subjects: subjects.split(",").map((s) => s.trim()).filter(Boolean) }) });
-      toast.success("You're now a tutor — host a session to start earning stars.");
+      await fetch("/api/social/tutors", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ is_tutor: true, headline, tutor_subjects: subjects }) });
       setIsTutor(true);
+      setMyTutor({ headline, subjects });
+      toast.success("Tutor profile saved");
+      refreshMe();
       load("tutors");
     } catch { toast.error("Failed"); }
+  };
+  const stopTutoring = async () => {
+    try {
+      await fetch("/api/social/tutors", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ is_tutor: false }) });
+      setIsTutor(false);
+      toast.success("You're no longer a tutor");
+      refreshMe();
+      load("tutors");
+    } catch { toast.error("Failed"); }
+  };
+  const saveShared = async (shareId: string) => {
+    try {
+      const r = await fetch("/api/social/materials/save", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ share_id: shareId }) });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || "Failed");
+      toast.success(j.kind === "quiz" ? "Saved to Quiz Lab" : "Saved to Flashcards");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); }
   };
 
   // ---- sessions ----
@@ -168,8 +198,7 @@ export default function CommunityPage() {
       {/* Tabs */}
       <div className="mb-6 flex gap-1 overflow-x-auto border-b border-gray-200">
         {([
-          ["buddies", "Study Buddy", <Users key="b" size={15} />],
-          ["people", "People", <UserPlus key="p" size={15} />],
+          ["people", "People", <Users key="p" size={15} />],
           ["tutors", "Tutors & Sessions", <GraduationCap key="t" size={15} />],
           ["shared", "Shared", <Share2 key="sh" size={15} />],
         ] as [Tab, string, React.ReactNode][]).map(([key, label, icon]) => (
@@ -182,41 +211,39 @@ export default function CommunityPage() {
 
       {loading && <div className="flex items-center justify-center py-20 text-gray-400"><Loader2 className="animate-spin" /></div>}
 
-      {/* BUDDIES */}
-      {!loading && tab === "buddies" && buddies && (
-        <div>
-          {!buddies.my_public && <Banner>Your profile is private — others can&apos;t match with you. Turn on “Go global” in your profile.</Banner>}
-          {buddies.my_courses === 0 && <Banner>Add your courses in Passing Target so we can match you on what you study.</Banner>}
-          <div className="mb-4 rounded-xl border border-indigo-100 bg-indigo-50 p-4 text-sm font-medium text-indigo-primary">{buddies.headline}</div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {buddies.matches.map((m) => (
-              <div key={m.user_id} className="flex flex-col rounded-2xl border border-gray-200 bg-white p-5">
-                <div className="mb-3 flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <Avatar name={m.name} />
-                    <div>
-                      <p className="flex items-center gap-1.5 font-semibold text-black-primary">{m.name}{m.is_tutor && <Tag>Tutor</Tag>}</p>
-                      <span className="text-xs text-gray-primary">{m.match_type}</span>
-                    </div>
-                  </div>
-                  <div className="text-right"><p className="text-lg font-semibold text-indigo-primary">{Math.round(m.match_score)}</p><p className="text-[10px] uppercase text-gray-400">match</p></div>
-                </div>
-                <ul className="mb-4 flex flex-1 flex-col gap-1.5">
-                  {m.reasons.map((r, i) => <li key={i} className="flex items-start gap-2 text-sm text-gray-700"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-primary" />{r}</li>)}
-                </ul>
-                <button onClick={() => requestMutual(m.user_id)} className="flex items-center justify-center gap-2 rounded-lg border border-indigo-primary px-3 py-2 text-sm font-medium text-indigo-primary transition hover:bg-indigo-primary/5">
-                  <UserPlus size={15} /> Request mutual
-                </button>
-              </div>
-            ))}
-            {!buddies.matches.length && <Empty label="No matches yet — they appear as classmates add courses and go global." />}
-          </div>
-        </div>
-      )}
-
-      {/* PEOPLE */}
+      {/* PEOPLE (search + connections + suggested study buddies) */}
       {!loading && tab === "people" && (
         <div className="flex flex-col gap-6">
+          {/* Suggested study buddies — engine matches */}
+          <div>
+            <h2 className="mb-2 text-sm font-semibold text-black-primary">Suggested study buddies</h2>
+            {buddies && !buddies.my_public && <Banner>Your profile is private — others can&apos;t match with you. Turn on “Go global” in your profile to be discoverable.</Banner>}
+            {buddies && buddies.my_courses === 0 && <Banner>Add your courses in Passing Target so we can match you on what you study.</Banner>}
+            {buddies && buddies.matches.length > 0 && (
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {buddies.matches.map((m) => (
+                  <div key={m.user_id} className="flex flex-col rounded-2xl border border-gray-200 bg-white p-5">
+                    <div className="mb-3 flex items-start justify-between">
+                      <div className="flex items-center gap-3">
+                        <Avatar name={m.name} />
+                        <div><p className="flex items-center gap-1.5 font-semibold text-black-primary">{m.name}{m.is_tutor && <Tag>Tutor</Tag>}</p><span className="text-xs text-gray-primary">{m.match_type}</span></div>
+                      </div>
+                      <div className="text-right"><p className="text-lg font-semibold text-indigo-primary">{Math.round(m.match_score)}</p><p className="text-[10px] uppercase text-gray-400">match</p></div>
+                    </div>
+                    <ul className="mb-4 flex flex-1 flex-col gap-1.5">
+                      {m.reasons.map((r, i) => <li key={i} className="flex items-start gap-2 text-sm text-gray-700"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-primary" />{r}</li>)}
+                    </ul>
+                    <button onClick={() => requestMutual(m.user_id)} className="flex items-center justify-center gap-2 rounded-lg border border-indigo-primary px-3 py-2 text-sm font-medium text-indigo-primary transition hover:bg-indigo-primary/5">
+                      <UserPlus size={15} /> Request mutual
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {buddies && !buddies.matches.length && <p className="text-sm text-gray-400">No matches yet — they appear as classmates go global and add courses.</p>}
+          </div>
+
+          {/* Find people */}
           <div>
             <div className="mb-3 flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2">
               <Search size={16} className="text-gray-400" />
@@ -272,15 +299,9 @@ export default function CommunityPage() {
         <div className="flex flex-col gap-8">
           {/* Hosting — tutors only */}
           <div>
-            <h2 className="mb-3 text-sm font-semibold text-black-primary">Sessions</h2>
-            {isTutor ? (
-              <SessionComposer isPublic={isPublic} onCreated={() => load("tutors")} />
-            ) : (
-              <div className="flex flex-col items-start gap-2 rounded-xl border border-gray-200 bg-gray-50 p-4">
-                <p className="text-sm text-gray-primary">Only tutors can host &quot;study with me&quot; sessions.</p>
-                <button onClick={becomeTutor} className="flex items-center gap-2 rounded-lg bg-indigo-primary px-4 py-2 text-sm font-medium text-white hover:bg-indigo-600"><GraduationCap size={15} /> Become a tutor</button>
-              </div>
-            )}
+            <h2 className="mb-3 text-sm font-semibold text-black-primary">Your tutor profile</h2>
+            <TutorProfileCard isTutor={isTutor} headline={myTutor.headline} subjects={myTutor.subjects} onSave={saveTutorProfile} onStop={stopTutoring} />
+            {isTutor && <div className="mt-4"><SessionComposer isPublic={isPublic} onCreated={() => load("tutors")} /></div>}
             <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
               {sessions.map((s) => (
                 <div key={s.id} className="rounded-2xl border border-gray-200 bg-white p-5">
@@ -340,7 +361,7 @@ export default function CommunityPage() {
         <div>
           <ShareComposer mutuals={people.mutuals} onShared={() => load("shared")} ensureMutuals={() => load("people")} />
           <Section title={`Shared with you (${shares.received.length})`}>
-            {shares.received.map((r) => <ShareRow key={r.id} share={r} who={r.from?.full_name ?? "Someone"} dir="from" />)}
+            {shares.received.map((r) => <ShareRow key={r.id} share={r} who={r.from?.full_name ?? "Someone"} dir="from" onSave={saveShared} />)}
             {!shares.received.length && <p className="text-sm text-gray-400">Nothing shared with you yet.</p>}
           </Section>
           {shares.sent.length > 0 && (
@@ -382,16 +403,19 @@ function PersonRow({ name, subtitle, action }: { name: string | null; avatar?: s
     </div>
   );
 }
-function ShareRow({ share, who, dir }: { share: Share; who: string; dir: "from" | "to" }) {
+function ShareRow({ share, who, dir, onSave }: { share: Share; who: string; dir: "from" | "to"; onSave?: (id: string) => void }) {
   const icon = share.kind === "quiz" ? <BookOpenText size={15} /> : share.kind === "flashcard" ? <Star size={15} /> : <Share2 size={15} />;
   return (
     <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-3">
       <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-primary/10 text-indigo-primary">{icon}</span>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-black-primary">{share.title}</p>
-        <p className="truncate text-xs text-gray-primary">{share.kind} · {dir === "from" ? `from ${who}` : `to ${who}`}{share.note ? ` · ${share.note}` : ""}</p>
+        <p className="truncate text-xs text-gray-primary">{share.kind === "material" ? "PDF / link" : share.kind} · {dir === "from" ? `from ${who}` : `to ${who}`}{share.note ? ` · ${share.note}` : ""}</p>
       </div>
-      {share.url && <a href={share.url} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-indigo-primary px-3 py-1.5 text-xs font-medium text-indigo-primary">Open</a>}
+      {share.kind === "material" && share.url && <a href={share.url} target="_blank" rel="noopener noreferrer" className="shrink-0 rounded-lg border border-indigo-primary px-3 py-1.5 text-xs font-medium text-indigo-primary">Open</a>}
+      {dir === "from" && share.kind !== "material" && onSave && (
+        <button onClick={() => onSave(share.id)} className="shrink-0 rounded-lg bg-indigo-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-600">Save to my library</button>
+      )}
     </div>
   );
 }
@@ -434,6 +458,79 @@ function RateHost({ hostId, hostName, sessionId }: { hostId: string; hostName: s
           {recommend ? <Check size={14} /> : <span className="text-base leading-none">👍</span>} {recommend ? "Recommended" : "Recommend"}
         </button>
         <button type="button" disabled={saving} onClick={submit} className="rounded-lg bg-indigo-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-600 disabled:opacity-50">Submit</button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- tutor profile card (become / edit / undo) ---------------- */
+function TutorProfileCard({ isTutor, headline, subjects, onSave, onStop }: {
+  isTutor: boolean; headline: string; subjects: string[];
+  onSave: (headline: string, subjects: string[]) => void; onStop: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [h, setH] = useState(headline);
+  const [subs, setSubs] = useState<string[]>(subjects);
+  const [saving, setSaving] = useState(false);
+
+  // Load current values into the form, then open it (avoids syncing in an effect).
+  const startEdit = () => { setH(headline); setSubs(subjects); setEditing(true); };
+
+  const SUGGEST = ["OS", "OOP", "Math", "Data Structures", "Algorithms", "Databases", "Computer Networks", "Web Dev", "Machine Learning", "Statistics"];
+
+  const submit = async () => {
+    if (!h.trim()) { toast.error("Add a short headline"); return; }
+    setSaving(true);
+    await onSave(h.trim(), subs);
+    setSaving(false);
+    setEditing(false);
+  };
+
+  // Not a tutor yet, and not editing → call-to-action.
+  if (!isTutor && !editing) {
+    return (
+      <div className="flex flex-col items-start gap-2 rounded-2xl border border-gray-200 bg-gray-50 p-5">
+        <p className="text-sm text-gray-primary">Only tutors can host &quot;study with me&quot; sessions and earn stars.</p>
+        <button onClick={startEdit} className="flex items-center gap-2 rounded-lg bg-indigo-primary px-4 py-2 text-sm font-medium text-white hover:bg-indigo-600"><GraduationCap size={15} /> Become a tutor</button>
+      </div>
+    );
+  }
+
+  // Editing form (becoming a tutor or editing an existing profile).
+  if (editing) {
+    return (
+      <div className="rounded-2xl border border-indigo-100 bg-white p-5">
+        <label className="mb-1 block text-xs font-medium text-gray-primary">Headline</label>
+        <input value={h} onChange={(e) => setH(e.target.value)} placeholder="e.g. OS & Databases — I explain with diagrams" className="mb-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-primary" />
+        <label className="mb-1 block text-xs font-medium text-gray-primary">Subjects you tutor</label>
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          {SUGGEST.map((s) => {
+            const on = subs.includes(s);
+            return <button key={s} type="button" onClick={() => setSubs((p) => on ? p.filter((x) => x !== s) : [...p, s])} className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${on ? "border-indigo-primary bg-indigo-primary/10 text-indigo-primary" : "border-gray-200 text-gray-500"}`}>{s}</button>;
+          })}
+        </div>
+        <div className="flex gap-2">
+          <button onClick={submit} disabled={saving} className="flex items-center gap-2 rounded-lg bg-indigo-primary px-4 py-2 text-sm font-medium text-white hover:bg-indigo-600 disabled:opacity-50">{saving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} Save</button>
+          <button onClick={() => setEditing(false)} className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600">Cancel</button>
+        </div>
+      </div>
+    );
+  }
+
+  // Tutor profile card (view) with edit / stop.
+  return (
+    <div className="rounded-2xl border border-indigo-100 bg-white p-5">
+      <div className="mb-2 flex items-center gap-2">
+        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-primary/10 text-indigo-primary"><GraduationCap size={18} /></span>
+        <div>
+          <p className="text-sm font-semibold text-black-primary">You&apos;re a tutor</p>
+          <p className="text-xs text-gray-primary">{headline || "No headline yet"}</p>
+        </div>
+      </div>
+      {subjects.length > 0 && <div className="mb-3 flex flex-wrap gap-1.5">{subjects.map((s) => <span key={s} className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-600">{s}</span>)}</div>}
+      <div className="flex gap-2">
+        <button onClick={startEdit} className="flex items-center gap-1.5 rounded-lg border border-indigo-primary px-3 py-1.5 text-xs font-medium text-indigo-primary hover:bg-indigo-primary/5"><PencilLine size={14} /> Edit</button>
+        <button onClick={onStop} className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-500 hover:text-red-500"><X size={14} /> Stop tutoring</button>
       </div>
     </div>
   );
