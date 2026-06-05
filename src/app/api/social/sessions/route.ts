@@ -67,9 +67,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Add your meeting link (Google Meet, Zoom, etc.)" }, { status: 400 });
     }
 
+    // Only tutors can host sessions.
+    const { data: me } = await db.from("profiles").select("is_public, is_tutor").eq("id", userId).maybeSingle();
+    if (!me?.is_tutor) {
+      return NextResponse.json({ error: "Only tutors can host sessions. Become a tutor first." }, { status: 403 });
+    }
     // Audience rule: a public ("go global") host can only run GLOBAL sessions.
     // A private host may choose 'mutuals' (default) or 'global'.
-    const { data: me } = await db.from("profiles").select("is_public").eq("id", userId).maybeSingle();
     const isPublic = me?.is_public !== false;
     const requested = body.audience === "mutuals" ? "mutuals" : "global";
     const audience = isPublic ? "global" : requested;

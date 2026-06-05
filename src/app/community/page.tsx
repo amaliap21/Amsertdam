@@ -7,8 +7,6 @@ import {
   UserPlus,
   UserCheck,
   Clock,
-  Heart,
-  PenLine,
   Video,
   CalendarPlus,
   Loader2,
@@ -30,7 +28,7 @@ import { useStore } from "@/store/use-store";
  * Sessions (audience-scoped) · Articles · Shared (materials between mutuals).
  */
 
-type Tab = "buddies" | "people" | "tutors" | "sessions" | "articles" | "shared";
+type Tab = "buddies" | "people" | "tutors" | "shared";
 
 type Buddy = {
   user_id: string; name: string; is_tutor: boolean; match_score: number;
@@ -46,11 +44,6 @@ type Tutor = {
   follower_count: number; rating_avg: number; rating_count: number; recommend_count: number;
   sessions_hosted: number; is_following: boolean; is_me: boolean;
 };
-type Article = {
-  id: string; title: string; excerpt: string; body: string; course: string | null;
-  tags: string[] | null; like_count: number; liked: boolean;
-  author: { full_name: string | null; is_tutor: boolean } | null;
-};
 type Session = {
   id: string; host_id: string; title: string; course: string | null; description: string | null;
   scheduled_at: string | null; meet_url: string | null; capacity: number; participant_count: number;
@@ -65,19 +58,19 @@ type Share = {
 export default function CommunityPage() {
   const [tab, setTab] = useState<Tab>("buddies");
   const [loading, setLoading] = useState(false);
-  const [isPublic, setIsPublic] = useState(true);
+  const [isPublic, setIsPublic] = useState(false);
+  const [isTutor, setIsTutor] = useState(false);
 
   const [buddies, setBuddies] = useState<{ matches: Buddy[]; headline: string; my_public: boolean; my_courses: number } | null>(null);
   const [people, setPeople] = useState<{ mutuals: MiniProfile[]; incoming: MiniProfile[]; outgoing: MiniProfile[] }>({ mutuals: [], incoming: [], outgoing: [] });
   const [searchResults, setSearchResults] = useState<Person[]>([]);
   const [query, setQuery] = useState("");
   const [tutors, setTutors] = useState<Tutor[]>([]);
-  const [articles, setArticles] = useState<Article[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [shares, setShares] = useState<{ received: Share[]; sent: Share[] }>({ received: [], sent: [] });
 
   useEffect(() => {
-    fetch("/api/profile").then((r) => r.json()).then((p) => setIsPublic(p?.is_public !== false)).catch(() => {});
+    fetch("/api/profile").then((r) => r.json()).then((p) => { setIsPublic(p?.is_public === true); setIsTutor(p?.is_tutor === true); }).catch(() => {});
   }, []);
 
   const load = useCallback(async (which: Tab) => {
@@ -89,11 +82,13 @@ export default function CommunityPage() {
       } else if (which === "people") {
         setPeople(await (await fetch("/api/social/connections")).json());
       } else if (which === "tutors") {
-        setTutors((await (await fetch("/api/social/tutors")).json()).tutors ?? []);
-      } else if (which === "articles") {
-        setArticles((await (await fetch("/api/social/articles")).json()).articles ?? []);
-      } else if (which === "sessions") {
-        setSessions((await (await fetch("/api/social/sessions")).json()).sessions ?? []);
+        // Tutors tab also hosts sessions now.
+        const [t, s] = await Promise.all([
+          fetch("/api/social/tutors").then((r) => r.json()),
+          fetch("/api/social/sessions").then((r) => r.json()),
+        ]);
+        setTutors(t.tutors ?? []);
+        setSessions(s.sessions ?? []);
       } else if (which === "shared") {
         setShares(await (await fetch("/api/social/materials")).json());
       }
@@ -145,15 +140,9 @@ export default function CommunityPage() {
     try {
       await fetch("/api/social/tutors", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ is_tutor: true, headline, tutor_subjects: subjects.split(",").map((s) => s.trim()).filter(Boolean) }) });
       toast.success("You're now a tutor — host a session to start earning stars.");
+      setIsTutor(true);
       load("tutors");
     } catch { toast.error("Failed"); }
-  };
-
-  // ---- articles ----
-  const toggleLike = async (a: Article) => {
-    setArticles((prev) => prev.map((x) => (x.id === a.id ? { ...x, liked: !x.liked, like_count: x.like_count + (x.liked ? -1 : 1) } : x)));
-    try { await fetch("/api/social/articles/like", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ article_id: a.id }) }); }
-    catch { load("articles"); }
   };
 
   // ---- sessions ----
@@ -161,7 +150,7 @@ export default function CommunityPage() {
     try {
       const j = await (await fetch("/api/social/sessions/join", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ session_id: s.id }) })).json();
       if (j.error) throw new Error(j.error);
-      load("sessions");
+      load("tutors");
       if (j.joined && s.meet_url) window.open(s.meet_url, "_blank", "noopener,noreferrer");
     } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); }
   };
@@ -181,9 +170,7 @@ export default function CommunityPage() {
         {([
           ["buddies", "Study Buddy", <Users key="b" size={15} />],
           ["people", "People", <UserPlus key="p" size={15} />],
-          ["tutors", "Tutors", <GraduationCap key="t" size={15} />],
-          ["sessions", "Sessions", <Video key="s" size={15} />],
-          ["articles", "Articles", <BookOpenText key="a" size={15} />],
+          ["tutors", "Tutors & Sessions", <GraduationCap key="t" size={15} />],
           ["shared", "Shared", <Share2 key="sh" size={15} />],
         ] as [Tab, string, React.ReactNode][]).map(([key, label, icon]) => (
           <button key={key} onClick={() => setTab(key)}
@@ -280,87 +267,71 @@ export default function CommunityPage() {
         </div>
       )}
 
-      {/* TUTORS */}
+      {/* TUTORS & SESSIONS */}
       {!loading && tab === "tutors" && (
-        <div>
-          <div className="mb-4 flex justify-end">
-            <button onClick={becomeTutor} className="flex items-center gap-2 rounded-lg bg-indigo-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-600"><GraduationCap size={16} /> Become a tutor</button>
-          </div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {tutors.map((t) => (
-              <div key={t.id} className="rounded-2xl border border-gray-200 bg-white p-5">
-                <div className="mb-2 flex items-start justify-between">
-                  <div className="flex items-center gap-3"><Avatar name={t.full_name ?? "?"} /><div><p className="font-semibold text-black-primary">{t.full_name ?? "Student"}</p><p className="text-xs text-gray-primary">{t.headline ?? "Tutor"}</p></div></div>
-                  <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">★ {Number(t.rating_avg).toFixed(1)}</span>
-                </div>
-                <div className="mb-3 flex flex-wrap gap-1.5">{(t.tutor_subjects ?? []).slice(0, 4).map((s) => <span key={s} className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-600">{s}</span>)}</div>
-                <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500">
-                  <span>{t.follower_count} followers</span><span>{t.rating_count} ratings</span>
-                  <span className="text-indigo-primary">👍 {t.recommend_count} recommend</span><span>{t.sessions_hosted} sessions</span>
-                </div>
-                {!t.is_me ? (
-                  <button onClick={() => toggleFollow(t)} className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition ${t.is_following ? "border-gray-200 text-gray-500" : "border-indigo-primary text-indigo-primary hover:bg-indigo-primary/5"}`}>
-                    {t.is_following ? <UserCheck size={15} /> : <UserPlus size={15} />}{t.is_following ? "Following" : "Follow"}
+        <div className="flex flex-col gap-8">
+          {/* Hosting — tutors only */}
+          <div>
+            <h2 className="mb-3 text-sm font-semibold text-black-primary">Sessions</h2>
+            {isTutor ? (
+              <SessionComposer isPublic={isPublic} onCreated={() => load("tutors")} />
+            ) : (
+              <div className="flex flex-col items-start gap-2 rounded-xl border border-gray-200 bg-gray-50 p-4">
+                <p className="text-sm text-gray-primary">Only tutors can host &quot;study with me&quot; sessions.</p>
+                <button onClick={becomeTutor} className="flex items-center gap-2 rounded-lg bg-indigo-primary px-4 py-2 text-sm font-medium text-white hover:bg-indigo-600"><GraduationCap size={15} /> Become a tutor</button>
+              </div>
+            )}
+            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+              {sessions.map((s) => (
+                <div key={s.id} className="rounded-2xl border border-gray-200 bg-white p-5">
+                  <div className="mb-1 flex items-center justify-between">
+                    <h3 className="font-semibold text-black-primary">{s.title}</h3>
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${s.status === "full" ? "bg-red-50 text-red-600" : "bg-green-50 text-green-700"}`}>{s.participant_count}/{s.capacity}</span>
+                  </div>
+                  <p className="mb-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-500">
+                    <span>Host {s.host?.full_name ?? "Student"}{s.host?.rating_avg ? ` · ★ ${Number(s.host.rating_avg).toFixed(1)}` : ""}</span>
+                    {s.audience === "mutuals" ? <span className="inline-flex items-center gap-0.5 rounded-full bg-gray-100 px-1.5 text-[10px] text-gray-600"><Lock size={10} /> Mutuals</span> : <span className="inline-flex items-center gap-0.5 rounded-full bg-indigo-50 px-1.5 text-[10px] text-indigo-primary"><Globe size={10} /> Global</span>}
+                    {s.course && <span>· {s.course}</span>}
+                  </p>
+                  {s.scheduled_at && <p className="mb-2 text-xs font-medium text-indigo-primary">📅 {new Date(s.scheduled_at).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</p>}
+                  {s.description && <p className="mb-3 text-sm text-gray-700">{s.description}</p>}
+                  <button onClick={() => joinSession(s)} disabled={s.status === "full" && !s.joined}
+                    className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition disabled:opacity-50 ${s.joined ? "border border-gray-200 text-gray-600" : "bg-indigo-primary text-white hover:bg-indigo-600"}`}>
+                    <Video size={15} /> {s.is_host ? "Open room" : s.joined ? "Joined — open" : "Join session"}
                   </button>
-                ) : <span className="text-xs text-gray-400">This is you</span>}
-                <p className="mt-2 text-[11px] text-gray-400">Rate this host after joining one of their sessions.</p>
-              </div>
-            ))}
-          </div>
-          {!tutors.length && <Empty label="No tutors yet — be the first to teach." />}
-        </div>
-      )}
-
-      {/* SESSIONS */}
-      {!loading && tab === "sessions" && (
-        <div>
-          <SessionComposer isPublic={isPublic} onCreated={() => load("sessions")} />
-          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-            {sessions.map((s) => (
-              <div key={s.id} className="rounded-2xl border border-gray-200 bg-white p-5">
-                <div className="mb-1 flex items-center justify-between">
-                  <h3 className="font-semibold text-black-primary">{s.title}</h3>
-                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${s.status === "full" ? "bg-red-50 text-red-600" : "bg-green-50 text-green-700"}`}>{s.participant_count}/{s.capacity}</span>
+                  {s.joined && !s.is_host && <RateHost hostId={s.host_id} hostName={s.host?.full_name ?? "host"} sessionId={s.id} />}
                 </div>
-                <p className="mb-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-500">
-                  <span>Host {s.host?.full_name ?? "Student"}{s.host?.rating_avg ? ` · ★ ${Number(s.host.rating_avg).toFixed(1)}` : ""}</span>
-                  {s.audience === "mutuals" ? <span className="inline-flex items-center gap-0.5 rounded-full bg-gray-100 px-1.5 text-[10px] text-gray-600"><Lock size={10} /> Mutuals</span> : <span className="inline-flex items-center gap-0.5 rounded-full bg-indigo-50 px-1.5 text-[10px] text-indigo-primary"><Globe size={10} /> Global</span>}
-                  {s.course && <span>· {s.course}</span>}
-                </p>
-                {s.scheduled_at && <p className="mb-2 text-xs font-medium text-indigo-primary">📅 {new Date(s.scheduled_at).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</p>}
-                {s.description && <p className="mb-3 text-sm text-gray-700">{s.description}</p>}
-                <button onClick={() => joinSession(s)} disabled={s.status === "full" && !s.joined}
-                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition disabled:opacity-50 ${s.joined ? "border border-gray-200 text-gray-600" : "bg-indigo-primary text-white hover:bg-indigo-600"}`}>
-                  <Video size={15} /> {s.is_host ? "Open room" : s.joined ? "Joined — open" : "Join session"}
-                </button>
-                {s.joined && !s.is_host && <RateHost hostId={s.host_id} hostName={s.host?.full_name ?? "host"} sessionId={s.id} />}
-              </div>
-            ))}
+              ))}
+              {!sessions.length && <Empty label="No sessions yet — a tutor can host the first one." />}
+            </div>
           </div>
-          {!sessions.length && <Empty label="No sessions yet — host a 'study with me' room." />}
-        </div>
-      )}
 
-      {/* ARTICLES */}
-      {!loading && tab === "articles" && (
-        <div>
-          <ArticleComposer onPublished={() => load("articles")} />
-          <div className="mt-4 flex flex-col gap-4">
-            {articles.map((a) => (
-              <article key={a.id} className="rounded-2xl border border-gray-200 bg-white p-5">
-                <div className="mb-1 flex items-center gap-2 text-xs text-gray-500">
-                  <span className="font-medium text-black-primary">{a.author?.full_name ?? "Student"}</span>
-                  {a.author?.is_tutor && <Tag>Tutor</Tag>}{a.course && <span>· {a.course}</span>}
+          {/* Tutor directory */}
+          <div>
+            <h2 className="mb-3 text-sm font-semibold text-black-primary">Tutors</h2>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {tutors.map((t) => (
+                <div key={t.id} className="rounded-2xl border border-gray-200 bg-white p-5">
+                  <div className="mb-2 flex items-start justify-between">
+                    <div className="flex items-center gap-3"><Avatar name={t.full_name ?? "?"} /><div><p className="font-semibold text-black-primary">{t.full_name ?? "Student"}</p><p className="text-xs text-gray-primary">{t.headline ?? "Tutor"}</p></div></div>
+                    <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">★ {Number(t.rating_avg).toFixed(1)}</span>
+                  </div>
+                  <div className="mb-3 flex flex-wrap gap-1.5">{(t.tutor_subjects ?? []).slice(0, 4).map((s) => <span key={s} className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-600">{s}</span>)}</div>
+                  <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500">
+                    <span>{t.follower_count} followers</span><span>{t.rating_count} ratings</span>
+                    <span className="text-indigo-primary">👍 {t.recommend_count} recommend</span><span>{t.sessions_hosted} sessions</span>
+                  </div>
+                  {!t.is_me ? (
+                    <button onClick={() => toggleFollow(t)} className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition ${t.is_following ? "border-gray-200 text-gray-500" : "border-indigo-primary text-indigo-primary hover:bg-indigo-primary/5"}`}>
+                      {t.is_following ? <UserCheck size={15} /> : <UserPlus size={15} />}{t.is_following ? "Following" : "Follow"}
+                    </button>
+                  ) : <span className="text-xs text-gray-400">This is you</span>}
+                  <p className="mt-2 text-[11px] text-gray-400">Rate this tutor after joining one of their sessions.</p>
                 </div>
-                <h3 className="mb-1 text-lg font-semibold text-black-primary">{a.title}</h3>
-                <p className="mb-3 text-sm text-gray-700">{a.excerpt}{a.body.length > 220 ? "…" : ""}</p>
-                <button onClick={() => toggleLike(a)} className={`flex items-center gap-1.5 text-sm ${a.liked ? "text-red-500" : "text-gray-400 hover:text-red-500"}`}>
-                  <Heart size={15} className={a.liked ? "fill-red-500" : ""} /> {a.like_count}
-                </button>
-              </article>
-            ))}
+              ))}
+              {!tutors.length && <Empty label="No tutors yet — be the first to teach." />}
+            </div>
           </div>
-          {!articles.length && <Empty label="No articles yet — share what you've learned." />}
         </div>
       )}
 
@@ -469,37 +440,6 @@ function RateHost({ hostId, hostName, sessionId }: { hostId: string; hostName: s
 }
 
 /* ---------------- composers ---------------- */
-function ArticleComposer({ onPublished }: { onPublished: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-  const [course, setCourse] = useState("");
-  const [saving, setSaving] = useState(false);
-  const publish = async () => {
-    setSaving(true);
-    try {
-      const r = await fetch("/api/social/articles", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title, body, course: course || undefined }) });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || "Failed");
-      toast.success("Article published");
-      setTitle(""); setBody(""); setCourse(""); setOpen(false); onPublished();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); }
-    finally { setSaving(false); }
-  };
-  if (!open) return <button onClick={() => setOpen(true)} className="flex items-center gap-2 rounded-lg bg-indigo-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-600"><PenLine size={16} /> Write an article</button>;
-  return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5">
-      <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" className="mb-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-primary" />
-      <input value={course} onChange={(e) => setCourse(e.target.value)} placeholder="Course (optional)" className="mb-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-primary" />
-      <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Share what you learned…" rows={5} className="mb-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-primary" />
-      <div className="flex gap-2">
-        <button onClick={publish} disabled={saving} className="flex items-center gap-2 rounded-lg bg-indigo-primary px-4 py-2 text-sm font-medium text-white hover:bg-indigo-600 disabled:opacity-50">{saving ? <Loader2 size={15} className="animate-spin" /> : <PenLine size={15} />} Publish</button>
-        <button onClick={() => setOpen(false)} className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600">Cancel</button>
-      </div>
-    </div>
-  );
-}
-
 function SessionComposer({ isPublic, onCreated }: { isPublic: boolean; onCreated: () => void }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
