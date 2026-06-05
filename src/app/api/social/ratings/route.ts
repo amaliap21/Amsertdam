@@ -12,7 +12,7 @@ export async function POST(req: Request) {
   try {
     const userId = await getUserId();
     if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const { tutor_id, stars, comment } = await req.json();
+    const { tutor_id, stars, comment, recommend, session_id } = await req.json();
     const s = Math.round(Number(stars));
     if (!tutor_id || typeof tutor_id !== "string") {
       return NextResponse.json({ error: "Missing tutor_id" }, { status: 400 });
@@ -24,20 +24,30 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Stars must be 1-5" }, { status: 400 });
     }
 
-    const { error } = await db
-      .from("tutor_ratings")
-      .upsert(
-        { tutor_id, rater_id: userId, stars: s, comment: comment ? String(comment).slice(0, 1000) : null },
-        { onConflict: "tutor_id,rater_id" },
-      );
+    const { error } = await db.from("tutor_ratings").upsert(
+      {
+        tutor_id,
+        rater_id: userId,
+        stars: s,
+        comment: comment ? String(comment).slice(0, 1000) : null,
+        recommend: recommend === true,
+        session_id: typeof session_id === "string" ? session_id : null,
+      },
+      { onConflict: "tutor_id,rater_id" },
+    );
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
     const { data: tutor } = await db
       .from("profiles")
-      .select("rating_avg, rating_count")
+      .select("rating_avg, rating_count, recommend_count")
       .eq("id", tutor_id)
       .single();
-    return NextResponse.json({ ok: true, rating_avg: tutor?.rating_avg ?? null, rating_count: tutor?.rating_count ?? null });
+    return NextResponse.json({
+      ok: true,
+      rating_avg: tutor?.rating_avg ?? null,
+      rating_count: tutor?.rating_count ?? null,
+      recommend_count: tutor?.recommend_count ?? null,
+    });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }

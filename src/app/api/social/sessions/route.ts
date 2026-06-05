@@ -54,6 +54,13 @@ export async function POST(req: Request) {
     const title = String(body.title ?? "").trim();
     if (title.length < 3) return NextResponse.json({ error: "Title is too short" }, { status: 400 });
 
+    // The host brings their own room — we don't auto-generate a link (meet.new
+    // would hand every joiner a *different* room). Require a real, shareable URL.
+    const meetUrl = String(body.meet_url ?? "").trim();
+    if (!/^https?:\/\/.+/i.test(meetUrl)) {
+      return NextResponse.json({ error: "Add your meeting link (Google Meet, Zoom, etc.)" }, { status: 400 });
+    }
+
     const capacity = Math.max(2, Math.min(50, Number(body.capacity) || 8));
     const row = {
       host_id: userId,
@@ -61,7 +68,7 @@ export async function POST(req: Request) {
       course: body.course ? String(body.course).slice(0, 120) : null,
       description: body.description ? String(body.description).slice(0, 1000) : null,
       scheduled_at: body.scheduled_at ? new Date(body.scheduled_at).toISOString() : null,
-      meet_url: body.meet_url ? String(body.meet_url).slice(0, 500) : "https://meet.new",
+      meet_url: meetUrl.slice(0, 500),
       capacity,
     };
     const { data, error } = await db.from("study_sessions").insert(row).select().single();

@@ -31,6 +31,7 @@ type Tutor = {
   follower_count: number;
   rating_avg: number;
   rating_count: number;
+  recommend_count: number;
   sessions_hosted: number;
   reputation: number;
   is_following: boolean;
@@ -53,6 +54,7 @@ type Article = {
 
 type Session = {
   id: string;
+  host_id: string;
   title: string;
   course: string | null;
   description: string | null;
@@ -281,9 +283,10 @@ export default function CommunityPage() {
                   ))}
                 </div>
 
-                <div className="mb-3 flex items-center gap-4 text-xs text-gray-500">
+                <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500">
                   <span>{t.follower_count} followers</span>
                   <span>{t.rating_count} ratings</span>
+                  <span className="text-indigo-primary">👍 {t.recommend_count} recommend</span>
                   <span>{t.sessions_hosted} sessions</span>
                 </div>
 
@@ -367,7 +370,12 @@ export default function CommunityPage() {
                   {s.course ? ` · ${s.course}` : ""}
                 </p>
                 {s.scheduled_at && (
-                  <p className="mb-2 text-xs text-gray-400">{new Date(s.scheduled_at).toLocaleString()}</p>
+                  <p className="mb-2 text-xs font-medium text-indigo-primary">
+                    📅 {new Date(s.scheduled_at).toLocaleString(undefined, {
+                      weekday: "short", day: "numeric", month: "short",
+                      hour: "2-digit", minute: "2-digit",
+                    })}
+                  </p>
                 )}
                 {s.description && <p className="mb-3 text-sm text-gray-700">{s.description}</p>}
                 <button
@@ -379,12 +387,73 @@ export default function CommunityPage() {
                 >
                   <Video size={15} /> {s.is_host ? "Open room" : s.joined ? "Joined — open" : "Join session"}
                 </button>
+
+                {/* Rate the host after attending (joined, not the host yourself) */}
+                {s.joined && !s.is_host && (
+                  <RateHost hostId={s.host_id} hostName={s.host?.full_name ?? "host"} sessionId={s.id} />
+                )}
               </div>
             ))}
           </div>
           {!sessions.length && <Empty label="No sessions yet — host a 'study with me' room." />}
         </div>
       )}
+    </div>
+  );
+}
+
+function RateHost({ hostId, hostName, sessionId }: { hostId: string; hostName: string; sessionId: string }) {
+  const [stars, setStars] = useState(0);
+  const [recommend, setRecommend] = useState(false);
+  const [done, setDone] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (n: number, rec: boolean) => {
+    setSaving(true);
+    try {
+      const r = await fetch("/api/social/ratings", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ tutor_id: hostId, stars: n, recommend: rec, session_id: sessionId }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || "Failed");
+      setDone(true);
+      toast.success(`Thanks — you rated ${hostName} ${n}★${rec ? " and recommended them" : ""}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to rate");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (done) {
+    return <p className="mt-3 text-xs text-green-600">✓ Rated {stars}★{recommend ? " · recommended" : ""}</p>;
+  }
+  return (
+    <div className="mt-3 rounded-lg border border-gray-100 bg-gray-50 p-3">
+      <p className="mb-1.5 text-xs font-medium text-gray-600">Rate {hostName} after the session</p>
+      <div className="flex items-center gap-3">
+        <span className="inline-flex items-center gap-0.5">
+          {[1, 2, 3, 4, 5].map((n) => (
+            <button key={n} type="button" disabled={saving} onClick={() => setStars(n)} aria-label={`${n} star`}>
+              <Star size={16} className={n <= stars ? "fill-amber-400 text-amber-400" : "text-gray-300"} />
+            </button>
+          ))}
+        </span>
+        <label className="flex items-center gap-1.5 text-xs text-gray-600">
+          <input type="checkbox" checked={recommend} onChange={(e) => setRecommend(e.target.checked)} className="accent-indigo-primary" />
+          Recommend
+        </label>
+        <button
+          type="button"
+          disabled={saving || stars === 0}
+          onClick={() => submit(stars, recommend)}
+          className="ml-auto rounded-lg bg-indigo-primary px-3 py-1 text-xs font-medium text-white hover:bg-indigo-600 disabled:opacity-50"
+        >
+          Submit
+        </button>
+      </div>
     </div>
   );
 }
@@ -455,20 +524,34 @@ function SessionComposer({ onCreated }: { onCreated: () => void }) {
   const [course, setCourse] = useState("");
   const [when, setWhen] = useState("");
   const [capacity, setCapacity] = useState("8");
+  const [meetUrl, setMeetUrl] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // Human-readable echo of the chosen day, date and time so the host can
+  // confirm it at a glance before creating.
+  const whenLabel = when
+    ? new Date(when).toLocaleString(undefined, {
+        weekday: "long", day: "numeric", month: "short", year: "numeric",
+        hour: "2-digit", minute: "2-digit",
+      })
+    : "";
+
   const create = async () => {
+    if (!/^https?:\/\/.+/i.test(meetUrl.trim())) {
+      toast.error("Paste your meeting link (Google Meet, Zoom, etc.)");
+      return;
+    }
     setSaving(true);
     try {
       const r = await fetch("/api/social/sessions", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title, course: course || undefined, scheduled_at: when || undefined, capacity: Number(capacity) }),
+        body: JSON.stringify({ title, course: course || undefined, scheduled_at: when || undefined, capacity: Number(capacity), meet_url: meetUrl.trim() }),
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || "Failed");
-      toast.success("Session created — a Meet room is ready");
-      setTitle(""); setCourse(""); setWhen(""); setOpen(false);
+      toast.success("Session created");
+      setTitle(""); setCourse(""); setWhen(""); setMeetUrl(""); setOpen(false);
       onCreated();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed");
@@ -487,11 +570,17 @@ function SessionComposer({ onCreated }: { onCreated: () => void }) {
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5">
       <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Session title (e.g. OS Exam Cram)" className="mb-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-primary" />
-      <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+      <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
         <input value={course} onChange={(e) => setCourse(e.target.value)} placeholder="Course" className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-primary" />
-        <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-primary" />
         <input type="number" min={2} max={50} value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="Capacity" className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-primary" />
       </div>
+      {/* When — day, date & time */}
+      <label className="mb-1 block text-xs font-medium text-gray-primary">When (day, date &amp; time)</label>
+      <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} className="mb-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-primary" />
+      {whenLabel && <p className="mb-2 text-xs text-indigo-primary">📅 {whenLabel}</p>}
+      {/* Host's own room link */}
+      <label className="mb-1 block text-xs font-medium text-gray-primary">Meeting link (you host the room)</label>
+      <input value={meetUrl} onChange={(e) => setMeetUrl(e.target.value)} placeholder="https://meet.google.com/…  or  https://zoom.us/j/…" className="mb-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-primary" />
       <div className="flex gap-2">
         <button onClick={create} disabled={saving} className="flex items-center gap-2 rounded-lg bg-indigo-primary px-4 py-2 text-sm font-medium text-white hover:bg-indigo-600 disabled:opacity-50">
           {saving ? <Loader2 size={15} className="animate-spin" /> : <CalendarPlus size={15} />} Create

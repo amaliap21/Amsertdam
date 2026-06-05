@@ -45,7 +45,16 @@ type Profile = {
   avatar_url: string | null;
   major: string | null;
   semester: number | null;
+  interests: string[] | null;
+  is_public: boolean | null;
 };
+
+// Suggested interests used both for the profile picker and Study Buddy matching.
+const INTEREST_OPTIONS = [
+  "OS", "OOP", "Math", "Data Structures", "Algorithms", "Databases",
+  "Computer Networks", "Web Dev", "Machine Learning", "Statistics",
+  "Calculus", "Physics", "Cybersecurity", "AI",
+];
 
 /* ------------------------------------------------------------------ */
 /*  Instant-search result type                                         */
@@ -100,7 +109,15 @@ function dateAtLocalMorning(isoDate: string, dayOffset = 0): Date | null {
   const parts = isoDate.split("-").map(Number);
   if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return null;
   const [y, m, d] = parts;
-  return new Date(y, m - 1, d + dayOffset, REMINDER_MORNING_HOUR, REMINDER_MORNING_MIN, 0, 0);
+  return new Date(
+    y,
+    m - 1,
+    d + dayOffset,
+    REMINDER_MORNING_HOUR,
+    REMINDER_MORNING_MIN,
+    0,
+    0,
+  );
 }
 
 function loadReminderHistory(): Record<string, number> {
@@ -137,6 +154,8 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
   const [editName, setEditName] = useState("");
   const [editMajor, setEditMajor] = useState("");
   const [editSemester, setEditSemester] = useState("");
+  const [editInterests, setEditInterests] = useState<string[]>([]);
+  const [editPublic, setEditPublic] = useState(true);
   const [saving, setSaving] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
   const notificationsRef = useRef<HTMLDivElement>(null);
@@ -154,6 +173,8 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
           setEditName(p.full_name ?? "");
           setEditMajor(p.major ?? "");
           setEditSemester(p.semester != null ? String(p.semester) : "");
+          setEditInterests(Array.isArray(p.interests) ? p.interests : []);
+          setEditPublic(p.is_public !== false);
         }
       } catch {
         /* ignore */
@@ -185,6 +206,8 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
           full_name: editName.trim() || null,
           major: editMajor.trim() || null,
           semester: editSemester ? Number(editSemester) : null,
+          interests: editInterests,
+          is_public: editPublic,
         }),
       });
       if (r.ok) {
@@ -406,7 +429,11 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
       }
 
       for (const target of reminderTargets) {
-        const reminders: Array<{ id: string; time: Date; kind: "day-before" | "short" | "day-of" }> = [];
+        const reminders: Array<{
+          id: string;
+          time: Date;
+          kind: "day-before" | "short" | "day-of";
+        }> = [];
         if (target.hasTime) {
           reminders.push({
             id: `${target.key}:day-before`,
@@ -435,7 +462,8 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
         for (const reminder of reminders) {
           const ts = reminder.time.getTime();
           if (Number.isNaN(ts)) continue;
-          if (now.getTime() < ts || now.getTime() - ts > REMINDER_WINDOW_MS) continue;
+          if (now.getTime() < ts || now.getTime() - ts > REMINDER_WINDOW_MS)
+            continue;
           if (history[reminder.id]) continue;
 
           let body = "";
@@ -592,7 +620,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
           type="button"
           data-tour="buy-credits"
           onClick={() => setBuyOpen(true)}
-          className="flex-1 sm:flex-none whitespace-nowrap rounded-lg bg-indigo-primary px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-600 sm:px-3 sm:py-1.5 sm:text-xs"
+          className="flex-1 sm:flex-none whitespace-nowrap rounded-full bg-indigo-primary px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-600 sm:px-3 sm:py-1.5 sm:text-xs"
         >
           Buy credits
         </button>
@@ -621,22 +649,30 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
           {showNotifications && (
             <div className="absolute right-0 top-full mt-2 z-50 w-[calc(100vw-1.5rem)] max-w-72 rounded-2xl border border-gray-200 bg-white p-4 shadow-lg">
               <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold text-black-primary">Notifications</p>
+                <p className="text-sm font-semibold text-black-primary">
+                  Notifications
+                </p>
                 <span className="text-[10px] uppercase tracking-wider text-gray-400">
                   Client only
                 </span>
               </div>
               <div className="mt-3 flex items-center justify-between rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
                 <div>
-                  <p className="text-sm font-medium text-black-primary">Study reminders</p>
-                  <p className="text-xs text-gray-primary">1 day + 30 min before</p>
+                  <p className="text-sm font-medium text-black-primary">
+                    Study reminders
+                  </p>
+                  <p className="text-xs text-gray-primary">
+                    1 day + 30 min before
+                  </p>
                 </div>
                 <button
                   type="button"
                   onClick={async () => {
                     if (typeof window === "undefined") return;
                     if (!("Notification" in window)) {
-                      toast.error("Notifications aren't supported in this browser.");
+                      toast.error(
+                        "Notifications aren't supported in this browser.",
+                      );
                       return;
                     }
                     if (!notificationEnabled) {
@@ -656,17 +692,20 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
                       toast("Notifications muted");
                     }
                   }}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${notificationEnabled ? "bg-emerald-500" : "bg-gray-300"
-                    }`}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
+                    notificationEnabled ? "bg-emerald-500" : "bg-gray-300"
+                  }`}
                 >
                   <span
-                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${notificationEnabled ? "translate-x-5" : "translate-x-1"
-                      }`}
+                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                      notificationEnabled ? "translate-x-5" : "translate-x-1"
+                    }`}
                   />
                 </button>
               </div>
               <p className="mt-3 text-[11px] text-gray-500">
-                Reminders use your device time and only fire while the app is open.
+                Reminders use your device time and only fire while the app is
+                open.
               </p>
             </div>
           )}
@@ -694,6 +733,8 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
               setEditSemester(
                 profile.semester != null ? String(profile.semester) : "",
               );
+              setEditInterests(Array.isArray(profile.interests) ? profile.interests : []);
+              setEditPublic(profile.is_public !== false);
             }
           }}
           className="flex items-center gap-2 sm:gap-3 cursor-pointer"
@@ -801,6 +842,64 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
                   className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-black-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary"
                   placeholder="e.g. 3"
                 />
+              </div>
+
+              {/* Interests — power Study Buddy matching */}
+              <div>
+                <label className="block text-xs font-medium text-gray-primary mb-1">
+                  Interests
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {INTEREST_OPTIONS.map((opt) => {
+                    const active = editInterests.includes(opt);
+                    return (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() =>
+                          setEditInterests((prev) =>
+                            prev.includes(opt) ? prev.filter((x) => x !== opt) : [...prev, opt],
+                          )
+                        }
+                        className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+                          active
+                            ? "border-indigo-primary bg-indigo-primary/10 text-indigo-primary"
+                            : "border-gray-200 text-gray-500 hover:border-indigo-primary/40"
+                        }`}
+                      >
+                        {opt}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Privacy — "go global" vs private */}
+              <div className="flex items-start justify-between rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                <div className="pr-2">
+                  <p className="text-sm font-medium text-black-primary">
+                    {editPublic ? "Go global" : "Private profile"}
+                  </p>
+                  <p className="text-[11px] text-gray-primary">
+                    {editPublic
+                      ? "You can be found and matched by other students."
+                      : "You're hidden from Study Buddy and the directory."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditPublic((v) => !v)}
+                  aria-label="Toggle profile visibility"
+                  className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition ${
+                    editPublic ? "bg-indigo-primary" : "bg-gray-300"
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                      editPublic ? "translate-x-5" : "translate-x-1"
+                    }`}
+                  />
+                </button>
               </div>
             </div>
 
