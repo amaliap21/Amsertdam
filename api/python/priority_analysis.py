@@ -190,10 +190,10 @@ def compute_breakdown(data: dict) -> dict:
 def _priority_from_composite_score(score: float) -> tuple[str, str, str]:
     """Map a 0..1 score to priority, action, and color."""
     if score >= HIGH_THRESHOLD:
-        return "HIGH", "Do it fully and on time", "green"
+        return "HIGH", "Worth your energy - do it fully and on time", "green"
     if score >= MEDIUM_THRESHOLD:
-        return "MEDIUM", "Do it, but time-box your effort", "yellow"
-    return "LOW", "Consider skipping or doing minimally", "red"
+        return "MEDIUM", "Helpful but flexible - time-box your effort", "yellow"
+    return "LOW", "Safe to minimize - protect your energy for higher-impact work", "red"
 
 
 def _calculate_confidence(data: dict) -> float:
@@ -281,7 +281,7 @@ def rank_tasks_with_topsis(results: list[dict], tasks: list[dict]) -> list[dict]
             passing_grade = float(tasks[i].get("passing_grade", 75))
             if current_grade >= passing_grade:
                 result["priority"] = "LOW"
-                result["action"] = "Already passing - focus on other tasks"
+                result["action"] = "Already passing - focus your energy elsewhere"
                 result["color"] = "gray"
                 result["topsis_score"] = 0.0  # Penalti score agar tetap di ranking bawah
                 result["composite_score"] = 0.0  # Penalti score agar tetap di ranking bawah
@@ -311,7 +311,7 @@ def analyze_effort_impact(data: dict) -> dict:
     passing_grade = float(data.get("passing_grade", 75))
     if current_grade >= passing_grade:
         priority = "LOW"
-        action = "Already passing - focus on other tasks"
+        action = "Already passing - focus your energy elsewhere"
         color = "gray"
 
     # efficiency

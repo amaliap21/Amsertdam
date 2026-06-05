@@ -43,6 +43,11 @@ export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
     const file = formData.get("file");
+    // Batch / NotebookLM-style ingestion: the client may attach several text
+    // sources under the same "file" key. We merge their extracted text into a
+    // single corpus. Images stay single-source (the vision path reads one
+    // picture directly).
+    const allFiles = formData.getAll("file").filter((f): f is File => f instanceof File);
     const title = (formData.get("title") as string) || "Untitled Quiz";
     const course = (formData.get("course") as string) || "";
     const mode = (formData.get("mode") as string) || "generate";
@@ -123,23 +128,43 @@ export async function POST(req: NextRequest) {
     if (isImage) {
       maxQuestions = 8; // vision: one image, can't pre-count terms
     } else {
-      const extracted = await extractTextFromUpload(file);
-      cleaned = tidyText(extracted.text);
-      if (cleaned.length < 40 || extracted.wordCount < 30) {
+      // Merge every text/PDF source the client sent (skip any images mixed in,
+      // which need the separate vision path). Each document is labelled so the
+      // generator can attribute questions to the right source.
+      const textFiles = allFiles.filter((f) => {
+        const img = f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name);
+        return !img;
+      });
+      const sources = textFiles.length ? textFiles : [file];
+      let totalPages = 0;
+      let totalWords = 0;
+      const segments: string[] = [];
+      for (const f of sources) {
+        const extracted = await extractTextFromUpload(f);
+        const segment = tidyText(extracted.text);
+        if (segment.length < 40 || extracted.wordCount < 30) continue;
+        segments.push(
+          sources.length > 1 ? `# Source: ${f.name}\n${segment}` : segment,
+        );
+        totalPages += extracted.pageCount ?? 0;
+        totalWords += extracted.wordCount;
+      }
+      cleaned = tidyText(segments.join("\n\n"));
+      if (cleaned.length < 40 || totalWords < 30) {
         return NextResponse.json(
           {
             error:
-              "Could not extract enough readable text from this file. Try a text-based PDF (not a scan) or a .txt file with more content.",
+              "Could not extract enough readable text from these file(s). Try text-based PDFs (not scans) or .txt files with more content.",
             extractedChars: cleaned.length,
-            extractedWords: extracted.wordCount,
+            extractedWords: totalWords,
           },
           { status: 422 },
         );
       }
       maxQuestions = estimateMaxQuestions(cleaned);
       extractedMeta = {
-        pageCount: extracted.pageCount ?? null,
-        wordCount: extracted.wordCount,
+        pageCount: totalPages || null,
+        wordCount: totalWords,
       };
     }
 

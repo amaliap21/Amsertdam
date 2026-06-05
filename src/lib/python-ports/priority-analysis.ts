@@ -70,6 +70,7 @@ export interface TaskResult {
   priority: "HIGH" | "MEDIUM" | "LOW";
   action: string;
   color: "green" | "yellow" | "red" | "gray";
+  color_reason: string;
   composite_score: number;
   confidence: number;
   efficiency_ratio: number;
@@ -185,9 +186,41 @@ export function computeBreakdown(data: TaskInput): RawBreakdown {
 export function priorityFromScore(
   score: number,
 ): { priority: "HIGH" | "MEDIUM" | "LOW"; action: string; color: "green" | "yellow" | "red" } {
-  if (score >= HIGH_THRESHOLD) return { priority: "HIGH", action: "Do it fully and on time", color: "green" };
-  if (score >= MEDIUM_THRESHOLD) return { priority: "MEDIUM", action: "Do it, but time-box your effort", color: "yellow" };
-  return { priority: "LOW", action: "Consider skipping or doing minimally", color: "red" };
+  if (score >= HIGH_THRESHOLD) return { priority: "HIGH", action: "Worth your energy — do it fully and on time", color: "green" };
+  if (score >= MEDIUM_THRESHOLD) return { priority: "MEDIUM", action: "Helpful but flexible — time-box your effort", color: "yellow" };
+  return { priority: "LOW", action: "Safe to minimize — protect your energy for higher-impact work", color: "red" };
+}
+
+/**
+ * Explainable AI: a plain-language reason for the assigned colour, so the UI
+ * can answer "why is this red?" instead of showing an opaque label.
+ */
+export function colorReason(
+  color: "green" | "yellow" | "red" | "gray",
+  breakdown: Pick<RawBreakdown, "impact" | "urgency" | "gap_factor" | "effort_penalty">,
+): string {
+  if (color === "gray") return "You're already passing this course, so this can wait.";
+  const drivers: string[] = [];
+  if (breakdown.urgency >= 0.6) drivers.push("the deadline is close");
+  if (breakdown.impact >= 0.2) drivers.push("it's a big chunk of your grade");
+  if (breakdown.gap_factor >= 0.6) drivers.push("you're below the passing threshold here");
+  if (breakdown.effort_penalty >= 0.6) drivers.push("it's costly for the time you have left");
+  if (color === "green") {
+    return drivers.length
+      ? `Flagged as high priority because ${drivers.join(" and ")}.`
+      : "High priority — it scores well across deadline, grade impact, and effort.";
+  }
+  if (color === "yellow") {
+    return "Moderate priority — it matters, but not enough to crowd out your top tasks.";
+  }
+  // red / low
+  const lowReasons: string[] = [];
+  if (breakdown.impact < 0.15) lowReasons.push("it's only a small share of your grade");
+  if (breakdown.urgency < 0.4) lowReasons.push("the deadline is still far off");
+  if (breakdown.effort_penalty >= 0.6) lowReasons.push("it would cost a lot of time for little return");
+  return lowReasons.length
+    ? `Safe to minimize because ${lowReasons.join(" and ")}.`
+    : "Low impact on your grade — safe to do less and protect your wellbeing.";
 }
 
 function calculateConfidence(data: TaskInput): number {
@@ -218,7 +251,7 @@ export function analyzeEffortImpact(data: TaskInput): TaskResult {
   const passing_grade = Number(data.passing_grade ?? 75);
   if (current_grade >= passing_grade) {
     priority = "LOW";
-    action = "Already passing - focus on other tasks";
+    action = "Already passing — focus your energy elsewhere";
     color = "gray";
   }
 
@@ -233,6 +266,7 @@ export function analyzeEffortImpact(data: TaskInput): TaskResult {
     priority,
     action,
     color,
+    color_reason: colorReason(color, breakdown),
     composite_score: Math.round(breakdown.composite * 1000) / 1000,
     confidence: Math.round(confidence * 100) / 100,
     efficiency_ratio: efficiency,
@@ -308,14 +342,26 @@ export function rankTasksWithTopsis(
     result.priority = decision.priority;
     result.action = decision.action;
     result.color = decision.color;
+    result.color_reason = colorReason(decision.color, {
+      impact: result.breakdown.grade_impact,
+      urgency: result.breakdown.urgency,
+      gap_factor: result.breakdown.gap_factor,
+      effort_penalty: result.breakdown.effort_penalty,
+    });
 
     if (i < tasks.length) {
       const current = Number(tasks[i].current_grade ?? 0);
       const passing = Number(tasks[i].passing_grade ?? 75);
       if (current >= passing) {
         result.priority = "LOW";
-        result.action = "Already passing - focus on other tasks";
+        result.action = "Already passing — focus your energy elsewhere";
         result.color = "gray";
+        result.color_reason = colorReason("gray", {
+          impact: result.breakdown.grade_impact,
+          urgency: result.breakdown.urgency,
+          gap_factor: result.breakdown.gap_factor,
+          effort_penalty: result.breakdown.effort_penalty,
+        });
         result.topsis_score = 0.0;
         result.composite_score = 0.0;
       }

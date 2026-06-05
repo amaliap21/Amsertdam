@@ -35,6 +35,9 @@ export default function CreateQuizModal({
     title: "",
     course: "",
     file: null as File | null,
+    // Batch / NotebookLM-style: one or more text sources merged into a single
+    // quiz. `file` mirrors files[0] for the existing image/size checks.
+    files: [] as File[],
   });
   // Stored as a string so the input can be momentarily empty without
   // snapping back to "1". The number is parsed at submit time.
@@ -150,7 +153,8 @@ export default function CreateQuizModal({
     const t = toast.loading("Generating quiz questions…");
     try {
       const fd = new FormData();
-      fd.append("file", formData.file);
+      const sources = formData.files.length ? formData.files : [formData.file];
+      for (const f of sources) if (f) fd.append("file", f);
       fd.append("title", formData.title);
       fd.append("course", formData.course);
       fd.append("requestedQuestions", String(parsedQuestions));
@@ -177,7 +181,7 @@ export default function CreateQuizModal({
         source: json.source,
         questions: json.questions,
       });
-      setFormData({ title: "", course: "", file: null });
+      setFormData({ title: "", course: "", file: null, files: [] });
       onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Generation failed", {
@@ -188,32 +192,26 @@ export default function CreateQuizModal({
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const f = e.target.files[0];
-      if (f.size > MAX_SIZE) {
-        setError("File exceeds the 50 MB limit.");
-        return;
-      }
-      setError(null);
-      setFormData({ ...formData, file: f });
-      analyzeFile(f, formData.title, formData.course);
+  const acceptFiles = (fileList: FileList) => {
+    const picked = Array.from(fileList);
+    if (picked.some((f) => f.size > MAX_SIZE)) {
+      setError("A file exceeds the 50 MB limit.");
+      return;
     }
+    setError(null);
+    setFormData({ ...formData, file: picked[0], files: picked });
+    // Estimate question count from the first source (good enough for the cap).
+    analyzeFile(picked[0], formData.title, formData.course);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length) acceptFiles(e.target.files);
   };
 
   const handleDrop = (e: React.DragEvent<HTMLLabelElement>) => {
     e.preventDefault();
     setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const f = e.dataTransfer.files[0];
-      if (f.size > MAX_SIZE) {
-        setError("File exceeds the 50 MB limit.");
-        return;
-      }
-      setError(null);
-      setFormData({ ...formData, file: f });
-      analyzeFile(f, formData.title, formData.course);
-    }
+    if (e.dataTransfer.files && e.dataTransfer.files.length) acceptFiles(e.dataTransfer.files);
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLLabelElement>) => {
@@ -381,12 +379,16 @@ export default function CreateQuizModal({
               <div className="flex flex-col items-center justify-center pt-5 pb-6">
                 <Upload size={24} className="text-gray-400 mb-2" />
                 <p className="text-sm text-gray-500">
-                  {formData.file ? (
+                  {formData.files.length > 1 ? (
+                    <span className="font-medium text-indigo-primary">
+                      {formData.files.length} files — merged into one quiz
+                    </span>
+                  ) : formData.file ? (
                     <span className="font-medium text-indigo-primary">
                       {formData.file.name}
                     </span>
                   ) : (
-                    "Upload a PDF, .txt, or image (max. 50 MB)"
+                    "Upload PDF, .txt, or image — select several to merge (max. 50 MB each)"
                   )}
                 </p>
                 {recommendedMaxQuestions ? (
@@ -398,6 +400,7 @@ export default function CreateQuizModal({
               <input
                 id="quiz-source-upload"
                 type="file"
+                multiple
                 className="hidden"
                 accept="application/pdf,.pdf,text/plain,.txt,image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
                 onChange={handleFileChange}

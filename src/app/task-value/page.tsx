@@ -17,6 +17,7 @@ import Image from "next/image";
 import AddTaskModal, { type TaskFormInitial } from "@/components/ui/task-form";
 import toast from "react-hot-toast";
 import { useStore, type TaskPriority, type TaskItem } from "@/store/use-store";
+import ColorLegend from "@/components/ui/color-legend";
 import {
   parseTaskDate,
   formatTaskDate,
@@ -601,12 +602,15 @@ export default function TaskValue() {
         </div>
       </div>
 
+      {/* Explainable colors — make the red/yellow/green system self-evident */}
+      <ColorLegend variant="priority" className="mb-8" />
+
       {/* Info Message */}
       <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-4 mb-8">
         <p className="text-sm text-gray-700">
           <span className="font-medium">It&apos;s okay to let go.</span> One
-          task can be minimized or skipped without affecting your ability to
-          pass. Protecting your energy is a valid choice.
+          task can be minimized without affecting your ability to pass.
+          Protecting your energy is a valid choice.
         </p>
       </div>
 
