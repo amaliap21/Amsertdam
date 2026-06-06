@@ -258,6 +258,9 @@ export async function POST(req: NextRequest) {
 
     const target = Math.max(1, effective);
     let questions: QuizQuestion[] = [];
+    // True when the LLM produced nothing and we used the deterministic extractor
+    // (lower quality, no content filtering / math formatting). Surfaced to the UI.
+    let basic = false;
     if (AI_USE_LLM) {
       const chain = resolveChain(requestedModel, tier);
 
@@ -450,6 +453,7 @@ export async function POST(req: NextRequest) {
         );
       }
       questions = extractQuiz(cleaned, Math.max(1, effective), 0, language);
+      basic = questions.length > 0; // LLM gave nothing; this is the basic fallback
     }
 
     if (questions.length === 0) {
@@ -476,6 +480,7 @@ export async function POST(req: NextRequest) {
       source: file.name,
       questions,
       imageDataUrl,
+      basic,
       maxQuestions,
       tier,
       credits: isPremium ? await getCredits(userId) : undefined,

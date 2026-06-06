@@ -28,6 +28,7 @@ type CreateQuizModalProps = {
     questions: GeneratedQuestion[];
     imageDataUrl?: string | null;
     imageRegions?: ImageOcrRegion[] | null;
+    basic?: boolean;
   }) => void;
 };
 
@@ -169,6 +170,7 @@ export default function CreateQuizModal({
         source: string;
         questions: GeneratedQuestion[];
         imageDataUrl?: string | null;
+        basic?: boolean;
       };
       toast.success(`Generated ${json.questions.length} questions`, { id: t });
       refreshUsage(); // credits/quota were spent server-side, sync the navbar
@@ -190,7 +192,11 @@ export default function CreateQuizModal({
         questions: json.questions,
         imageDataUrl: json.imageDataUrl ?? null,
         imageRegions,
+        basic: json.basic ?? false,
       });
+      if (json.basic) {
+        toast("Made a basic quiz (AI was busy). Regenerate or use a Premium model for AI-quality questions.", { icon: "ℹ️", duration: 6000 });
+      }
       setFormData({ title: "", course: "", file: null });
       onClose();
     } catch (err) {

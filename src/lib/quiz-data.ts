@@ -13,6 +13,7 @@ export type Quiz = {
   questions: QuizQuestion[];
   imageDataUrl?: string | null;
   imageRegions?: import("@/store/use-store").ImageOcrRegion[] | null;
+  basic?: boolean;
 };
 
 export const QUIZZES: Quiz[] = [];
@@ -34,6 +35,7 @@ export function useQuizById(id: string): Quiz | undefined {
       questions: generated.questions,
       imageDataUrl: generated.imageDataUrl ?? null,
       imageRegions: generated.imageRegions ?? null,
+      basic: generated.basic ?? false,
     };
   }
   return getQuizById(id);

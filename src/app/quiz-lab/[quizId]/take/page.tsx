@@ -128,6 +128,14 @@ export default function TakeQuiz({
             {quiz.title}
           </h1>
 
+          {quiz.basic && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              <span className="font-medium">This is a basic quiz.</span> The AI was busy, so it was built with a
+              simpler generator (no smart content filtering or math formatting). Regenerate it in Quiz Lab, or pick a
+              Premium model (Claude Opus), for AI-quality questions.
+            </div>
+          )}
+
           {quiz.imageDataUrl && (
             <CoveredImage src={quiz.imageDataUrl} regions={quiz.imageRegions ?? []} />
           )}

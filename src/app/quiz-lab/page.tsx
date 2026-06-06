@@ -100,6 +100,7 @@ export default function QuizLab() {
     questions: GeneratedQuestion[];
     imageDataUrl?: string | null;
     imageRegions?: import("@/store/use-store").ImageOcrRegion[] | null;
+    basic?: boolean;
   }) => {
     addQuiz(data)
       .then(() => toast.success("Quiz saved"))

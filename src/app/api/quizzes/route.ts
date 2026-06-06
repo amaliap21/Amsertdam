@@ -44,13 +44,14 @@ export async function POST(req: Request) {
       questions: body.questions ?? null,
       image_url: body.imageDataUrl ?? body.image_url ?? null,
       image_regions: body.imageRegions ?? body.image_regions ?? null,
+      generated_basic: body.basic ?? body.generated_basic ?? false,
       user_id: userId,
     }
     const { data, error } = await supabaseAdmin.from('quizzes').insert(payload).select().single()
     if (error) {
-      // If migrations 019/020 (image_url, image_regions) aren't applied yet,
-      // retry with only the core columns so quizzes still save.
-      if (/image_url|image_regions|column|schema cache/i.test(String(error.message))) {
+      // If migrations 019/020/021 (image_url, image_regions, generated_basic)
+      // aren't applied yet, retry with only the core columns so quizzes still save.
+      if (/image_url|image_regions|generated_basic|column|schema cache/i.test(String(error.message))) {
         const rest = {
           title: payload.title,
           course: payload.course,
