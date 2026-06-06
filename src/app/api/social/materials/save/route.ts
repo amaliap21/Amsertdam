@@ -27,7 +27,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Share not found" }, { status: 404 });
     }
     if (share.kind === "material") {
-      return NextResponse.json({ error: "Open the link directly — nothing to save." }, { status: 400 });
+      return NextResponse.json({ error: "Open the link directly, nothing to save." }, { status: 400 });
     }
     if (!share.ref_id) {
       return NextResponse.json({ error: "Original resource is unavailable." }, { status: 404 });

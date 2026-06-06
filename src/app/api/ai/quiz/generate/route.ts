@@ -261,11 +261,11 @@ export async function POST(req: NextRequest) {
         `Use ${lang === "id" ? "Indonesian" : "English"} for all questions and options; do not mix languages unless the source text is mixed.`,
         `Identify the core concepts and important context in the source, and write questions that test understanding of those key points rather than trivial details.`,
         `Respond ONLY with a single valid JSON object matching: {"questions":[{"prompt":"...","options":[{"letter":"A","text":"..."}],"correctAnswer":"A"}]}.`,
-        `Produce ${n} distinct multiple-choice questions derived from the provided source — aim for the full count, only producing fewer if the source genuinely lacks enough material. Always include exactly 4 options A/B/C/D. Keep options plausible and the correct answer grounded in the source.`,
-        `Read everything visible in the source: typed text, handwritten notes, diagrams, equations, and any mathematical or scientific symbols. Do not skip a section because it is handwritten or stylized — read it.`,
+        `Produce ${n} distinct multiple-choice questions derived from the provided source, aim for the full count, only producing fewer if the source genuinely lacks enough material. Always include exactly 4 options A/B/C/D. Keep options plausible and the correct answer grounded in the source.`,
+        `Read everything visible in the source: typed text, handwritten notes, diagrams, equations, and any mathematical or scientific symbols. Do not skip a section because it is handwritten or stylized, read it.`,
         `When the source contains math: transcribe stacked fractions as "a/b", superscripts as "x^n", subscripts as "x_n", square roots as "sqrt(x)", integrals as "integral", limits as "lim", Greek letters by name (alpha, beta, pi), and inequalities exactly as drawn (preserve "<", ">", "<=", ">=" direction).`,
         `Solve every math problem yourself before emitting it: the marked correctAnswer MUST be the mathematically correct option. Do not guess.`,
-        `Use plain-text math notation throughout — no LaTeX, no Unicode math glyphs that won't render in a plain web textarea. Keep distractors realistic (common algebraic slips, sign errors, off-by-one) so the question actually tests understanding.`,
+        `Use plain-text math notation throughout, no LaTeX, no Unicode math glyphs that won't render in a plain web textarea. Keep distractors realistic (common algebraic slips, sign errors, off-by-one) so the question actually tests understanding.`,
         `If a region of the source is illegible, skip questions from that region rather than fabricating content.`,
       ].join(" ");
 
@@ -370,7 +370,7 @@ export async function POST(req: NextRequest) {
               `printed math, diagrams. If a fraction is drawn stacked, render it inline ` +
               `as "a/b". If you see an exponent as a superscript, write it as "x^n". ` +
               `Preserve inequality direction exactly ("<" stays "<", ">=" stays ">="). ` +
-              `Treat any clearly written symbol as readable — never skip math just ` +
+              `Treat any clearly written symbol as readable, never skip math just ` +
               `because it is handwritten. If a region is genuinely illegible, skip ` +
               `questions from it instead of guessing.` + avoidClause();
             try {

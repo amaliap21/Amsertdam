@@ -52,7 +52,7 @@ const INTENTS: IntentSpec[] = [
     route: "/passing-target",
     dataSource: "/api/python/graduation_threshold",
     keywords: ["pass", "passing", "target", "score i need", "grade i need", "minimum", "threshold", "what do i need", "gpa", "final exam score"],
-    follow_up: "I can calculate the exact score you still need on each assessment — want that?",
+    follow_up: "I can calculate the exact score you still need on each assessment, want that?",
   },
   {
     intent: "priority",
@@ -60,7 +60,7 @@ const INTENTS: IntentSpec[] = [
     route: "/task-value",
     dataSource: "/api/python/priority_analysis",
     keywords: ["priorit", "what should i do", "what to do first", "important", "focus first", "skip", "minimize", "task value", "which task", "what matters", "worth it"],
-    follow_up: "I can re-rank your tasks by what's worth your energy right now — shall I?",
+    follow_up: "I can re-rank your tasks by what's worth your energy right now, shall I?",
   },
   {
     intent: "schedule",
@@ -76,7 +76,7 @@ const INTENTS: IntentSpec[] = [
     route: "/flashcards",
     dataSource: null,
     keywords: ["flashcard", "memorize", "memorise", "recall", "review cards", "spaced repetition", "drill"],
-    follow_up: "I can pull up a deck and quiz you with hints — ready?",
+    follow_up: "I can pull up a deck and quiz you with hints, ready?",
   },
   {
     intent: "quiz",
@@ -84,7 +84,7 @@ const INTENTS: IntentSpec[] = [
     route: "/quiz-lab",
     dataSource: null,
     keywords: ["quiz", "practice questions", "test me", "mock exam", "practice test", "generate questions"],
-    follow_up: "I can generate practice questions from your material — want a set?",
+    follow_up: "I can generate practice questions from your material, want a set?",
   },
   {
     intent: "tutoring",
@@ -102,7 +102,7 @@ const GENERAL: IntentSpec = {
   route: "/study-companion",
   dataSource: null,
   keywords: [],
-  follow_up: "I can help with your schedule, priorities, risk, passing targets, flashcards, or any concept — what's on your mind?",
+  follow_up: "I can help with your schedule, priorities, risk, passing targets, flashcards, or any concept, what's on your mind?",
 };
 
 function classify(query: string): {

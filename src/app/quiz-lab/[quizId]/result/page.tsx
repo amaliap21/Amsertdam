@@ -128,7 +128,7 @@ export default function QuizResult({
                     Your answer:{" "}
                     {userOption
                       ? `${userOption.letter}. ${userOption.text}`
-                      : "—"}
+                      : "-"}
                   </p>
                   {!isCorrect && correctOption && (
                     <p className="text-sm text-green-700 mt-1">

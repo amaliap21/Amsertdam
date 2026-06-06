@@ -91,7 +91,7 @@ export default function RootLayout({
         <title>RealTrack</title>
         <meta
           name="description"
-          content="RealTrack — study planning, flashcards, quizzes, and an AI study companion that reviews your answers."
+          content="RealTrack, study planning, flashcards, quizzes, and an AI study companion that reviews your answers."
         />
         <link rel="icon" href="/logo.png" type="image/png" />
         <link rel="apple-touch-icon" href="/logo.png" />

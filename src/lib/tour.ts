@@ -280,7 +280,7 @@ export async function createTour(router: Router): Promise<ShepherdTour> {
       id: "study-companion",
       attachTo: { element: '[data-tour="ai-credits"]', on: pos("bottom") },
       title: "Study Companion",
-      text: "After you take a quiz, this page reviews your answers with AI — it explains mistakes and shows whether each course is on track to pass.",
+      text: "After you take a quiz, this page reviews your answers with AI, it explains mistakes and shows whether each course is on track to pass.",
       beforeShowPromise: waitFor('[data-tour="ai-credits"]'),
       buttons: [
         navigateBack("/quiz-lab", '[data-tour="create-quiz"]'),
@@ -292,7 +292,7 @@ export async function createTour(router: Router): Promise<ShepherdTour> {
       id: "ai-credits",
       attachTo: { element: '[data-tour="buy-credits"]', on: pos("bottom") },
       title: "Free analyses & premium credits",
-      text: "You get free AI analyses every day. For deeper Claude-quality feedback, buy premium credits — pay easily with QRIS, e-wallet, or card. You can pick which model to use on each analysis.",
+      text: "You get free AI analyses every day. For deeper Claude-quality feedback, buy premium credits, pay easily with QRIS, e-wallet, or card. You can pick which model to use on each analysis.",
       beforeShowPromise: waitFor('[data-tour="buy-credits"]'),
       buttons: [skipBtn, navigateNext("/dashboard", '[data-tour="dashboard-hero"]')],
     },

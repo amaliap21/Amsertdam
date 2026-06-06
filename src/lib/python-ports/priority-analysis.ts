@@ -186,9 +186,9 @@ export function computeBreakdown(data: TaskInput): RawBreakdown {
 export function priorityFromScore(
   score: number,
 ): { priority: "HIGH" | "MEDIUM" | "LOW"; action: string; color: "green" | "yellow" | "red" } {
-  if (score >= HIGH_THRESHOLD) return { priority: "HIGH", action: "Worth your energy — do it fully and on time", color: "green" };
-  if (score >= MEDIUM_THRESHOLD) return { priority: "MEDIUM", action: "Helpful but flexible — time-box your effort", color: "yellow" };
-  return { priority: "LOW", action: "Safe to minimize — protect your energy for higher-impact work", color: "red" };
+  if (score >= HIGH_THRESHOLD) return { priority: "HIGH", action: "Worth your energy, do it fully and on time", color: "green" };
+  if (score >= MEDIUM_THRESHOLD) return { priority: "MEDIUM", action: "Helpful but flexible, time-box your effort", color: "yellow" };
+  return { priority: "LOW", action: "Safe to minimize, protect your energy for higher-impact work", color: "red" };
 }
 
 /**
@@ -208,10 +208,10 @@ export function colorReason(
   if (color === "green") {
     return drivers.length
       ? `Flagged as high priority because ${drivers.join(" and ")}.`
-      : "High priority — it scores well across deadline, grade impact, and effort.";
+      : "High priority, it scores well across deadline, grade impact, and effort.";
   }
   if (color === "yellow") {
-    return "Moderate priority — it matters, but not enough to crowd out your top tasks.";
+    return "Moderate priority, it matters, but not enough to crowd out your top tasks.";
   }
   // red / low
   const lowReasons: string[] = [];
@@ -220,7 +220,7 @@ export function colorReason(
   if (breakdown.effort_penalty >= 0.6) lowReasons.push("it would cost a lot of time for little return");
   return lowReasons.length
     ? `Safe to minimize because ${lowReasons.join(" and ")}.`
-    : "Low impact on your grade — safe to do less and protect your wellbeing.";
+    : "Low impact on your grade, safe to do less and protect your wellbeing.";
 }
 
 function calculateConfidence(data: TaskInput): number {
@@ -251,7 +251,7 @@ export function analyzeEffortImpact(data: TaskInput): TaskResult {
   const passing_grade = Number(data.passing_grade ?? 75);
   if (current_grade >= passing_grade) {
     priority = "LOW";
-    action = "Already passing — focus your energy elsewhere";
+    action = "Already passing, focus your energy elsewhere";
     color = "gray";
   }
 
@@ -354,7 +354,7 @@ export function rankTasksWithTopsis(
       const passing = Number(tasks[i].passing_grade ?? 75);
       if (current >= passing) {
         result.priority = "LOW";
-        result.action = "Already passing — focus your energy elsewhere";
+        result.action = "Already passing, focus your energy elsewhere";
         result.color = "gray";
         result.color_reason = colorReason("gray", {
           impact: result.breakdown.grade_impact,

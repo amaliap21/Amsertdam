@@ -1,8 +1,8 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Lightbulb, Eye, EyeOff, Check } from "lucide-react";
+import { ChevronLeft, ChevronRight, Lightbulb, Eye, EyeOff, Check, Timer, Play, Pause, RotateCcw, X, ListChecks } from "lucide-react";
 import Link from "next/link";
-import { use, useMemo, useRef, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useStore, type ImageOcrRegion } from "@/store/use-store";
 
@@ -592,6 +592,12 @@ export default function FlashcardReview({
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
   const [showAnswer, setShowAnswer] = useState(false);
   const [showHint, setShowHint] = useState(false);
+  // Pomodoro session: which cards were studied (answer revealed) during the run.
+  const [studied, setStudied] = useState<Set<number>>(new Set());
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const markStudied = useCallback((idx: number) => {
+    setStudied((prev) => (prev.has(idx) ? prev : new Set(prev).add(idx)));
+  }, []);
 
   const generatedDeck = useStore((s) =>
     s.decks.find((d) => d.id === deckId),
@@ -668,11 +674,16 @@ export default function FlashcardReview({
       </div>
 
       {/* Deck Title */}
-      <div className="text-center mb-12">
+      <div className="text-center mb-8">
         <h1 className="text-[28px] font-semibold text-indigo-primary mb-2">
           {deck.title}
         </h1>
         <p className="text-gray-primary">{deck.description}</p>
+      </div>
+
+      {/* Pomodoro focus timer */}
+      <div className="mx-auto mb-10 max-w-3xl">
+        <PomodoroPanel studiedCount={studied.size} onComplete={() => setSummaryOpen(true)} onSummarize={() => setSummaryOpen(true)} />
       </div>
 
       {/* Flashcard */}
@@ -686,7 +697,7 @@ export default function FlashcardReview({
           {/* Answer Section */}
           <div
             className="bg-indigo-50 rounded-xl p-6 cursor-pointer hover:bg-indigo-100 transition-colors"
-            onClick={() => setShowAnswer(!showAnswer)}
+            onClick={() => { if (!showAnswer) markStudied(currentCardIndex); setShowAnswer(!showAnswer); }}
           >
             <p className="text-center text-2xl font-mono tracking-wider text-black-primary">
               {showAnswer ? currentCard.answer : formatAnswerBlanks(currentCard.answer)}
@@ -746,6 +757,104 @@ export default function FlashcardReview({
             <ChevronRight size={20} />
           </button>
         </div>
+      </div>
+
+      {summaryOpen && (
+        <SessionSummary
+          deckTitle={deck.title}
+          studiedCards={deck.cards.filter((_, i) => studied.has(i))}
+          total={totalCards}
+          onClose={() => setSummaryOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Pomodoro focus timer with a humane, no-pressure framing. */
+function PomodoroPanel({ studiedCount, onComplete, onSummarize }: { studiedCount: number; onComplete: () => void; onSummarize: () => void }) {
+  const [minutes, setMinutes] = useState(25);
+  const [remaining, setRemaining] = useState(25 * 60);
+  const [running, setRunning] = useState(false);
+
+  useEffect(() => {
+    if (!running) return;
+    const id = window.setInterval(() => {
+      setRemaining((r) => {
+        if (r <= 1) {
+          window.clearInterval(id);
+          setRunning(false);
+          onComplete();
+          return 0;
+        }
+        return r - 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [running, onComplete]);
+
+  const reset = (mins = minutes) => { setRunning(false); setRemaining(mins * 60); };
+  const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
+  const ss = String(remaining % 60).padStart(2, "0");
+  const pct = minutes > 0 ? Math.round((1 - remaining / (minutes * 60)) * 100) : 0;
+
+  return (
+    <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-indigo-primary">
+          <Timer size={18} />
+          <span className="text-sm font-medium">Pomodoro focus</span>
+        </div>
+        <div className="font-mono text-2xl font-semibold text-black-primary tabular-nums">{mm}:{ss}</div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setRunning((v) => !v)} className="flex items-center gap-1.5 rounded-lg bg-indigo-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-600">
+            {running ? <Pause size={15} /> : <Play size={15} />}{running ? "Pause" : "Start"}
+          </button>
+          <button onClick={() => reset()} className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600"><RotateCcw size={15} /> Reset</button>
+        </div>
+      </div>
+      <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-white">
+        <div className="h-full rounded-full bg-indigo-primary transition-all" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          {[15, 25, 50].map((m) => (
+            <button key={m} onClick={() => { setMinutes(m); reset(m); }} className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${minutes === m ? "border-indigo-primary bg-indigo-primary/10 text-indigo-primary" : "border-gray-200 text-gray-500"}`}>{m} min</button>
+          ))}
+        </div>
+        <button onClick={onSummarize} className="flex items-center gap-1.5 text-xs font-medium text-indigo-primary hover:underline">
+          <ListChecks size={14} /> End and summarize ({studiedCount} reviewed)
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** End-of-session recap: what you reviewed during this Pomodoro. */
+function SessionSummary({ deckTitle, studiedCards, total, onClose }: { deckTitle: string; studiedCards: Flashcard[]; total: number; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.5)" }} onClick={onClose}>
+      <div className="max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-black-primary">Session summary</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+        <p className="mb-4 text-sm text-gray-700">
+          Nice work. During this Pomodoro you reviewed <span className="font-semibold text-indigo-primary">{studiedCards.length}</span> of {total} cards in {deckTitle}.
+        </p>
+        {studiedCards.length > 0 ? (
+          <ul className="flex flex-col gap-2">
+            {studiedCards.map((c) => (
+              <li key={c.id} className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                <p className="text-sm font-medium text-black-primary">{c.question}</p>
+                <p className="mt-0.5 text-sm text-indigo-primary">{c.answer}</p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-gray-400">You have not revealed any cards yet. Flip a few, then come back to see your recap.</p>
+        )}
+        <button onClick={onClose} className="mt-4 w-full rounded-lg bg-indigo-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-600">Keep studying</button>
       </div>
     </div>
   );

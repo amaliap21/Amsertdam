@@ -107,11 +107,11 @@ function scoreCandidate(me: StudentInput, other: StudentInput) {
 type Match = ReturnType<typeof scoreCandidate>;
 
 function headline(top: Match[]): string {
-  if (!top.length) return "No strong study matches yet — add your courses to find peers.";
+  if (!top.length) return "No strong study matches yet, add your courses to find peers.";
   const best = top[0];
   if (best.shared_courses.length) {
     const n = top.filter((m) => m.shared_courses.length).length;
-    return `${n} peer(s) are also behind on ${best.shared_courses[0]} this week — start a focus room?`;
+    return `${n} peer(s) are also behind on ${best.shared_courses[0]} this week, start a focus room?`;
   }
   return `${best.name} looks like a great ${best.match_type.toLowerCase()} for you.`;
 }

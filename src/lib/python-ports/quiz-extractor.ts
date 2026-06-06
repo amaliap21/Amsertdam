@@ -60,7 +60,7 @@ function escapeRegex(s: string): string {
 
 function cleanTerm(term: string): string {
   let t = term.replace(/\s+/g, " ").trim();
-  t = t.replace(/^[\s,;:\-—–"'()]+|[\s,;:\-—–"'()]+$/g, "");
+  t = t.replace(/^[\s,;:\-, –"'()]+|[\s,;:\-, –"'()]+$/g, "");
   t = t.replace(/^(?:a|an|the)\s+/i, "");
   return t;
 }

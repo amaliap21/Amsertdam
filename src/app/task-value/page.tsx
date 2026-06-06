@@ -84,10 +84,10 @@ export default function TaskValue() {
     // formatting happens at render time via formatTaskDate().
     const newDate = data.deadline
       ? new Date(data.deadline).toISOString()
-      : "—";
+      : "Not set";
     const newTimeEstimate = data.estimatedHours
       ? `${data.estimatedHours}h`
-      : "—";
+      : "Not set";
     // Preserve any AI-advice trailing line that was previously appended below
     // the assessment metadata so we don't overwrite useful prioritization context.
     const previousAdvice = (editingTask.description ?? "")
@@ -142,8 +142,8 @@ export default function TaskValue() {
       course: task.course || "General",
       // Store the real ISO timestamp; the year would otherwise be stripped
       // by the short en-US format and have to be guessed at parse time.
-      date: task.deadline ? new Date(task.deadline).toISOString() : "—",
-      timeEstimate: task.estimatedHours ? `${task.estimatedHours}h` : "—",
+      date: task.deadline ? new Date(task.deadline).toISOString() : "Not set",
+      timeEstimate: task.estimatedHours ? `${task.estimatedHours}h` : "Not set",
       priority: "If You Have Energy",
       description: task.description,
       effort: "medium effort",
@@ -164,7 +164,7 @@ export default function TaskValue() {
       const metaMatch = original.match(/^(Assessment:[^\n]*)/i);
       const meta = metaMatch ? metaMatch[1] : "";
       const advice =
-        "Only task on your plate — treat it as your top priority and finish on time.";
+        "Only task on your plate, treat it as your top priority and finish on time.";
       const newDescription = meta ? `${meta}\n${advice}` : advice;
       setTasks([
         { ...only, priority: "Focus First", description: newDescription },
@@ -182,7 +182,7 @@ export default function TaskValue() {
       } catch {
         /* persistence is best-effort; UI already updated */
       }
-      setAiSummary("1 task — defaulted to Focus First.");
+      setAiSummary("1 task, defaulted to Focus First.");
       toast.success("Task prioritized");
       return;
     }

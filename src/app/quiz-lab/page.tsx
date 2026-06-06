@@ -48,7 +48,7 @@ async function downloadQuizPdf(quiz: GeneratedQuiz) {
   // Header
   writeWrapped(quiz.title || "Quiz", 18, "bold");
   writeWrapped(
-    `${quiz.course || "—"} • ${quiz.questions.length} questions`,
+    `${quiz.course || "-"} • ${quiz.questions.length} questions`,
     11,
     "normal",
   );

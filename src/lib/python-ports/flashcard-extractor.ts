@@ -47,7 +47,7 @@ export const WORD_RE = /[A-Za-z][A-Za-z\-']+/g;
 
 // Strip leading bullet markers ("• ", "- ", "* ", "1. ", "1) ") so the term
 // extractor sees the real content, not "• Photosynthesis".
-const BULLET_PREFIX_RE = /^[\s•▪◦●○■□–—\-*]+|^\s*\d+[.)\s]+/;
+const BULLET_PREFIX_RE = /^[\s•▪◦●○■□–, \-*]+|^\s*\d+[.)\s]+/;
 
 // PDF artifact patterns. `pdf-parse` interleaves page headers/footers
 // (e.g. "-- 3 of 10 --", "25 | J", running titles, journal codes) with the
@@ -286,7 +286,7 @@ function isStopword(token: string): boolean {
 
 function cleanTerm(term: string): string {
   let t = term.replace(/\s+/g, " ").trim();
-  t = t.replace(/^[\s,;:\-—–"'()]+|[\s,;:\-—–"'()]+$/g, "");
+  t = t.replace(/^[\s,;:\-, –"'()]+|[\s,;:\-, –"'()]+$/g, "");
   t = t.replace(/^(?:a|an|the)\s+/i, "");
   return t;
 }
@@ -345,7 +345,7 @@ function extractDefinitionPairs(sentence: string): Array<[string, string]> {
 // stand-alone hyphen surrounded by whitespace, but NOT a hyphen with no
 // whitespace on either side, otherwise terms like "Kolagen tipe I-III"
 // get split into "Kolagen tipe I" / "III adalah ...".
-const COLON_DASH_RE = /^\s*([A-ZА-Я][\w\s\-]{1,60}?)\s*(?::|—|–|\s-\s)\s*(.{10,280})$/;
+const COLON_DASH_RE = /^\s*([A-ZА-Я][\w\s\-]{1,60}?)\s*(?::|, |–|\s-\s)\s*(.{10,280})$/;
 
 function extractColonDashPairs(sentence: string): Array<[string, string]> {
   const m = sentence.match(COLON_DASH_RE);

@@ -53,12 +53,12 @@ function workloadDetail(ratio: number): string {
 }
 
 function intervention(driver: string, color: string): string {
-  if (color === "green") return "You're on track here — protect this and rest when you can.";
+  if (color === "green") return "You're on track here, protect this and rest when you can.";
   const table: Record<string, string> = {
     trajectory: "Your grade is trending down. Book one focused review session this week before the next assessment.",
     buffer: "You're close to the threshold. Use Passing Target to find the exact score you still need.",
     workload: "This course is over your time budget. Use Task Value to find what's safe to minimize elsewhere.",
-    completion: "Missed assessments are the main risk. Catch up on the most recent one first — even partial credit helps.",
+    completion: "Missed assessments are the main risk. Catch up on the most recent one first, even partial credit helps.",
     procrastination: "You tend to start late. Schedule the next deadline in Priority Planner and start 3 days earlier.",
   };
   return table[driver] ?? "Review this course with your Study Companion.";
@@ -127,7 +127,7 @@ function computeRisk(course: CourseInput) {
     weeks_to_threshold: weeksToThreshold,
     top_driver: top.key,
     intervention: intervention(top.key, color),
-    explanation: `${label} (${score}/100). Biggest driver: ${top.label.toLowerCase()} — ${top.detail}.`,
+    explanation: `${label} (${score}/100). Biggest driver: ${top.label.toLowerCase()}, ${top.detail}.`,
     factors,
   };
 }
@@ -144,7 +144,7 @@ function summarize(results: RiskResult[]) {
   const counts = { red: 0, yellow: 0, green: 0 };
   for (const r of results) counts[r.color] += 1;
   let headline: string;
-  if (color === "red") headline = `${worst.course} needs attention now — ${worst.intervention}`;
+  if (color === "red") headline = `${worst.course} needs attention now, ${worst.intervention}`;
   else if (color === "yellow") headline = `Mostly steady, but keep an eye on ${worst.course}.`;
   else headline = "You're on track across all courses. Keep the pace and rest.";
   return { overall_risk: overall, band: label, color, headline, ...counts };

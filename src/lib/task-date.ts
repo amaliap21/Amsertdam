@@ -14,7 +14,7 @@ export function parseTaskDate(
   raw: string,
 ): { isoDate: string; clock: { h: number; m: number } | null } {
   const empty = { isoDate: "", clock: null as { h: number; m: number } | null };
-  if (!raw || raw === "—") return empty;
+  if (!raw || raw === "-") return empty;
 
   // Modern path: a real Date string with a year (ISO, RFC, or any
   // toLocaleString output that includes the year).
@@ -46,7 +46,7 @@ export function parseTaskDate(
 // short human-readable form used across the UI ("Nov 20, 11:22 PM").
 // Returns the raw string unchanged when it can't be parsed (e.g. "—").
 export function formatTaskDate(raw: string): string {
-  if (!raw || raw === "—") return raw || "—";
+  if (!raw || raw === "-") return raw || "-";
   const d = new Date(raw);
   if (!Number.isNaN(d.getTime())) {
     return d.toLocaleString("en-US", {

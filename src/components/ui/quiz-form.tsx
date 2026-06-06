@@ -356,8 +356,8 @@ export default function CreateQuizModal({
             label="AI Model"
             hint={
               modelTier(model) === "premium"
-                ? "Premium model — uses 1 credit per question generated."
-                : "Free model — rate-limited but no cost."
+                ? "Premium model, uses 1 credit per question generated."
+                : "Free model, rate-limited but no cost."
             }
           />
 
@@ -381,14 +381,14 @@ export default function CreateQuizModal({
                 <p className="text-sm text-gray-500">
                   {formData.files.length > 1 ? (
                     <span className="font-medium text-indigo-primary">
-                      {formData.files.length} files — merged into one quiz
+                      {formData.files.length} files, merged into one quiz
                     </span>
                   ) : formData.file ? (
                     <span className="font-medium text-indigo-primary">
                       {formData.file.name}
                     </span>
                   ) : (
-                    "Upload PDF, .txt, or image — select several to merge (max. 50 MB each)"
+                    "Upload PDF, .txt, or image, select several to merge (max. 50 MB each)"
                   )}
                 </p>
                 {recommendedMaxQuestions ? (

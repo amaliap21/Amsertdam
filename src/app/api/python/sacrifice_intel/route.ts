@@ -42,7 +42,7 @@ function minimalAdvice(weight: number): string {
 }
 
 function sacrificeAdvice(weight: number, hours: number): string {
-  if (weight <= 5) return `Only ${weight}% of your grade — safe to minimize and protect your energy.`;
+  if (weight <= 5) return `Only ${weight}% of your grade, safe to minimize and protect your energy.`;
   if (hours >= 10) return `${hours}h is a lot for a ${weight}% task. A solid basic attempt is enough here.`;
   return "Lower return on effort. A minimal pass captures partial credit and frees energy for higher-impact work.";
 }

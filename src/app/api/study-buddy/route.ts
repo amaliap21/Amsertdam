@@ -93,11 +93,11 @@ export async function GET() {
 
     const sharedCount = matches.filter((m) => m.shared_courses.length).length;
     const headline = !candidateProfiles.length
-      ? "No public peers yet — invite classmates, or turn on “Go global” in your profile."
+      ? "No public peers yet, invite classmates, or turn on “Go global” in your profile."
       : !matches.length
-        ? "No strong matches yet — add your courses and interests to find peers."
+        ? "No strong matches yet, add your courses and interests to find peers."
         : sharedCount
-          ? `${sharedCount} peer(s) share a course you're working on — start a focus room?`
+          ? `${sharedCount} peer(s) share a course you're working on, start a focus room?`
           : `${matches[0].name} looks like a great ${matches[0].match_type.toLowerCase()} for you.`;
 
     return NextResponse.json({

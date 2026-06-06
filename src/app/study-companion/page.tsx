@@ -48,12 +48,12 @@ function StudyCompanionInner() {
 
       if (pending) {
         // Payment created but NOT yet received — don't promise credits.
-        toast("Payment pending — we'll add your credits once it's confirmed.", {
+        toast("Payment pending, we'll add your credits once it's confirmed.", {
           icon: "⏳",
         });
       } else {
         // settlement / capture (or a finish callback without a status param).
-        toast.success("Payment received — adding your credits…");
+        toast.success("Payment received, adding your credits…");
       }
       // Either way refresh a few times: a pending QRIS can settle within
       // seconds, and the webhook may land a beat after the redirect.
@@ -190,8 +190,8 @@ function StudyCompanionInner() {
                   {c.safe
                     ? "Your quiz scores meet this course's pass threshold."
                     : c.borderline
-                      ? "Close to the line — a few more correct answers and you're safe."
-                      : "Below the pass threshold — you risk failing this course. Review weak topics and retake quizzes."}
+                      ? "Close to the line, a few more correct answers and you're safe."
+                      : "Below the pass threshold, you risk failing this course. Review weak topics and retake quizzes."}
                 </p>
               </div>
             ))}
