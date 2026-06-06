@@ -59,10 +59,20 @@ export async function POST(req: Request) {
     const userId = await getUserId();
     if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const body = await req.json();
-    const updates: Record<string, unknown> = { id: userId, is_tutor: body.is_tutor !== false };
-    if (body.headline !== undefined) updates.headline = String(body.headline).slice(0, 140);
-    if (body.bio !== undefined) updates.bio = String(body.bio).slice(0, 2000);
-    if (Array.isArray(body.tutor_subjects)) updates.tutor_subjects = body.tutor_subjects.slice(0, 12);
+    const becomingTutor = body.is_tutor !== false;
+    const updates: Record<string, unknown> = { id: userId, is_tutor: becomingTutor };
+
+    if (becomingTutor) {
+      if (body.headline !== undefined) updates.headline = String(body.headline).slice(0, 140);
+      if (body.bio !== undefined) updates.bio = String(body.bio).slice(0, 2000);
+      if (Array.isArray(body.tutor_subjects)) updates.tutor_subjects = body.tutor_subjects.slice(0, 12).map((s: unknown) => String(s).slice(0, 40));
+    } else {
+      // Stop tutoring resets the whole tutor profile and cancels every session
+      // the user was hosting (participants cascade away with them).
+      updates.headline = null;
+      updates.tutor_subjects = [];
+      await db.from("study_sessions").delete().eq("host_id", userId);
+    }
 
     // Upsert (not update) so it self-heals if the profile row doesn't exist yet.
     const { data, error } = await db.from("profiles").upsert(updates, { onConflict: "id" }).select().single();

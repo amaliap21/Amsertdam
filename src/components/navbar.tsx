@@ -166,6 +166,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
   const [editMajor, setEditMajor] = useState("");
   const [editSemester, setEditSemester] = useState("");
   const [editInterests, setEditInterests] = useState<string[]>([]);
+  const [interestInput, setInterestInput] = useState("");
   const [editPublic, setEditPublic] = useState(true);
   const [saving, setSaving] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
@@ -523,7 +524,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
         type="button"
         onClick={onToggleSidebar}
         aria-label="Open menu"
-        className="order-1 lg:hidden flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-black-primary hover:bg-gray-100 sm:order-none"
+        className="order-1 lg:hidden flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-black-primary hover:bg-gray-100 sm:order-0"
       >
         <Menu size={22} />
       </button>
@@ -545,7 +546,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
           inline and grows (flex-1). */}
       <div
         ref={searchRef}
-        className="relative order-last w-full min-w-0 sm:order-none sm:w-auto sm:flex-1 sm:max-w-126.25"
+        className="relative order-last w-full min-w-0 sm:order-0 sm:w-auto sm:flex-1 sm:max-w-126.25"
       >
         <form
           className="flex h-11 md:h-14 items-center gap-3 rounded-[100px] bg-[#F5F5F5] px-4"
@@ -642,7 +643,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
           mobile (next to the hamburger); reset on sm+ so it sits inline. */}
       <div
         ref={profileRef}
-        className="order-2 ml-auto relative flex items-center gap-2 shrink-0 sm:order-none sm:ml-0 sm:gap-3"
+        className="order-2 ml-auto relative flex items-center gap-2 shrink-0 sm:order-0 sm:ml-0 sm:gap-3"
       >
         <div ref={notificationsRef} className="relative">
           <button
@@ -857,36 +858,72 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
                 />
               </div>
 
-              {/* Interests — power Study Buddy matching */}
+              {/* Interests, used by Study Buddy matching. Pick presets or add your own. */}
               <div>
                 <label className="block text-xs font-medium text-gray-primary mb-1">
                   Interests
                 </label>
-                <div className="flex flex-wrap gap-1.5">
-                  {INTEREST_OPTIONS.map((opt) => {
-                    const active = editInterests.includes(opt);
-                    return (
+                {/* Your selected interests (removable) */}
+                {editInterests.length > 0 && (
+                  <div className="mb-2 flex flex-wrap gap-1.5">
+                    {editInterests.map((it) => (
                       <button
-                        key={opt}
+                        key={it}
                         type="button"
                         onClick={() =>
                           setEditInterests((prev) =>
-                            prev.includes(opt)
-                              ? prev.filter((x) => x !== opt)
-                              : [...prev, opt],
+                            prev.filter((x) => x !== it),
                           )
                         }
-                        className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
-                          active
-                            ? "border-indigo-primary bg-indigo-primary/10 text-indigo-primary"
-                            : "border-gray-200 text-gray-500 hover:border-indigo-primary/40"
-                        }`}
+                        className="inline-flex items-center gap-1 rounded-full border border-indigo-primary bg-indigo-primary/10 px-2.5 py-1 text-[11px] font-medium text-indigo-primary"
                       >
-                        {opt}
+                        {it} <X size={11} />
                       </button>
-                    );
-                  })}
+                    ))}
+                  </div>
+                )}
+                {/* Add your own with autocomplete */}
+                <div className="mb-2 flex gap-2">
+                  <input
+                    type="text"
+                    value={interestInput}
+                    onChange={(e) => setInterestInput(e.target.value)}
+                    list="interest-options"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        const parts = interestInput
+                          .split(",")
+                          .map((part) => part.trim())
+                          .filter(Boolean);
+                        if (parts.length) {
+                          setEditInterests((p) => {
+                            const next = [...p];
+                            for (const v of parts) {
+                              if (!next.some((x) => x.toLowerCase() === v.toLowerCase())) {
+                                next.push(v);
+                              }
+                            }
+                            return next;
+                          });
+                        }
+                        setInterestInput("");
+                      }
+                    }}
+                    placeholder="Add your own, then press Enter"
+                    className="flex-1 rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-black-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary"
+                  />
                 </div>
+                <datalist id="interest-options">
+                  {INTEREST_OPTIONS.filter(
+                    (opt) =>
+                      !editInterests.some(
+                        (x) => x.toLowerCase() === opt.toLowerCase(),
+                      ),
+                  ).map((opt) => (
+                    <option key={opt} value={opt} />
+                  ))}
+                </datalist>
               </div>
 
               {/* Privacy — "go global" vs private */}

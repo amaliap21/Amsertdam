@@ -99,3 +99,32 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }
 }
+
+// DELETE /api/social/sessions { session_id } deletes a session owned by the host.
+export async function DELETE(req: Request) {
+  try {
+    const userId = await getUserId();
+    if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { session_id } = await req.json();
+    if (!session_id || typeof session_id !== "string") {
+      return NextResponse.json({ error: "Missing session_id" }, { status: 400 });
+    }
+
+    const { data: session } = await db
+      .from("study_sessions")
+      .select("id, host_id")
+      .eq("id", session_id)
+      .maybeSingle();
+    if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    if (session.host_id !== userId) {
+      return NextResponse.json({ error: "Only the host can delete this session" }, { status: 403 });
+    }
+
+    await db.from("session_participants").delete().eq("session_id", session_id);
+    const { error } = await db.from("study_sessions").delete().eq("id", session_id).eq("host_id", userId);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+  }
+}
