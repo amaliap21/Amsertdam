@@ -102,7 +102,7 @@ export default function ActiveHoursForm({
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-2">
+            <div className="flex min-w-0 flex-col gap-2">
               <label className="text-xs font-medium text-black-primary sm:text-sm">
                 Start
               </label>
@@ -110,11 +110,11 @@ export default function ActiveHoursForm({
                 type="time"
                 value={start}
                 onChange={(e) => setStart(e.target.value)}
-                className="w-full rounded-xl border border-[#b1b1b1] px-3 py-2 text-sm text-black-primary focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary"
+                className="w-full min-w-0 box-border appearance-none rounded-xl border border-[#b1b1b1] px-3 py-2 text-sm text-black-primary focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary"
                 required
               />
             </div>
-            <div className="flex flex-col gap-2">
+            <div className="flex min-w-0 flex-col gap-2">
               <label className="text-xs font-medium text-black-primary sm:text-sm">
                 End
               </label>
@@ -122,7 +122,7 @@ export default function ActiveHoursForm({
                 type="time"
                 value={end}
                 onChange={(e) => setEnd(e.target.value)}
-                className="w-full rounded-xl border border-[#b1b1b1] px-3 py-2 text-sm text-black-primary focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary"
+                className="w-full min-w-0 box-border appearance-none rounded-xl border border-[#b1b1b1] px-3 py-2 text-sm text-black-primary focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary"
                 required
               />
             </div>
@@ -148,7 +148,7 @@ export default function ActiveHoursForm({
                   type="time"
                   value={breakStart}
                   onChange={(e) => setBreakStart(e.target.value)}
-                  className="w-full rounded-xl border border-[#b1b1b1] px-3 py-2 text-sm text-black-primary focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary"
+                  className="w-full min-w-0 box-border appearance-none rounded-xl border border-[#b1b1b1] px-3 py-2 text-sm text-black-primary focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary"
                 />
               </div>
               <div className="flex flex-col gap-2">
@@ -159,7 +159,7 @@ export default function ActiveHoursForm({
                   type="time"
                   value={breakEnd}
                   onChange={(e) => setBreakEnd(e.target.value)}
-                  className="w-full rounded-xl border border-[#b1b1b1] px-3 py-2 text-sm text-black-primary focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary"
+                  className="w-full min-w-0 box-border appearance-none rounded-xl border border-[#b1b1b1] px-3 py-2 text-sm text-black-primary focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary"
                 />
               </div>
             </div>

@@ -280,8 +280,14 @@ export default function CreateFlashcardModal({
       analyzeFile(picked[0], formData.deckName);
       return;
     }
-    const textFiles = picked.filter((f) => !isImageName(f));
-    const files = textFiles.length ? textFiles : [picked[0]];
+    // Text/PDF: ACCUMULATE with already-chosen files (so picking one at a time
+    // still merges them), de-duping by name + size.
+    const existing = formData.files.filter((f) => !isImageName(f));
+    const merged = [...existing];
+    for (const f of picked.filter((f) => !isImageName(f))) {
+      if (!merged.some((e) => e.name === f.name && e.size === f.size)) merged.push(f);
+    }
+    const files = merged.length ? merged : [picked[0]];
     setFormData({ ...formData, file: files[0], files });
     analyzeFile(files[0], formData.deckName);
   };

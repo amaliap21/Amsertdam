@@ -144,7 +144,10 @@ export default function CreateQuizModal({
       return;
     }
     let parsedTotal = Math.max(1, Math.floor(Number(numQuestions) || 1));
-    if (recommendedMaxQuestions && parsedTotal > recommendedMaxQuestions) {
+    // Only clamp to the estimate for a SINGLE file. With multiple merged files
+    // the estimate (from the first file) understates the real combined max, so
+    // we let the server cap against the full merged text instead.
+    if (formData.files.length <= 1 && recommendedMaxQuestions && parsedTotal > recommendedMaxQuestions) {
       parsedTotal = recommendedMaxQuestions;
     }
     setError(null);
@@ -214,9 +217,23 @@ export default function CreateQuizModal({
       return;
     }
     setError(null);
-    setFormData({ ...formData, file: picked[0], files: picked });
-    // Estimate question count from the first source (good enough for the cap).
-    analyzeFile(picked[0], formData.title, formData.course);
+    const isImg = (f: File) => f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name);
+    // An image is single-source (vision path); replace with just that image.
+    if (picked.some(isImg)) {
+      const img = picked.find(isImg)!;
+      setFormData({ ...formData, file: img, files: [img] });
+      analyzeFile(img, formData.title, formData.course);
+      return;
+    }
+    // Text/PDF: ACCUMULATE with what's already chosen (so picking files one at a
+    // time still merges them), de-duping by name + size.
+    const existing = formData.files.filter((f) => !isImg(f));
+    const merged = [...existing];
+    for (const f of picked) {
+      if (!merged.some((e) => e.name === f.name && e.size === f.size)) merged.push(f);
+    }
+    setFormData({ ...formData, file: merged[0], files: merged });
+    analyzeFile(merged[0], formData.title, formData.course);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
