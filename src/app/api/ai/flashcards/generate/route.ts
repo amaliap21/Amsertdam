@@ -42,6 +42,9 @@ export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
     const file = formData.get("file");
+    // Batch ingestion: several text/PDF sources merged into one deck. Images
+    // stay single-source (the vision model reads one picture).
+    const allFiles = formData.getAll("file").filter((f): f is File => f instanceof File);
     const deckName = (formData.get("deckName") as string) || "Untitled Deck";
     const mode = (formData.get("mode") as string) || "generate";
     const requestedCardsRaw = Number(formData.get("requestedCards") ?? 0);
@@ -112,23 +115,39 @@ export async function POST(req: NextRequest) {
     if (isImage) {
       maxCards = 12; // vision: one image, no term-counting to bound from
     } else {
-      const extracted = await extractTextFromUpload(file);
-      cleanedText = tidyText(extracted.text);
-      if (cleanedText.length < 40 || extracted.wordCount < 30) {
+      // Merge every text/PDF source (skip any images mixed in).
+      const textFiles = allFiles.filter((f) => {
+        const img = f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name);
+        return !img;
+      });
+      const sources = textFiles.length ? textFiles : [file];
+      let totalPages = 0;
+      let totalWords = 0;
+      const segments: string[] = [];
+      for (const f of sources) {
+        const extracted = await extractTextFromUpload(f);
+        const seg = tidyText(extracted.text);
+        if (seg.length < 40 || extracted.wordCount < 30) continue;
+        segments.push(sources.length > 1 ? `# Source: ${f.name}\n${seg}` : seg);
+        totalPages += extracted.pageCount ?? 0;
+        totalWords += extracted.wordCount;
+      }
+      cleanedText = tidyText(segments.join("\n\n"));
+      if (cleanedText.length < 40 || totalWords < 30) {
         return NextResponse.json(
           {
             error:
-              "Could not extract enough readable text from this PDF. Try a text-based PDF (not a scan), or upload an image with a Premium model to use vision OCR.",
+              "Could not extract enough readable text from these file(s). Try text-based PDFs (not scans), or an image with a Premium model for vision OCR.",
             extractedChars: cleanedText.length,
-            extractedWords: extracted.wordCount,
+            extractedWords: totalWords,
           },
           { status: 422 },
         );
       }
       maxCards = estimateMaxCards(cleanedText);
       extractedMeta = {
-        pageCount: extracted.pageCount ?? null,
-        wordCount: extracted.wordCount,
+        pageCount: totalPages || null,
+        wordCount: totalWords,
       };
     }
 

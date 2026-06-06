@@ -43,6 +43,17 @@ export default function CreateQuizModal({
   // Stored as a string so the input can be momentarily empty without
   // snapping back to "1". The number is parsed at submit time.
   const [requestedQuestions, setRequestedQuestions] = useState<string>("5");
+  // Total questions = questions-per-topic x number-of-topics.
+  const [perTopic, setPerTopic] = useState<string>("5");
+  const [topics, setTopics] = useState<string>("1");
+  const totalQuestions = Math.max(1, (Number(perTopic) || 0) * (Number(topics) || 0));
+  // Keep requestedQuestions (used by the cap + submit logic) in sync.
+  const applyCount = (nextPer: string, nextTopics: string) => {
+    setPerTopic(nextPer);
+    setTopics(nextTopics);
+    const total = Math.max(1, (Number(nextPer) || 0) * (Number(nextTopics) || 0));
+    setRequestedQuestions(String(total));
+  };
   const [language, setLanguage] = useState<Language>("en");
   const [model, setModel] = useState<string>(DEFAULT_MODEL_ID);
   const [recommendedMaxQuestions, setRecommendedMaxQuestions] = useState<number | null>(null);
@@ -161,6 +172,7 @@ export default function CreateQuizModal({
       fd.append("title", formData.title);
       fd.append("course", formData.course);
       fd.append("requestedQuestions", String(parsedQuestions));
+      fd.append("topics", String(Math.max(1, Number(topics) || 1)));
       fd.append("language", language);
       fd.append("model", model);
       const resp = await fetch("/api/ai/quiz/generate", {
@@ -278,28 +290,37 @@ export default function CreateQuizModal({
         <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-6">
           <div>
             <label className="mb-1 block text-[11px] font-medium text-black-primary sm:mb-3 sm:text-sm">
-              Questions to generate
+              Questions per topic and number of topics
             </label>
-            <input
-              type="number"
-              min={1}
-              max={recommendedMaxQuestions ?? undefined}
-              value={requestedQuestions}
-              onChange={(e) => setRequestedQuestions(e.target.value)}
-              onBlur={() => {
-                if (requestedQuestions === "" || Number(requestedQuestions) < 1) {
-                  setRequestedQuestions("1");
-                }
-              }}
-              disabled={loading || analyzing}
-              className="w-full rounded-xl border border-gray-300 px-2.5 py-2 text-[13px] text-black-primary focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary sm:px-4 sm:py-3.5 sm:text-sm"
-            />
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <input
+                  type="number"
+                  min={1}
+                  value={perTopic}
+                  onChange={(e) => applyCount(e.target.value, topics)}
+                  onBlur={() => { if (perTopic === "" || Number(perTopic) < 1) applyCount("1", topics); }}
+                  disabled={loading || analyzing}
+                  className="w-full rounded-xl border border-gray-300 px-2.5 py-2 text-[13px] text-black-primary focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary sm:px-4 sm:py-3.5 sm:text-sm"
+                />
+                <p className="mt-1 text-[10px] text-gray-primary">Questions per topic</p>
+              </div>
+              <div>
+                <input
+                  type="number"
+                  min={1}
+                  value={topics}
+                  onChange={(e) => applyCount(perTopic, e.target.value)}
+                  onBlur={() => { if (topics === "" || Number(topics) < 1) applyCount(perTopic, "1"); }}
+                  disabled={loading || analyzing}
+                  className="w-full rounded-xl border border-gray-300 px-2.5 py-2 text-[13px] text-black-primary focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary sm:px-4 sm:py-3.5 sm:text-sm"
+                />
+                <p className="mt-1 text-[10px] text-gray-primary">Number of topics</p>
+              </div>
+            </div>
             <p className="mt-1.5 text-[11px] leading-tight text-gray-primary sm:text-sm">
-              {recommendedMaxQuestions
-                ? `This file supports up to ${recommendedMaxQuestions} questions. You can choose any value up to that limit.`
-                : analyzing
-                  ? "Estimating the maximum question count…"
-                  : "Upload a file to estimate the maximum question count."}
+              Total: <span className="font-semibold text-indigo-primary">{totalQuestions} questions</span>
+              {recommendedMaxQuestions ? ` (this file supports up to ${recommendedMaxQuestions})` : analyzing ? " (estimating the maximum…)" : ""}
             </p>
           </div>
 
