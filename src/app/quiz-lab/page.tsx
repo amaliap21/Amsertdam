@@ -98,6 +98,7 @@ export default function QuizLab() {
     course: string;
     source: string;
     questions: GeneratedQuestion[];
+    imageDataUrl?: string | null;
   }) => {
     addQuiz(data)
       .then(() => toast.success("Quiz saved"))

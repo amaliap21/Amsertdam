@@ -491,11 +491,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // For image quizzes, return the image so it can be shown on the quiz page
+    // (questions reference "the image").
+    let imageDataUrl: string | undefined;
+    if (isImage) {
+      const buf = Buffer.from(await file.arrayBuffer()).toString("base64");
+      imageDataUrl = `data:${file.type || "image/png"};base64,${buf}`;
+    }
+
     return NextResponse.json({
       title,
       course,
       source: file.name,
       questions,
+      imageDataUrl,
       maxQuestions,
       tier,
       credits: isPremium ? await getCredits(userId) : undefined,

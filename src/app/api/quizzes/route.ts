@@ -42,6 +42,7 @@ export async function POST(req: Request) {
       course: body.course ?? null,
       source: body.source ?? null,
       questions: body.questions ?? null,
+      image_url: body.imageDataUrl ?? body.image_url ?? null,
       user_id: userId,
     }
     const { data, error } = await supabaseAdmin.from('quizzes').insert(payload).select().single()

@@ -24,6 +24,7 @@ type CreateQuizModalProps = {
     course: string;
     source: string;
     questions: GeneratedQuestion[];
+    imageDataUrl?: string | null;
   }) => void;
 };
 
@@ -188,6 +189,7 @@ export default function CreateQuizModal({
         course: string;
         source: string;
         questions: GeneratedQuestion[];
+        imageDataUrl?: string | null;
       };
       toast.success(`Generated ${json.questions.length} questions`, { id: t });
       refreshUsage(); // credits/quota were spent server-side, sync the navbar
@@ -196,6 +198,7 @@ export default function CreateQuizModal({
         course: json.course,
         source: json.source,
         questions: json.questions,
+        imageDataUrl: json.imageDataUrl ?? null,
       });
       setFormData({ title: "", course: "", file: null, files: [] });
       onClose();

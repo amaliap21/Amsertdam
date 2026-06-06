@@ -74,6 +74,13 @@ export default function TakeQuiz({
             {quiz.title}
           </h1>
 
+          {quiz.imageDataUrl && (
+            <div className="mb-4 overflow-hidden rounded-xl border border-gray-200 bg-white p-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={quiz.imageDataUrl} alt="Quiz reference" className="mx-auto max-h-[420px] w-auto object-contain" />
+            </div>
+          )}
+
           <div className="rounded-xl border border-gray-200 bg-white p-6">
             <h2 className="text-lg font-medium text-black-primary mb-6">
               {question.prompt}

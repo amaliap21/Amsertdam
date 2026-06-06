@@ -11,6 +11,7 @@ export type Quiz = {
   course: string;
   source: string;
   questions: QuizQuestion[];
+  imageDataUrl?: string | null;
 };
 
 export const QUIZZES: Quiz[] = [];
@@ -30,6 +31,7 @@ export function useQuizById(id: string): Quiz | undefined {
       course: generated.course,
       source: generated.source,
       questions: generated.questions,
+      imageDataUrl: generated.imageDataUrl ?? null,
     };
   }
   return getQuizById(id);
