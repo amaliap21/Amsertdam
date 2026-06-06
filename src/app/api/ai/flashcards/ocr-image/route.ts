@@ -6,13 +6,13 @@ import { spendCredit, refundCredit, getCredits } from "@/lib/ai/credits";
 export const runtime = "nodejs";
 export const maxDuration = 40;
 
-// Premium label refinement for cover-and-reveal.
+// AI label detection for cover-and-reveal.
 //
-// Geometry stays with Tesseract (pixel-accurate); an LLM cannot return precise
-// boxes. This endpoint takes the image plus Tesseract's detected label texts
-// and returns CORRECTED labels in the same order (fix OCR garble, proper
-// spelling/casing, fill a label Tesseract misread). The client keeps the exact
-// Tesseract boxes and only swaps the text.
+// The premium vision model uses its own knowledge to NAME every label in the
+// diagram (correctly spelled, multi-line/hyphenated terms joined, e.g.
+// "hypothalamus", "medulla oblongata") and give an approximate box. The client
+// then SNAPS each box to the precise Tesseract word pixels (see
+// snapLabelsToWords), so the result is accurate names + precise covers.
 export async function POST(req: NextRequest) {
   const auth = await requireUserId();
   if (auth.response) return auth.response;
@@ -22,26 +22,14 @@ export async function POST(req: NextRequest) {
     const form = await req.formData();
     const file = form.get("file");
     const model = typeof form.get("model") === "string" ? (form.get("model") as string) : undefined;
-    let labels: string[] = [];
-    try {
-      const raw = form.get("labels");
-      labels = Array.isArray(JSON.parse(String(raw))) ? JSON.parse(String(raw)) : [];
-    } catch {
-      labels = [];
-    }
-    labels = labels.map((l) => String(l)).slice(0, 40);
 
     if (!file || !(file instanceof File)) {
       return NextResponse.json({ error: "Missing image file" }, { status: 400 });
     }
-    if (!labels.length) {
-      return NextResponse.json({ error: "No labels to refine" }, { status: 400 });
-    }
     if (modelTier(model ?? "") !== "premium") {
-      return NextResponse.json({ error: "Refinement needs a Premium model." }, { status: 400 });
+      return NextResponse.json({ error: "AI detection needs a Premium model." }, { status: 400 });
     }
 
-    // One credit per refinement pass.
     if ((await getCredits(userId)) <= 0) {
       return NextResponse.json({ error: "Not enough premium credits.", needsCredits: true, cost: 1 }, { status: 402 });
     }
@@ -53,8 +41,11 @@ export async function POST(req: NextRequest) {
     const dataUrl = `data:${file.type || "image/png"};base64,${base64}`;
 
     const system =
-      "You correct OCR label text for a labelled diagram. You receive the image and an ordered list of OCR-detected labels. Return a JSON array of the SAME length and SAME order, where each item is the corrected label as it appears in the image (fix spelling, casing, spacing, and obvious OCR errors; keep the original language). Do not add, remove, or reorder items. Respond with ONLY the JSON array of strings.";
-    const userText = `OCR labels in order:\n${JSON.stringify(labels)}`;
+      "You are an expert diagram label reader for any subject (anatomy, biology, geography, engineering, etc.). " +
+      "Identify EVERY text label/callout in the image and name each one correctly using your own knowledge: " +
+      "fix OCR-style errors, join words split across lines or hyphens into the proper term (for example 'hypothal-' + 'amus' is 'hypothalamus', 'medulla' + 'oblongata' is 'medulla oblongata'), and keep the label's language. " +
+      "For each label give an approximate bounding box around the LABEL TEXT (not the arrow or the part in the picture) as fractions of the image size. " +
+      "Respond with ONLY a JSON array: [{\"label\":\"text\",\"x\":0.0,\"y\":0.0,\"w\":0.0,\"h\":0.0}] where x,y is the top-left corner and w,h the size, all between 0 and 1. No prose.";
 
     try {
       const result = await chatWithFallback(
@@ -63,30 +54,38 @@ export async function POST(req: NextRequest) {
           {
             role: "user",
             content: [
-              { type: "text", text: userText },
+              { type: "text", text: "List every label in this diagram with its bounding box." },
               { type: "image_url", image_url: { url: dataUrl } },
             ],
           },
         ],
         resolveChain(model, "premium"),
-        { maxTokens: 800, deadlineMs: 28000 },
+        { maxTokens: 2000, deadlineMs: 32000 },
       );
       const match = result.content.match(/\[[\s\S]*\]/);
-      const parsed = match ? (JSON.parse(match[0]) as unknown[]) : [];
-      // Only accept a same-length result; otherwise keep the originals.
-      const refined =
-        Array.isArray(parsed) && parsed.length === labels.length
-          ? parsed.map((s, i) => (typeof s === "string" && s.trim() ? s.trim().slice(0, 80) : labels[i]))
-          : labels;
-      return NextResponse.json({ labels: refined });
-    } catch (e) {
-      // Refinement is best-effort: refund the credit and return the originals
-      // so the user still gets a precise cover-and-reveal deck.
-      await refundCredit(userId, 1);
-      if (e instanceof AllModelsFailedError || e instanceof SyntaxError) {
-        return NextResponse.json({ labels });
+      const parsed = match ? (JSON.parse(match[0]) as { label?: string; x?: number; y?: number; w?: number; h?: number }[]) : [];
+      const labels = parsed
+        .filter((r) => r && typeof r.label === "string" && [r.x, r.y, r.w, r.h].every((n) => Number.isFinite(Number(n))))
+        .map((r) => ({
+          label: String(r.label).trim().slice(0, 80),
+          x: Math.max(0, Math.min(1, Number(r.x))),
+          y: Math.max(0, Math.min(1, Number(r.y))),
+          w: Math.max(0, Math.min(1, Number(r.w))),
+          h: Math.max(0, Math.min(1, Number(r.h))),
+        }))
+        .filter((r) => r.label.length >= 2 && r.w > 0 && r.h > 0);
+
+      if (!labels.length) {
+        await refundCredit(userId, 1);
+        return NextResponse.json({ error: "No labels detected. Try a clearer diagram or the free path." }, { status: 422 });
       }
       return NextResponse.json({ labels });
+    } catch (e) {
+      await refundCredit(userId, 1);
+      if (e instanceof AllModelsFailedError || e instanceof SyntaxError) {
+        return NextResponse.json({ error: "The vision model was busy. Your credit was refunded, please try again." }, { status: 503 });
+      }
+      return NextResponse.json({ error: (e as Error).message }, { status: 500 });
     }
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
