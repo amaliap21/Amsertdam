@@ -46,7 +46,18 @@ export async function POST(req: Request) {
       user_id: userId,
     }
     const { data, error } = await supabaseAdmin.from('quizzes').insert(payload).select().single()
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) {
+      // If migration 019 (image_url) hasn't been applied yet, retry without it
+      // so quizzes still save instead of silently failing.
+      if (/image_url|column|schema cache/i.test(String(error.message))) {
+        const { image_url: _omit, ...rest } = payload
+        void _omit
+        const retry = await supabaseAdmin.from('quizzes').insert(rest).select().single()
+        if (retry.error) return NextResponse.json({ error: retry.error.message }, { status: 500 })
+        return NextResponse.json(retry.data)
+      }
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
     return NextResponse.json(data)
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 })

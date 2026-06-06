@@ -372,6 +372,10 @@ export const useStore = create<AppState>()(
               }))
               return body.id
             }
+            // Server responded but not OK (e.g. column missing): still show the
+            // quiz locally so it never silently disappears.
+            set((state) => ({ quizzes: [...state.quizzes, { id, title: data.title, course: data.course, source: data.source, questions: data.questions, createdAt: new Date().toISOString(), imageDataUrl: data.imageDataUrl ?? null }] }))
+            return id
           } catch {
             // fallback local
             set((state) => ({ quizzes: [...state.quizzes, { id, title: data.title, course: data.course, source: data.source, questions: data.questions, createdAt: new Date().toISOString(), imageDataUrl: data.imageDataUrl ?? null }] }))
