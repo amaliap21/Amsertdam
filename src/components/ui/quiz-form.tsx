@@ -41,20 +41,10 @@ export default function CreateQuizModal({
     // quiz. `file` mirrors files[0] for the existing image/size checks.
     files: [] as File[],
   });
-  // Stored as a string so the input can be momentarily empty without
-  // snapping back to "1". The number is parsed at submit time.
-  const [requestedQuestions, setRequestedQuestions] = useState<string>("5");
-  // Total questions = questions-per-topic x number-of-topics.
+  // The user sets only questions-PER-TOPIC. The generator detects how many
+  // distinct topics the material has and makes this many questions for each, so
+  // 1 topic gives N, 2 topics give 2N, etc. (no manual topic count).
   const [perTopic, setPerTopic] = useState<string>("5");
-  const [topics, setTopics] = useState<string>("1");
-  const totalQuestions = Math.max(1, (Number(perTopic) || 0) * (Number(topics) || 0));
-  // Keep requestedQuestions (used by the cap + submit logic) in sync.
-  const applyCount = (nextPer: string, nextTopics: string) => {
-    setPerTopic(nextPer);
-    setTopics(nextTopics);
-    const total = Math.max(1, (Number(nextPer) || 0) * (Number(nextTopics) || 0));
-    setRequestedQuestions(String(total));
-  };
   const [language, setLanguage] = useState<Language>("en");
   const [model, setModel] = useState<string>(DEFAULT_MODEL_ID);
   const [recommendedMaxQuestions, setRecommendedMaxQuestions] = useState<number | null>(null);
@@ -115,11 +105,7 @@ export default function CreateQuizModal({
       });
       const json = await resp.json().catch(() => ({}));
       if (resp.ok && Number.isFinite(Number(json.maxQuestions))) {
-        const maxQuestions = Math.max(1, Math.round(Number(json.maxQuestions)));
-        setRecommendedMaxQuestions(maxQuestions);
-        setRequestedQuestions((current) =>
-          String(Math.min(Number(current) || 1, maxQuestions)),
-        );
+        setRecommendedMaxQuestions(Math.max(1, Math.round(Number(json.maxQuestions))));
         return;
       }
       setRecommendedMaxQuestions(null);
@@ -152,17 +138,7 @@ export default function CreateQuizModal({
       );
       return;
     }
-    const parsedQuestions = Math.max(
-      1,
-      Math.floor(Number(requestedQuestions) || 1),
-    );
-    if (
-      recommendedMaxQuestions &&
-      parsedQuestions > recommendedMaxQuestions
-    ) {
-      setError(`This source supports up to ${recommendedMaxQuestions} questions.`);
-      return;
-    }
+    const parsedPerTopic = Math.max(1, Math.floor(Number(perTopic) || 1));
     setError(null);
     setLoading(true);
     const t = toast.loading("Generating quiz questions…");
@@ -172,8 +148,11 @@ export default function CreateQuizModal({
       for (const f of sources) if (f) fd.append("file", f);
       fd.append("title", formData.title);
       fd.append("course", formData.course);
-      fd.append("requestedQuestions", String(parsedQuestions));
-      fd.append("topics", String(Math.max(1, Number(topics) || 1)));
+      // perTopic drives the count; the server detects topics and makes this many
+      // questions per detected topic. requestedQuestions=0 means "up to the max
+      // the source supports".
+      fd.append("perTopic", String(parsedPerTopic));
+      fd.append("requestedQuestions", "0");
       fd.append("language", language);
       fd.append("model", model);
       const resp = await fetch("/api/ai/quiz/generate", {
@@ -293,37 +272,20 @@ export default function CreateQuizModal({
         <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-6">
           <div>
             <label className="mb-1 block text-[11px] font-medium text-black-primary sm:mb-3 sm:text-sm">
-              Questions per topic and number of topics
+              Questions per topic
             </label>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <input
-                  type="number"
-                  min={1}
-                  value={perTopic}
-                  onChange={(e) => applyCount(e.target.value, topics)}
-                  onBlur={() => { if (perTopic === "" || Number(perTopic) < 1) applyCount("1", topics); }}
-                  disabled={loading || analyzing}
-                  className="w-full rounded-xl border border-gray-300 px-2.5 py-2 text-[13px] text-black-primary focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary sm:px-4 sm:py-3.5 sm:text-sm"
-                />
-                <p className="mt-1 text-[10px] text-gray-primary">Questions per topic</p>
-              </div>
-              <div>
-                <input
-                  type="number"
-                  min={1}
-                  value={topics}
-                  onChange={(e) => applyCount(perTopic, e.target.value)}
-                  onBlur={() => { if (topics === "" || Number(topics) < 1) applyCount(perTopic, "1"); }}
-                  disabled={loading || analyzing}
-                  className="w-full rounded-xl border border-gray-300 px-2.5 py-2 text-[13px] text-black-primary focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary sm:px-4 sm:py-3.5 sm:text-sm"
-                />
-                <p className="mt-1 text-[10px] text-gray-primary">Number of topics</p>
-              </div>
-            </div>
+            <input
+              type="number"
+              min={1}
+              value={perTopic}
+              onChange={(e) => setPerTopic(e.target.value)}
+              onBlur={() => { if (perTopic === "" || Number(perTopic) < 1) setPerTopic("1"); }}
+              disabled={loading || analyzing}
+              className="w-full rounded-xl border border-gray-300 px-2.5 py-2 text-[13px] text-black-primary focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary sm:px-4 sm:py-3.5 sm:text-sm"
+            />
             <p className="mt-1.5 text-[11px] leading-tight text-gray-primary sm:text-sm">
-              Total: <span className="font-semibold text-indigo-primary">{totalQuestions} questions</span>
-              {recommendedMaxQuestions ? ` (this file supports up to ${recommendedMaxQuestions})` : analyzing ? " (estimating the maximum…)" : ""}
+              We detect the topics in your file and make this many questions for each one. 1 topic gives {Math.max(1, Number(perTopic) || 1)}, 2 topics give {2 * Math.max(1, Number(perTopic) || 1)}, and so on
+              {recommendedMaxQuestions ? ` (up to ${recommendedMaxQuestions} total for this file)` : analyzing ? " (estimating the maximum…)" : ""}.
             </p>
           </div>
 
