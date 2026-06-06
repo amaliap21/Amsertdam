@@ -93,37 +93,26 @@ export async function extractTesseractRegions(file: File): Promise<TesseractResu
     return x;
   }
   function union(a: number, b: number) { parent[find(a)] = find(b); }
-  // Same-line words that sit close together form one label.
+  // Merge ONLY words on the SAME text line that sit close together. We do NOT
+  // merge across lines: distinct labels are often stacked just one line apart
+  // (e.g. "amus" above "pituitary gland", "medulla oblongata" above
+  // "vertebra"), so any cross-line merge fuses different terms into one box.
+  // A multi-line term therefore becomes separate boxes per line, which is
+  // correct (never two terms in one box) and far better than over-merging.
   for (let i = 0; i < words.length; i++) {
     for (let j = i + 1; j < words.length; j++) {
       const a = words[i], b = words[j];
-      const overlapY = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
-      const minH = Math.min(a.y1 - a.y0, b.y1 - b.y0);
-      if (overlapY < minH * 0.35) continue;
+      const avgH = (a.y1 - a.y0 + (b.y1 - b.y0)) / 2;
+      // Strict same-line: vertical centres must be nearly aligned, so the line
+      // below never counts as the same line even when spacing is tight.
+      const cYa = (a.y0 + a.y1) / 2;
+      const cYb = (b.y0 + b.y1) / 2;
+      if (Math.abs(cYa - cYb) > avgH * 0.4) continue;
+      // Horizontal gap small enough to be a word-space within one label.
       const gap = Math.max(0, Math.max(a.x0 - b.x1, b.x0 - a.x1));
-      const maxH = Math.max(a.y1 - a.y0, b.y1 - b.y0);
-      if (gap > maxH * 2.2) continue;
+      if (gap > avgH * 1.8) continue;
       union(i, j);
     }
-  }
-  // Hyphenated line wraps: a word ending in "-" joins the nearest word directly
-  // below it whose x-range overlaps (e.g. "hypothal-" + "amus"). Only hyphenated
-  // continuations merge across lines, so distinct stacked labels stay separate.
-  for (let i = 0; i < words.length; i++) {
-    if (!words[i].text.endsWith("-")) continue;
-    const a = words[i];
-    let best = -1;
-    let bestDy = Infinity;
-    for (let j = 0; j < words.length; j++) {
-      if (j === i) continue;
-      const b = words[j];
-      const dy = b.y0 - a.y1;
-      if (dy < -2 || dy > (a.y1 - a.y0) * 1.6) continue;
-      const xOverlap = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
-      if (xOverlap <= 0) continue;
-      if (dy < bestDy) { bestDy = dy; best = j; }
-    }
-    if (best >= 0) union(i, best);
   }
 
   const groups = new Map<number, number[]>();
@@ -135,15 +124,16 @@ export async function extractTesseractRegions(file: File): Promise<TesseractResu
   const pad = Math.max(8, Math.round(height * 0.012));
   const regions: ImageOcrRegion[] = [];
   for (const members of groups.values()) {
-    // Reading order: top-to-bottom, then left-to-right.
-    const grp = members.map((i) => words[i]).sort((a, b) => (a.y0 - b.y0) || (a.x0 - b.x0));
+    // One line: left-to-right reading order.
+    const grp = members.map((i) => words[i]).sort((a, b) => a.x0 - b.x0);
     // Join words; a trailing hyphen glues straight onto the next word.
     let text = "";
     for (const g of grp) {
       if (text.endsWith("-")) text = text.slice(0, -1) + g.text;
       else text = text ? `${text} ${g.text}` : g.text;
     }
-    if (text.length < 4 || !/[a-zA-Z]{3,}/.test(text)) continue;
+    text = text.replace(/-$/, ""); // drop a dangling line-wrap hyphen
+    if (text.length < 3 || !/[a-zA-Z]{3,}/.test(text)) continue;
     const x0 = Math.min(...grp.map((g) => g.x0));
     const y0 = Math.min(...grp.map((g) => g.y0));
     const x1 = Math.max(...grp.map((g) => g.x1));
