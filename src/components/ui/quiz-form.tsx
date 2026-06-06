@@ -8,6 +8,8 @@ import LanguagePicker, { type Language } from "@/components/ui/language-picker";
 import ModelPicker, { DEFAULT_MODEL_ID } from "@/components/ui/model-picker";
 import { modelTier } from "@/lib/ai/openrouter";
 import { useAiAnalyze } from "@/lib/use-ai-analyze";
+import { extractTesseractRegions } from "@/lib/tesseract-regions";
+import type { ImageOcrRegion } from "@/store/use-store";
 
 export type GeneratedQuestion = {
   id: string;
@@ -25,6 +27,7 @@ type CreateQuizModalProps = {
     source: string;
     questions: GeneratedQuestion[];
     imageDataUrl?: string | null;
+    imageRegions?: ImageOcrRegion[] | null;
   }) => void;
 };
 
@@ -172,12 +175,24 @@ export default function CreateQuizModal({
       };
       toast.success(`Generated ${json.questions.length} questions`, { id: t });
       refreshUsage(); // credits/quota were spent server-side, sync the navbar
+      // For image quizzes, detect label boxes (Tesseract) so the quiz page can
+      // COVER the labels and the student answers without reading the diagram.
+      let imageRegions: ImageOcrRegion[] | null = null;
+      if (formData.file && isImageFile(formData.file)) {
+        try {
+          const tess = await extractTesseractRegions(formData.file);
+          imageRegions = tess.regions;
+        } catch {
+          imageRegions = null;
+        }
+      }
       onCreated?.({
         title: json.title,
         course: json.course,
         source: json.source,
         questions: json.questions,
         imageDataUrl: json.imageDataUrl ?? null,
+        imageRegions,
       });
       setFormData({ title: "", course: "", file: null, files: [] });
       onClose();

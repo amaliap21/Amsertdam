@@ -99,6 +99,7 @@ export default function QuizLab() {
     source: string;
     questions: GeneratedQuestion[];
     imageDataUrl?: string | null;
+    imageRegions?: import("@/store/use-store").ImageOcrRegion[] | null;
   }) => {
     addQuiz(data)
       .then(() => toast.success("Quiz saved"))

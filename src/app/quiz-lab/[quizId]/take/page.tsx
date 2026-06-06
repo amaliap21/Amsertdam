@@ -5,6 +5,60 @@ import Link from "next/link";
 import { useRouter, notFound } from "next/navigation";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { useQuizById } from "@/lib/quiz-data";
+import type { ImageOcrRegion } from "@/store/use-store";
+
+/** Quiz reference image with its labels covered so answers aren't readable.
+ *  Tap a box to peek. */
+function CoveredImage({ src, regions }: { src: string; regions: ImageOcrRegion[] }) {
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  const [peeked, setPeeked] = useState<Set<number>>(new Set());
+  const toggle = (i: number) =>
+    setPeeked((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  return (
+    <div className="mb-4 rounded-xl border border-gray-200 bg-white p-2">
+      <div className="relative mx-auto w-fit">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={src}
+          alt="Quiz reference"
+          className="block max-h-[440px] w-auto"
+          onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+        />
+        {dims &&
+          regions.map((r, i) => {
+            const [x, y, w, h] = r.bbox;
+            const revealed = peeked.has(i);
+            return (
+              <button
+                key={i}
+                type="button"
+                onClick={() => toggle(i)}
+                title={revealed ? "Hide label" : "Tap to peek"}
+                className="absolute transition-opacity"
+                style={{
+                  left: `${(x / dims.w) * 100}%`,
+                  top: `${(y / dims.h) * 100}%`,
+                  width: `${(w / dims.w) * 100}%`,
+                  height: `${(h / dims.h) * 100}%`,
+                  background: revealed ? "transparent" : "rgb(79,70,229)",
+                  border: revealed ? "1px solid rgba(79,70,229,0.6)" : "1px solid rgba(255,255,255,0.7)",
+                  borderRadius: 4,
+                }}
+              />
+            );
+          })}
+      </div>
+      {regions.length > 0 && (
+        <p className="mt-1 text-center text-[11px] text-gray-400">Labels are hidden so you answer from memory. Tap a box to peek.</p>
+      )}
+    </div>
+  );
+}
 
 type Answer = "A" | "B" | "C" | "D";
 
@@ -75,10 +129,7 @@ export default function TakeQuiz({
           </h1>
 
           {quiz.imageDataUrl && (
-            <div className="mb-4 overflow-hidden rounded-xl border border-gray-200 bg-white p-2">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={quiz.imageDataUrl} alt="Quiz reference" className="mx-auto max-h-[420px] w-auto object-contain" />
-            </div>
+            <CoveredImage src={quiz.imageDataUrl} regions={quiz.imageRegions ?? []} />
           )}
 
           <div className="rounded-xl border border-gray-200 bg-white p-6">
