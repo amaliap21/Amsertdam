@@ -7,6 +7,7 @@ import toast from "react-hot-toast";
 import LanguagePicker, { type Language } from "@/components/ui/language-picker";
 import ModelPicker, { DEFAULT_MODEL_ID } from "@/components/ui/model-picker";
 import { modelTier } from "@/lib/ai/openrouter";
+import { useAiAnalyze } from "@/lib/use-ai-analyze";
 
 export type GeneratedQuestion = {
   id: string;
@@ -51,6 +52,8 @@ export default function CreateQuizModal({
   const [loading, setLoading] = useState(false);
   const [courseOptions, setCourseOptions] = useState<string[]>([]);
   const [coursesLoaded, setCoursesLoaded] = useState(false);
+  // Refreshes the navbar credit / free-quota counters after a generation.
+  const { refresh: refreshUsage } = useAiAnalyze();
 
   useEffect(() => {
     if (!isOpen) return;
@@ -175,6 +178,7 @@ export default function CreateQuizModal({
         questions: GeneratedQuestion[];
       };
       toast.success(`Generated ${json.questions.length} questions`, { id: t });
+      refreshUsage(); // credits/quota were spent server-side, sync the navbar
       onCreated?.({
         title: json.title,
         course: json.course,
@@ -378,7 +382,7 @@ export default function CreateQuizModal({
             >
               <div className="flex flex-col items-center justify-center pt-5 pb-6">
                 <Upload size={24} className="text-gray-400 mb-2" />
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-gray-500 text-center">
                   {formData.files.length > 1 ? (
                     <span className="font-medium text-indigo-primary">
                       {formData.files.length} files, merged into one quiz

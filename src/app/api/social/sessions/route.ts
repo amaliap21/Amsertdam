@@ -38,11 +38,18 @@ export async function GET() {
       : { data: [] };
     const joinedSet = new Set((myJoins ?? []).map((j: { session_id: string }) => j.session_id));
 
+    // Which of these hosts have I already rated? (rating is one-time)
+    const { data: myRatings } = hostIds.length
+      ? await db.from("tutor_ratings").select("tutor_id").eq("rater_id", userId).in("tutor_id", hostIds)
+      : { data: [] };
+    const ratedSet = new Set((myRatings ?? []).map((r: { tutor_id: string }) => r.tutor_id));
+
     const enriched = list.map((s: Record<string, unknown>) => ({
       ...s,
       host: hostMap.get(s.host_id as string) ?? null,
       joined: joinedSet.has(s.id as string),
       is_host: s.host_id === userId,
+      rated_host: ratedSet.has(s.host_id as string),
     }));
 
     return NextResponse.json({ sessions: enriched });

@@ -477,6 +477,13 @@ export default function TaskValue() {
     return tasks.filter((task) => task.priority === priority);
   };
 
+  // A task is overdue when its deadline date is strictly before today.
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const isPastDeadline = (date: string) => {
+    const { isoDate } = parseTaskDate(date);
+    return !!isoDate && isoDate < todayIso;
+  };
+
   const getPriorityBadgeStyles = (priority: TaskPriority) => {
     switch (priority) {
       case "Focus First":
@@ -640,9 +647,12 @@ export default function TaskValue() {
                   <p className="text-sm text-gray-primary mb-2">
                     {task.course}
                   </p>
-                  <div className="flex items-center gap-1.5 text-sm text-gray-600">
+                  <div className="flex flex-wrap items-center gap-1.5 text-sm text-gray-600">
                     <Calendar size={14} />
                     <span>{formatTaskDate(task.date)}</span>
+                    {isPastDeadline(task.date) && (
+                      <span className="font-bold text-red-600">· Deadline passed</span>
+                    )}
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-1.5">
@@ -719,9 +729,12 @@ export default function TaskValue() {
                   <p className="text-sm text-gray-primary mb-2">
                     {task.course}
                   </p>
-                  <div className="flex items-center gap-1.5 text-sm text-gray-600">
+                  <div className="flex flex-wrap items-center gap-1.5 text-sm text-gray-600">
                     <Calendar size={14} />
                     <span>{formatTaskDate(task.date)}</span>
+                    {isPastDeadline(task.date) && (
+                      <span className="font-bold text-red-600">· Deadline passed</span>
+                    )}
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-1.5">
@@ -798,9 +811,12 @@ export default function TaskValue() {
                   <p className="text-sm text-gray-primary mb-2">
                     {task.course}
                   </p>
-                  <div className="flex items-center gap-1.5 text-sm text-gray-600">
+                  <div className="flex flex-wrap items-center gap-1.5 text-sm text-gray-600">
                     <Calendar size={14} />
                     <span>{formatTaskDate(task.date)}</span>
+                    {isPastDeadline(task.date) && (
+                      <span className="font-bold text-red-600">· Deadline passed</span>
+                    )}
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-1.5">

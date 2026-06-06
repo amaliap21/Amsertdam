@@ -26,7 +26,7 @@ export async function GET() {
 
     const { data: tutors, error } = await db
       .from("profiles")
-      .select("id, full_name, avatar_url, headline, bio, tutor_subjects, interests, is_public, follower_count, rating_avg, rating_count, recommend_count, sessions_hosted")
+      .select("id, full_name, avatar_url, headline, bio, tutor_subjects, interests, country, is_public, follower_count, rating_avg, rating_count, recommend_count, sessions_hosted")
       .eq("is_tutor", true)
       .limit(100);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });

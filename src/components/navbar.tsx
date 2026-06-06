@@ -45,6 +45,7 @@ type Profile = {
   avatar_url: string | null;
   major: string | null;
   semester: number | null;
+  country: string | null;
   interests: string[] | null;
   is_public: boolean | null;
 };
@@ -165,6 +166,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
   const [editName, setEditName] = useState("");
   const [editMajor, setEditMajor] = useState("");
   const [editSemester, setEditSemester] = useState("");
+  const [editCountry, setEditCountry] = useState("");
   const [editInterests, setEditInterests] = useState<string[]>([]);
   const [interestInput, setInterestInput] = useState("");
   const [editPublic, setEditPublic] = useState(true);
@@ -185,6 +187,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
           setEditName(p.full_name ?? "");
           setEditMajor(p.major ?? "");
           setEditSemester(p.semester != null ? String(p.semester) : "");
+          setEditCountry(p.country ?? "");
           setEditInterests(Array.isArray(p.interests) ? p.interests : []);
           setEditPublic(p.is_public !== false);
         }
@@ -218,6 +221,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
           full_name: editName.trim() || null,
           major: editMajor.trim() || null,
           semester: editSemester ? Number(editSemester) : null,
+          country: editCountry.trim() || null,
           interests: editInterests,
           is_public: editPublic,
         }),
@@ -745,6 +749,7 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
               setEditSemester(
                 profile.semester != null ? String(profile.semester) : "",
               );
+              setEditCountry(profile.country ?? "");
               setEditInterests(
                 Array.isArray(profile.interests) ? profile.interests : [],
               );
@@ -855,6 +860,18 @@ const Navbar: React.FC<NavbarProps> = ({ className = "", onToggleSidebar }) => {
                   onChange={(e) => setEditSemester(e.target.value)}
                   className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-black-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary"
                   placeholder="e.g. 3"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-primary mb-1">
+                  Country of origin
+                </label>
+                <input
+                  type="text"
+                  value={editCountry}
+                  onChange={(e) => setEditCountry(e.target.value)}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-black-primary focus:outline-none focus:ring-2 focus:ring-indigo-primary"
+                  placeholder="e.g. Indonesia"
                 />
               </div>
 

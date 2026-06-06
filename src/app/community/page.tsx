@@ -57,6 +57,7 @@ type Tutor = {
   id: string;
   full_name: string | null;
   headline: string | null;
+  country: string | null;
   tutor_subjects: string[] | null;
   follower_count: number;
   rating_avg: number;
@@ -80,6 +81,7 @@ type Session = {
   audience?: string;
   joined: boolean;
   is_host: boolean;
+  rated_host?: boolean;
   host: { full_name: string | null; rating_avg: number } | null;
 };
 type Share = {
@@ -746,11 +748,16 @@ export default function CommunityPage() {
                         : "Join session"}
                   </button>
                   {s.joined && !s.is_host && (
-                    <RateHost
-                      hostId={s.host_id}
-                      hostName={s.host?.full_name ?? "host"}
-                      sessionId={s.id}
-                    />
+                    s.rated_host ? (
+                      <p className="mt-3 text-xs text-green-600">✓ You already rated this host</p>
+                    ) : (
+                      <RateHost
+                        hostId={s.host_id}
+                        hostName={s.host?.full_name ?? "host"}
+                        sessionId={s.id}
+                        onRated={() => load("tutors")}
+                      />
+                    )
                   )}
                 </div>
               ))}
@@ -783,6 +790,9 @@ export default function CommunityPage() {
                           <p className="text-xs text-gray-primary">
                             {t.headline ?? "Tutor"}
                           </p>
+                          {t.country && (
+                            <p className="text-[11px] text-gray-400">📍 {t.country}</p>
+                          )}
                         </div>
                       </div>
                       <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">
@@ -1023,10 +1033,12 @@ function RateHost({
   hostId,
   hostName,
   sessionId,
+  onRated,
 }: {
   hostId: string;
   hostName: string;
   sessionId: string;
+  onRated?: () => void;
 }) {
   const [stars, setStars] = useState(0);
   const [hover, setHover] = useState(0);
@@ -1057,6 +1069,7 @@ function RateHost({
       toast.success(
         `Thanks. You rated ${hostName} ${stars}★${recommend ? " and recommended them" : ""}`,
       );
+      onRated?.();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed");
     } finally {

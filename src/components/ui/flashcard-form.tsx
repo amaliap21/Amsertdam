@@ -6,6 +6,7 @@ import toast from "react-hot-toast";
 import LanguagePicker, { type Language } from "@/components/ui/language-picker";
 import ModelPicker, { DEFAULT_MODEL_ID } from "@/components/ui/model-picker";
 import { modelTier } from "@/lib/ai/openrouter";
+import { useAiAnalyze } from "@/lib/use-ai-analyze";
 
 export type GeneratedFlashcard = { front: string; back: string };
 
@@ -85,6 +86,7 @@ export default function CreateFlashcardModal({
   const [analyzing, setAnalyzing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [loading, setLoading] = useState(false);
+  const { refresh: refreshUsage } = useAiAnalyze();
 
   const MAX_SIZE = 50 * 1024 * 1024;
 
@@ -191,6 +193,7 @@ export default function CreateFlashcardModal({
           cards: GeneratedFlashcard[];
         };
         toast.success(`Generated ${json.cards.length} flashcards`, { id: t });
+        refreshUsage(); // premium vision spent credits, sync the navbar
         onCreated?.({ deckName: json.deckName, cards: json.cards });
       } else if (isImage) {
         // Client-side OCR using Tesseract.js, no server/AI API call.
@@ -376,6 +379,7 @@ export default function CreateFlashcardModal({
           cards: GeneratedFlashcard[];
         };
         toast.success(`Generated ${json.cards.length} flashcards`, { id: t });
+        refreshUsage(); // credits/quota spent server-side, sync the navbar
         onCreated?.({ deckName: json.deckName, cards: json.cards });
       }
       reset();

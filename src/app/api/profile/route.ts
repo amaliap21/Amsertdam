@@ -58,6 +58,7 @@ export async function PATCH(req: Request) {
     if (body.major !== undefined) updates.major = body.major
     if (body.semester !== undefined) updates.semester = body.semester
     if (body.avatar_url !== undefined) updates.avatar_url = body.avatar_url
+    if (body.country !== undefined) updates.country = body.country ? String(body.country).slice(0, 60) : null
     // Community fields: interests (matching tags) + privacy ("go global").
     if (Array.isArray(body.interests)) {
       updates.interests = body.interests.slice(0, 20).map((t: unknown) => String(t).slice(0, 40))

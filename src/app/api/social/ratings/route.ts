@@ -5,9 +5,9 @@ import { getUserId } from "@/lib/get-user-id";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const db = supabaseAdmin as any;
 
-// POST /api/social/ratings { tutor_id, stars, comment? } — rate a tutor (1-5).
-// One rating per (tutor, rater); re-posting updates it. Triggers recompute the
-// tutor's rating_avg / rating_count.
+// POST /api/social/ratings { tutor_id, stars, comment? } rates a tutor (1-5).
+// One rating per (tutor, rater), and it is final: a second attempt is rejected.
+// Triggers recompute the tutor's rating_avg / rating_count.
 export async function POST(req: Request) {
   try {
     const userId = await getUserId();
@@ -40,17 +40,25 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Join one of their sessions before rating." }, { status: 403 });
     }
 
-    const { error } = await db.from("tutor_ratings").upsert(
-      {
-        tutor_id,
-        rater_id: userId,
-        stars: s,
-        comment: comment ? String(comment).slice(0, 1000) : null,
-        recommend: recommend === true,
-        session_id: typeof session_id === "string" ? session_id : null,
-      },
-      { onConflict: "tutor_id,rater_id" },
-    );
+    // One rating per (tutor, rater), final. Reject a second attempt.
+    const { data: existingRating } = await db
+      .from("tutor_ratings")
+      .select("id")
+      .eq("tutor_id", tutor_id)
+      .eq("rater_id", userId)
+      .maybeSingle();
+    if (existingRating) {
+      return NextResponse.json({ error: "You already rated this host." }, { status: 409 });
+    }
+
+    const { error } = await db.from("tutor_ratings").insert({
+      tutor_id,
+      rater_id: userId,
+      stars: s,
+      comment: comment ? String(comment).slice(0, 1000) : null,
+      recommend: recommend === true,
+      session_id: typeof session_id === "string" ? session_id : null,
+    });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
     const { data: tutor } = await db
