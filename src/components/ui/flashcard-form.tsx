@@ -79,8 +79,6 @@ export default function CreateFlashcardModal({
   const [formData, setFormData] = useState({
     deckName: "",
     file: null as File | null,
-    // Multiple text/PDF sources merged into one deck (images stay single).
-    files: [] as File[],
   });
   const [requestedCards, setRequestedCards] = useState<number | "">(8);
   const [language, setLanguage] = useState<Language>("en");
@@ -94,7 +92,7 @@ export default function CreateFlashcardModal({
   const MAX_SIZE = 50 * 1024 * 1024;
 
   const reset = () => {
-    setFormData({ deckName: "", file: null, files: [] });
+    setFormData({ deckName: "", file: null });
     setRequestedCards(8);
     setRecommendedMaxCards(null);
     setAnalyzing(false);
@@ -224,10 +222,9 @@ export default function CreateFlashcardModal({
           modelLoaded: true,
         });
       } else {
-        // PDF path, server-side extraction. Merge multiple text/PDF sources.
+        // PDF path, server-side extraction.
         const fd = new FormData();
-        const sources = formData.files.length ? formData.files : [formData.file];
-        for (const f of sources) if (f) fd.append("file", f);
+        fd.append("file", formData.file);
         fd.append("deckName", formData.deckName);
         fd.append("requestedCards", String(finalRequestedCards));
         fd.append("language", language);
@@ -259,47 +256,28 @@ export default function CreateFlashcardModal({
     }
   };
 
-  const isImageName = (f: File) =>
-    f.type.startsWith("image/") || /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(f.name);
-
-  const acceptFiles = async (list: FileList) => {
-    const picked = Array.from(list);
-    if (!picked.length) return;
-    if (picked.some((f) => f.size > MAX_SIZE)) {
-      toast.error("A file exceeds the 50 MB limit.");
+  const acceptFile = async (f: File) => {
+    if (f.size > MAX_SIZE) {
+      toast.error("File exceeds the 50 MB limit.");
       return;
     }
-    // Images stay single-source; PDFs/text can be merged.
-    if (isImageName(picked[0])) {
-      const imgErr = await validateImageFile(picked[0]);
-      if (imgErr) {
-        toast.error(imgErr);
-        return;
-      }
-      setFormData({ ...formData, file: picked[0], files: [picked[0]] });
-      analyzeFile(picked[0], formData.deckName);
+    const imgErr = await validateImageFile(f);
+    if (imgErr) {
+      toast.error(imgErr);
       return;
     }
-    // Text/PDF: ACCUMULATE with already-chosen files (so picking one at a time
-    // still merges them), de-duping by name + size.
-    const existing = formData.files.filter((f) => !isImageName(f));
-    const merged = [...existing];
-    for (const f of picked.filter((f) => !isImageName(f))) {
-      if (!merged.some((e) => e.name === f.name && e.size === f.size)) merged.push(f);
-    }
-    const files = merged.length ? merged : [picked[0]];
-    setFormData({ ...formData, file: files[0], files });
-    analyzeFile(files[0], formData.deckName);
+    setFormData({ ...formData, file: f });
+    analyzeFile(f, formData.deckName);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length) acceptFiles(e.target.files);
+    if (e.target.files && e.target.files[0]) acceptFile(e.target.files[0]);
   };
 
   const handleDrop = (e: React.DragEvent<HTMLLabelElement>) => {
     e.preventDefault();
     setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length) acceptFiles(e.dataTransfer.files);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) acceptFile(e.dataTransfer.files[0]);
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLLabelElement>) => {
@@ -447,16 +425,12 @@ export default function CreateFlashcardModal({
               <div className="flex flex-col items-center justify-center pt-4 pb-5 sm:pt-5 sm:pb-6">
                 <Upload size={22} className="mb-2 text-gray-400 sm:size-6" />
                 <p className="text-center text-sm text-gray-500">
-                  {formData.files.length > 1 ? (
-                    <span className="font-medium text-indigo-primary">
-                      {formData.files.length} files, merged into one deck
-                    </span>
-                  ) : formData.file ? (
+                  {formData.file ? (
                     <span className="font-medium text-indigo-primary">
                       {formData.file.name}
                     </span>
                   ) : (
-                    "Upload PDFs or text files, select several to merge (max. 50 MB each)"
+                    "Upload a PDF or image (max. 50 MB)"
                   )}
                 </p>
                 {recommendedMaxCards ? (
@@ -468,7 +442,6 @@ export default function CreateFlashcardModal({
               <input
                 id="file-upload"
                 type="file"
-                multiple
                 className="hidden"
                 accept="image/*,.pdf"
                 onChange={handleFileChange}

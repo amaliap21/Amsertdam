@@ -40,9 +40,6 @@ export default function CreateQuizModal({
     title: "",
     course: "",
     file: null as File | null,
-    // Batch / NotebookLM-style: one or more text sources merged into a single
-    // quiz. `file` mirrors files[0] for the existing image/size checks.
-    files: [] as File[],
   });
   // The user sets only questions-PER-TOPIC. The generator detects how many
   // distinct topics the material has and makes this many questions for each, so
@@ -144,10 +141,7 @@ export default function CreateQuizModal({
       return;
     }
     let parsedTotal = Math.max(1, Math.floor(Number(numQuestions) || 1));
-    // Only clamp to the estimate for a SINGLE file. With multiple merged files
-    // the estimate (from the first file) understates the real combined max, so
-    // we let the server cap against the full merged text instead.
-    if (formData.files.length <= 1 && recommendedMaxQuestions && parsedTotal > recommendedMaxQuestions) {
+    if (recommendedMaxQuestions && parsedTotal > recommendedMaxQuestions) {
       parsedTotal = recommendedMaxQuestions;
     }
     setError(null);
@@ -155,11 +149,9 @@ export default function CreateQuizModal({
     const t = toast.loading("Generating quiz questions…");
     try {
       const fd = new FormData();
-      const sources = formData.files.length ? formData.files : [formData.file];
-      for (const f of sources) if (f) fd.append("file", f);
+      fd.append("file", formData.file);
       fd.append("title", formData.title);
       fd.append("course", formData.course);
-      // Total questions; the server splits them evenly across merged files.
       fd.append("requestedQuestions", String(parsedTotal));
       fd.append("language", language);
       fd.append("model", model);
@@ -199,7 +191,7 @@ export default function CreateQuizModal({
         imageDataUrl: json.imageDataUrl ?? null,
         imageRegions,
       });
-      setFormData({ title: "", course: "", file: null, files: [] });
+      setFormData({ title: "", course: "", file: null });
       onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Generation failed", {
@@ -210,40 +202,24 @@ export default function CreateQuizModal({
     }
   };
 
-  const acceptFiles = (fileList: FileList) => {
-    const picked = Array.from(fileList);
-    if (picked.some((f) => f.size > MAX_SIZE)) {
-      setError("A file exceeds the 50 MB limit.");
+  const acceptFile = (f: File) => {
+    if (f.size > MAX_SIZE) {
+      setError("File exceeds the 50 MB limit.");
       return;
     }
     setError(null);
-    const isImg = (f: File) => f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name);
-    // An image is single-source (vision path); replace with just that image.
-    if (picked.some(isImg)) {
-      const img = picked.find(isImg)!;
-      setFormData({ ...formData, file: img, files: [img] });
-      analyzeFile(img, formData.title, formData.course);
-      return;
-    }
-    // Text/PDF: ACCUMULATE with what's already chosen (so picking files one at a
-    // time still merges them), de-duping by name + size.
-    const existing = formData.files.filter((f) => !isImg(f));
-    const merged = [...existing];
-    for (const f of picked) {
-      if (!merged.some((e) => e.name === f.name && e.size === f.size)) merged.push(f);
-    }
-    setFormData({ ...formData, file: merged[0], files: merged });
-    analyzeFile(merged[0], formData.title, formData.course);
+    setFormData({ ...formData, file: f });
+    analyzeFile(f, formData.title, formData.course);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length) acceptFiles(e.target.files);
+    if (e.target.files && e.target.files[0]) acceptFile(e.target.files[0]);
   };
 
   const handleDrop = (e: React.DragEvent<HTMLLabelElement>) => {
     e.preventDefault();
     setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length) acceptFiles(e.dataTransfer.files);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) acceptFile(e.dataTransfer.files[0]);
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLLabelElement>) => {
@@ -318,10 +294,8 @@ export default function CreateQuizModal({
               className="w-full rounded-xl border border-gray-300 px-2.5 py-2 text-[13px] text-black-primary focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary sm:px-4 sm:py-3.5 sm:text-sm"
             />
             <p className="mt-1.5 text-[11px] leading-tight text-gray-primary sm:text-sm">
-              {formData.files.length > 1
-                ? `Split evenly across your ${formData.files.length} files, about ${Math.max(1, Math.round((Number(numQuestions) || 1) / formData.files.length))} questions each.`
-                : "Exactly this many questions will be generated."}
-              {recommendedMaxQuestions ? ` Up to ${recommendedMaxQuestions} for this material.` : analyzing ? " Estimating the maximum…" : ""}
+              Exactly this many questions will be generated.
+              {recommendedMaxQuestions ? ` Up to ${recommendedMaxQuestions} for this file.` : analyzing ? " Estimating the maximum…" : ""}
             </p>
           </div>
 
@@ -405,16 +379,12 @@ export default function CreateQuizModal({
               <div className="flex flex-col items-center justify-center pt-5 pb-6">
                 <Upload size={24} className="text-gray-400 mb-2" />
                 <p className="text-sm text-gray-500 text-center">
-                  {formData.files.length > 1 ? (
-                    <span className="font-medium text-indigo-primary">
-                      {formData.files.length} files, merged into one quiz
-                    </span>
-                  ) : formData.file ? (
+                  {formData.file ? (
                     <span className="font-medium text-indigo-primary">
                       {formData.file.name}
                     </span>
                   ) : (
-                    "Upload PDF, .txt, or image, select several to merge (max. 50 MB each)"
+                    "Upload a PDF, .txt, or image (max. 50 MB)"
                   )}
                 </p>
                 {recommendedMaxQuestions ? (
@@ -426,17 +396,11 @@ export default function CreateQuizModal({
               <input
                 id="quiz-source-upload"
                 type="file"
-                multiple
                 className="hidden"
                 accept="application/pdf,.pdf,text/plain,.txt,image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
                 onChange={handleFileChange}
               />
             </label>
-            {formData.files.length > 1 && (
-              <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
-                Tip: merge files from the <span className="font-medium">same subject</span> (for example all Calculus, or all Biology). Mixing unrelated subjects produces a confusing quiz.
-              </p>
-            )}
             {error && (
               <p className="text-sm text-red-500 mt-2">{error}</p>
             )}

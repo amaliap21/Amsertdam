@@ -43,11 +43,6 @@ export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
     const file = formData.get("file");
-    // Batch / NotebookLM-style ingestion: the client may attach several text
-    // sources under the same "file" key. We merge their extracted text into a
-    // single corpus. Images stay single-source (the vision path reads one
-    // picture directly).
-    const allFiles = formData.getAll("file").filter((f): f is File => f instanceof File);
     const title = (formData.get("title") as string) || "Untitled Quiz";
     const course = (formData.get("course") as string) || "";
     const mode = (formData.get("mode") as string) || "generate";
@@ -119,10 +114,6 @@ export async function POST(req: NextRequest) {
     // chunking. Image input skips that (the vision LLM reads the picture
     // directly) and uses a fixed maxQuestions estimate.
     let cleaned = "";
-    // Each merged document kept SEPARATE so we can generate each file's share
-    // from its own text (true per-topic segmentation), not from a blind chunk
-    // of the concatenation.
-    const docs: { name: string; text: string }[] = [];
     let maxQuestions: number;
     let extractedMeta: { pageCount: number | null; wordCount: number } = {
       pageCount: null,
@@ -132,40 +123,23 @@ export async function POST(req: NextRequest) {
     if (isImage) {
       maxQuestions = 8; // vision: one image, can't pre-count terms
     } else {
-      // Merge every text/PDF source the client sent (skip any images mixed in,
-      // which need the separate vision path). Each document is labelled so the
-      // generator can attribute questions to the right source.
-      const textFiles = allFiles.filter((f) => {
-        const img = f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name);
-        return !img;
-      });
-      const sources = textFiles.length ? textFiles : [file];
-      let totalPages = 0;
-      let totalWords = 0;
-      for (const f of sources) {
-        const extracted = await extractTextFromUpload(f);
-        const segment = tidyText(extracted.text);
-        if (segment.length < 40 || extracted.wordCount < 30) continue;
-        docs.push({ name: f.name, text: segment });
-        totalPages += extracted.pageCount ?? 0;
-        totalWords += extracted.wordCount;
-      }
-      cleaned = tidyText(docs.map((d) => `# Source: ${d.name}\n${d.text}`).join("\n\n"));
-      if (cleaned.length < 40 || totalWords < 30) {
+      const extracted = await extractTextFromUpload(file);
+      cleaned = tidyText(extracted.text);
+      if (cleaned.length < 40 || extracted.wordCount < 30) {
         return NextResponse.json(
           {
             error:
-              "Could not extract enough readable text from these file(s). Try text-based PDFs (not scans) or .txt files with more content.",
+              "Could not extract enough readable text from this file. Try a text-based PDF (not a scan) or a .txt file with more content.",
             extractedChars: cleaned.length,
-            extractedWords: totalWords,
+            extractedWords: extracted.wordCount,
           },
           { status: 422 },
         );
       }
       maxQuestions = estimateMaxQuestions(cleaned);
       extractedMeta = {
-        pageCount: totalPages || null,
-        wordCount: totalWords,
+        pageCount: extracted.pageCount ?? null,
+        wordCount: extracted.wordCount,
       };
     }
 
@@ -403,59 +377,42 @@ export async function POST(req: NextRequest) {
           }
         } else {
           // ── Text path (PDF / .txt) ───────────────────────────────────
-          // Generate each merged document's SHARE from its OWN text, so every
-          // file (topic) is represented. Previously the concatenation was
-          // chunked and the loop hit the target inside the first file's first
-          // chunk, so all questions came from one document.
           const CHUNK_SIZE = Number(process.env.AI_CHUNK_SIZE || 4000);
           const CHUNK_OVERLAP = Number(process.env.AI_CHUNK_OVERLAP || 200);
-          const docList = docs.length ? docs : [{ name: "Source", text: cleaned }];
-          const perDocBase = Math.floor(target / docList.length);
-          const remainder = target % docList.length;
-          for (let d = 0; d < docList.length; d++) {
-            // First `remainder` docs get one extra so the shares sum to target.
-            const docTarget = perDocBase + (d < remainder ? 1 : 0);
-            if (docTarget <= 0) continue;
+          const threshold = CHUNK_SIZE * 1;
+          const chunks =
+            cleaned.length > threshold
+              ? splitTextIntoChunks(cleaned, CHUNK_SIZE, CHUNK_OVERLAP)
+              : [cleaned];
+          // Cycle through chunks, topping up until we reach target / run out of
+          // budget. Allow a few passes beyond chunk count for top-ups.
+          const MAX_ATTEMPTS = chunks.length + 4;
+          for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
             if (collected.length >= target) break;
-            const doc = docList[d];
-            const docChunks =
-              doc.text.length > CHUNK_SIZE
-                ? splitTextIntoChunks(doc.text, CHUNK_SIZE, CHUNK_OVERLAP)
-                : [doc.text];
-            const startCount = collected.length;
-            const MAX_ATTEMPTS = docChunks.length + 2;
-            for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-              const got = collected.length - startCount;
-              if (got >= docTarget) break;
-              if (collected.length >= target) break;
-              if (remainingBudget() < MIN_CALL_MS) break;
-              const chunk = docChunks[attempt % docChunks.length];
-              const want = Math.max(1, docTarget - got);
-              const system = buildSystemPrompt(want, language);
-              const user =
-                `${docList.length > 1 ? `This is ONE topic of the quiz (document: ${doc.name}). ` : ""}` +
-                `Source text:\n${chunk}\n\nProduce ${want} multiple-choice questions from THIS material only.` +
-                avoidClause();
-              try {
-                pushUnique(
-                  await runCall([
-                    { role: "system", content: system },
-                    { role: "user", content: user },
-                  ]),
-                );
-              } catch (err) {
-                // Premium errors should surface (we'll refund below).
-                if (isPremium && err instanceof AllModelsFailedError) {
-                  if (reservedCredits > 0) {
-                    await refundCredit(userId, reservedCredits);
-                    reservedCredits = 0;
-                  }
-                  return NextResponse.json(
-                    { error: err.message, credits: await getCredits(userId) },
-                    { status: 503 },
-                  );
+            if (remainingBudget() < MIN_CALL_MS) break;
+            const chunk = chunks[attempt % chunks.length];
+            const want = overAsk(target - collected.length);
+            const system = buildSystemPrompt(want, language);
+            const user =
+              `Source text:\n${chunk}\n\nProduce ${want} multiple-choice questions.` +
+              avoidClause();
+            try {
+              pushUnique(
+                await runCall([
+                  { role: "system", content: system },
+                  { role: "user", content: user },
+                ]),
+              );
+            } catch (err) {
+              if (isPremium && err instanceof AllModelsFailedError) {
+                if (reservedCredits > 0) {
+                  await refundCredit(userId, reservedCredits);
+                  reservedCredits = 0;
                 }
-                break; // free error: stop this document, move to the next
+                return NextResponse.json(
+                  { error: err.message, credits: await getCredits(userId) },
+                  { status: 503 },
+                );
               }
             }
           }
