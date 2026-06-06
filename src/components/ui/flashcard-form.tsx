@@ -7,6 +7,7 @@ import LanguagePicker, { type Language } from "@/components/ui/language-picker";
 import ModelPicker, { DEFAULT_MODEL_ID } from "@/components/ui/model-picker";
 import { modelTier } from "@/lib/ai/openrouter";
 import { useAiAnalyze } from "@/lib/use-ai-analyze";
+import { extractTesseractRegions } from "@/lib/tesseract-regions";
 
 export type GeneratedFlashcard = { front: string; back: string };
 
@@ -173,203 +174,52 @@ export default function CreateFlashcardModal({
     );
     try {
       if (useVision) {
-        // Premium model + image → vision LLM detects each label with a bounding
-        // box, producing the SAME cover-and-reveal deck as the free Tesseract
-        // path but with vision-grade accuracy (handwriting, 2D math).
-        const file = formData.file;
-        const imageDataUrl = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-        const imgEl = await new Promise<HTMLImageElement>((resolve, reject) => {
-          const img = new window.Image();
-          img.onload = () => resolve(img);
-          img.onerror = reject;
-          img.src = imageDataUrl;
-        });
-        const fd = new FormData();
-        fd.append("file", file);
-        fd.append("width", String(imgEl.naturalWidth));
-        fd.append("height", String(imgEl.naturalHeight));
-        fd.append("model", model);
-        const resp = await fetch("/api/ai/flashcards/ocr-image", { method: "POST", body: fd });
-        const json = await resp.json();
-        if (!resp.ok) throw new Error(json.error || `Failed (${resp.status})`);
-        const regions = (json.regions ?? []) as ImageOcrRegion[];
+        // Premium image: Tesseract gives PRECISE boxes (an LLM cannot return
+        // pixel-accurate coordinates), then Claude refines the label TEXT.
+        // Best of both: exact geometry + clean, corrected labels.
+        const base = await extractTesseractRegions(formData.file);
+        if (!base.regions.length) {
+          throw new Error("No text detected. Try a clearer image with visible labels.");
+        }
+        let regions = base.regions;
+        try {
+          const fd = new FormData();
+          fd.append("file", formData.file);
+          fd.append("labels", JSON.stringify(base.regions.map((r) => r.char)));
+          fd.append("model", model);
+          const resp = await fetch("/api/ai/flashcards/ocr-image", { method: "POST", body: fd });
+          const json = await resp.json();
+          if (resp.ok && Array.isArray(json.labels) && json.labels.length === base.regions.length) {
+            regions = base.regions.map((r, i) => ({ ...r, char: String(json.labels[i] ?? r.char) }));
+          }
+          refreshUsage(); // a credit may have been spent, sync the navbar
+        } catch {
+          /* refinement is best-effort, keep the precise Tesseract labels */
+        }
         toast.success(`Found ${regions.length} labels, cover and reveal!`, { id: t });
-        refreshUsage(); // premium vision spent a credit, sync the navbar
         onCreated?.({
           kind: "image",
           deckName: formData.deckName,
-          imageDataUrl,
-          width: imgEl.naturalWidth,
-          height: imgEl.naturalHeight,
+          imageDataUrl: base.imageDataUrl,
+          width: base.width,
+          height: base.height,
           regions,
           modelLoaded: true,
         });
       } else if (isImage) {
-        // Client-side OCR using Tesseract.js, no server/AI API call.
-        const file = formData.file;
-        const imageDataUrl = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-
-        // Load image to get dimensions.
-        const imgEl = await new Promise<HTMLImageElement>(
-          (resolve, reject) => {
-            const img = new window.Image();
-            img.onload = () => resolve(img);
-            img.onerror = reject;
-            img.src = imageDataUrl;
-          },
-        );
-        const imgDims = { w: imgEl.naturalWidth, h: imgEl.naturalHeight };
-
-        // Upscale small images so Tesseract can read text clearly.
-        // No sharpening, it creates edge artifacts on coloured diagrams
-        // that Tesseract misreads as characters.
-        const MIN_OCR_SIZE = 2000;
-        const longest = Math.max(imgDims.w, imgDims.h);
-        const scale = longest < MIN_OCR_SIZE ? MIN_OCR_SIZE / longest : 1;
-        let ocrInput: string | HTMLCanvasElement = imageDataUrl;
-        if (scale > 1) {
-          const canvas = document.createElement("canvas");
-          canvas.width = Math.round(imgDims.w * scale);
-          canvas.height = Math.round(imgDims.h * scale);
-          const ctx = canvas.getContext("2d")!;
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = "high";
-          ctx.drawImage(imgEl, 0, 0, canvas.width, canvas.height);
-          ocrInput = canvas;
+        // Free image: Tesseract cover-and-reveal, fully client-side.
+        const base = await extractTesseractRegions(formData.file);
+        if (!base.regions.length) {
+          throw new Error("No text detected. Try a clearer image with visible text labels.");
         }
-
-        // Run Tesseract with both eng+ind for maximum coverage.
-        const { createWorker } = await import("tesseract.js");
-        const worker = await createWorker("eng+ind");
-        const { data } = await worker.recognize(ocrInput);
-        await worker.terminate();
-
-        const scaleBack = 1 / scale;
-
-        // Strip non-alphanumeric noise from each word.
-        const cleanText = (raw: string) =>
-          raw.replace(/[^a-zA-Z0-9\s'-]/g, "").trim();
-
-        type OcrWord = {
-          x0: number; y0: number; x1: number; y1: number;
-          text: string; confidence: number;
-        };
-        const words: OcrWord[] = (data.words ?? [])
-          .map((w) => ({
-            bbox: w.bbox,
-            text: cleanText(w.text),
-            confidence: w.confidence,
-          }))
-          .filter(
-            (w) =>
-              w.confidence > 40 &&
-              w.text.length >= 2 &&
-              /[a-zA-Z]/.test(w.text),
-          )
-          .map((w) => ({
-            x0: Math.round(w.bbox.x0 * scaleBack),
-            y0: Math.round(w.bbox.y0 * scaleBack),
-            x1: Math.round(w.bbox.x1 * scaleBack),
-            y1: Math.round(w.bbox.y1 * scaleBack),
-            text: w.text,
-            confidence: w.confidence,
-          }));
-
-        // Group words into labels using Union-Find. Two words belong to
-        // the same label only when they overlap vertically AND the
-        // horizontal gap is small (< 1× the taller word's height).
-        // This merges "Right primary bronchus" but keeps "Pharynx" and
-        // "Nasal cavity" (on opposite sides) separate.
-        const parent = words.map((_, i) => i);
-        function find(x: number): number {
-          while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; }
-          return x;
-        }
-        function union(a: number, b: number) {
-          parent[find(a)] = find(b);
-        }
-        for (let i = 0; i < words.length; i++) {
-          for (let j = i + 1; j < words.length; j++) {
-            const a = words[i], b = words[j];
-            // Vertical overlap check: their y-ranges must intersect.
-            const overlapY = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
-            const minH = Math.min(a.y1 - a.y0, b.y1 - b.y0);
-            if (overlapY < minH * 0.4) continue;
-            // Horizontal gap must be small.
-            const gap = Math.max(0, Math.max(a.x0 - b.x1, b.x0 - a.x1));
-            const maxH = Math.max(a.y1 - a.y0, b.y1 - b.y0);
-            if (gap > maxH * 1.2) continue;
-            union(i, j);
-          }
-        }
-
-        // Build merged labels from groups.
-        const groups = new Map<number, number[]>();
-        for (let i = 0; i < words.length; i++) {
-          const root = find(i);
-          if (!groups.has(root)) groups.set(root, []);
-          groups.get(root)!.push(i);
-        }
-        const labels: OcrWord[] = [];
-        for (const members of groups.values()) {
-          const grp = members.map((i) => words[i]);
-          grp.sort((a, b) => a.x0 - b.x0);
-          labels.push({
-            x0: Math.min(...grp.map((g) => g.x0)),
-            y0: Math.min(...grp.map((g) => g.y0)),
-            x1: Math.max(...grp.map((g) => g.x1)),
-            y1: Math.max(...grp.map((g) => g.y1)),
-            text: grp.map((g) => g.text).join(" "),
-            confidence: Math.min(...grp.map((g) => g.confidence)),
-          });
-        }
-
-        // Drop noise: merged label must be ≥ 4 chars with 3+
-        // consecutive letters (filters "yy", "ET", "NA", "aol", etc.).
-        const validLabels = labels.filter(
-          (m) => m.text.length >= 4 && /[a-zA-Z]{3,}/.test(m.text),
-        );
-
-        // Generous padding so boxes fully cover labels.
-        const pad = Math.max(8, Math.round(imgDims.h * 0.012));
-        const regions: ImageOcrRegion[] = validLabels.map((m) => ({
-          bbox: [
-            Math.max(0, m.x0 - pad),
-            Math.max(0, m.y0 - pad),
-            Math.min(imgDims.w, m.x1 - m.x0 + pad * 2),
-            Math.min(imgDims.h, m.y1 - m.y0 + pad * 2),
-          ] as [number, number, number, number],
-          char: m.text,
-          confidence: m.confidence / 100,
-        }));
-
-        if (!regions.length) {
-          throw new Error(
-            "No text detected. Try a clearer image with visible text labels.",
-          );
-        }
-
-        toast.success(
-          `Found ${regions.length} labels, cover and reveal!`,
-          { id: t },
-        );
+        toast.success(`Found ${base.regions.length} labels, cover and reveal!`, { id: t });
         onCreated?.({
           kind: "image",
           deckName: formData.deckName,
-          imageDataUrl,
-          width: imgDims.w,
-          height: imgDims.h,
-          regions,
+          imageDataUrl: base.imageDataUrl,
+          width: base.width,
+          height: base.height,
+          regions: base.regions,
           modelLoaded: true,
         });
       } else {
