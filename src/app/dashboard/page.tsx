@@ -4,7 +4,6 @@ import Image from "next/image";
 import { useState, useEffect, useMemo } from "react";
 import { useStore } from "@/store/use-store";
 import { useCurrentUser } from "@/lib/use-current-user";
-import KaizenCard from "@/components/ui/kaizen-card";
 import {
   parseTaskDate,
   formatTaskDate,
@@ -296,9 +295,6 @@ export default function Dashboard() {
             overwork
           </p>
         </div>
-
-        {/* Kaizen: one small improvement a day */}
-        <KaizenCard />
 
         {/* Tasks Overview */}
         <div>

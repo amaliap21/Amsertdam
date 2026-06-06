@@ -7,6 +7,7 @@ import Navbar from "@/components/navbar";
 import Sidebar from "@/components/sidebar";
 import AuthSync from "@/components/auth-sync";
 import TourBootstrap from "@/components/tour-bootstrap";
+import KaizenFab from "@/components/ui/kaizen-fab";
 import { useCurrentUser } from "@/lib/use-current-user";
 import { Inter } from "next/font/google";
 import { Toaster } from "react-hot-toast";
@@ -138,6 +139,8 @@ export default function RootLayout({
                 />
                 <main className="flex-1">{children}</main>
               </div>
+              {/* Global Kaizen tracker, floats in the corner on every app page */}
+              <KaizenFab />
             </div>
           )}
         </QueryProvider>
