@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { Sprout, Flame, Check, Plus, X, Sparkles, Trash2 } from "lucide-react";
-import { useStore } from "@/store/use-store";
+import { Sprout, Flame, Check, Plus, X, Sparkles, Trash2, Loader2 } from "lucide-react";
 
 /**
  * Kaizen floating tracker.
@@ -45,53 +44,16 @@ function load(): KaizenState {
   }
 }
 
-// ---- Custom suggestion algorithm (reads real study data) -------------------
-type SuggestInputs = {
-  tasks: { title: string; priority?: string }[];
-  courses: { title: string; current: number | null; threshold: number | null }[];
-  decks: { title: string }[];
-};
-
-function suggestGoal(inp: SuggestInputs, existing: string[]): string {
-  const taken = new Set(existing.map((s) => s.toLowerCase()));
-  const candidates: string[] = [];
-
-  const focus = inp.tasks.find((t) => t.priority === "Focus First") ?? inp.tasks[0];
-  if (focus) candidates.push(`Spend 25 focused minutes on ${focus.title}`);
-
-  const atRisk = inp.courses.find((c) => c.current != null && c.threshold != null && c.current < c.threshold);
-  if (atRisk) candidates.push(`Do one small review for ${atRisk.title}`);
-
-  if (inp.decks.length) candidates.push(`Review 5 flashcards in ${inp.decks[0].title}`);
-
-  // Evergreen Kaizen / wellbeing micro-steps.
-  candidates.push(
-    "Summarize one concept in your own words",
-    "Review your notes for 15 minutes",
-    "Plan tomorrow's single most important task",
-    "Take a 5 minute break and stretch",
-    "Re-read one thing you got wrong recently",
-  );
-
-  return candidates.find((c) => !taken.has(c.toLowerCase())) ?? candidates[0];
-}
-
 export default function KaizenFab() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<KaizenState>({ date: today(), goals: [], streak: 0, lastCompleted: "" });
   const [draft, setDraft] = useState("");
+  // AI suggestions are fetched in a batch and consumed one per click.
+  const [pool, setPool] = useState<string[]>([]);
+  const [suggesting, setSuggesting] = useState(false);
 
-  const tasks = useStore((s) => s.tasks);
-  const coursesCache = useStore((s) => s.coursesCache);
-  const decks = useStore((s) => s.decks);
-  const fetchInitial = useStore((s) => s.fetchInitial);
-
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => { setState(load()); }, []);
-  /* eslint-enable react-hooks/set-state-in-effect */
-
-  useEffect(() => { if (open) fetchInitial().catch(() => {}); }, [open, fetchInitial]);
 
   const persist = (next: KaizenState) => {
     setState(next);
@@ -128,28 +90,28 @@ export default function KaizenFab() {
 
   const remove = (id: string) => persist({ ...state, goals: state.goals.filter((g) => g.id !== id) });
 
-  // Build suggestion inputs from the live store.
-  const suggestInputs = useMemo<SuggestInputs>(() => {
-    type Cached = { title?: string; threshold?: number | null; course_payload?: { threshold?: number | null; assessments?: { weight?: number; score?: number | null }[] }; assessments?: { weight?: number; score?: number | null }[] };
-    const courses = (Array.isArray(coursesCache) ? (coursesCache as Cached[]) : []).map((co) => {
-      const payload = co.course_payload ?? {};
-      const assessments = payload.assessments ?? co.assessments ?? [];
-      let w = 0, ws = 0;
-      for (const a of assessments) {
-        const weight = Number(a.weight);
-        if (Number.isFinite(weight) && weight > 0 && a.score != null && Number.isFinite(Number(a.score))) { w += weight; ws += Number(a.score) * weight; }
+  // AI-suggested goals, derived from the user's tasks, flashcard decks, and
+  // quizzes (Passing Target, Study Companion, and Community are excluded).
+  // We fetch a batch and add one unused suggestion per click.
+  const suggest = async () => {
+    const have = new Set(state.goals.map((g) => g.text.toLowerCase()));
+    let next = pool.find((s) => !have.has(s.toLowerCase()));
+    if (!next) {
+      setSuggesting(true);
+      try {
+        const r = await fetch("/api/ai/kaizen");
+        const j = await r.json();
+        const list: string[] = Array.isArray(j.goals) ? j.goals : [];
+        setPool(list);
+        next = list.find((s) => !have.has(s.toLowerCase())) ?? list[0];
+      } catch {
+        /* leave next undefined; nothing added */
+      } finally {
+        setSuggesting(false);
       }
-      const threshold = Number(payload.threshold ?? co.threshold);
-      return { title: co.title ?? "a course", current: w > 0 ? ws / w : null, threshold: Number.isFinite(threshold) ? threshold : null };
-    });
-    return {
-      tasks: tasks.map((t) => ({ title: t.title, priority: t.priority })),
-      courses,
-      decks: decks.map((d) => ({ title: d.title })),
-    };
-  }, [tasks, coursesCache, decks]);
-
-  const suggest = () => addGoal(suggestGoal(suggestInputs, state.goals.map((g) => g.text)));
+    }
+    if (next) addGoal(next);
+  };
 
   // The chat page has its own fixed bottom input bar, so skip the FAB there.
   if (pathname?.includes("/study-companion/") && pathname.endsWith("/chat")) return null;
@@ -209,8 +171,8 @@ export default function KaizenFab() {
               />
               <button onClick={() => addGoal(draft)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-white hover:bg-emerald-700"><Plus size={16} /></button>
             </div>
-            <button onClick={suggest} className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-emerald-600 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-50">
-              <Sparkles size={15} /> Suggest a goal
+            <button onClick={suggest} disabled={suggesting} className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-emerald-600 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
+              {suggesting ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />} {suggesting ? "Thinking" : "Suggest a goal"}
             </button>
           </div>
         </div>
