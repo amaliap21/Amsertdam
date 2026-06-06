@@ -7,7 +7,7 @@ import LanguagePicker, { type Language } from "@/components/ui/language-picker";
 import ModelPicker, { DEFAULT_MODEL_ID } from "@/components/ui/model-picker";
 import { modelTier } from "@/lib/ai/openrouter";
 import { useAiAnalyze } from "@/lib/use-ai-analyze";
-import { extractTesseractRegions, extractTesseractWords, snapLabelsToWords } from "@/lib/tesseract-regions";
+import { extractTesseractRegions } from "@/lib/tesseract-regions";
 
 export type GeneratedFlashcard = { front: string; back: string };
 
@@ -174,38 +174,36 @@ export default function CreateFlashcardModal({
     );
     try {
       if (useVision) {
-        // Premium image: AI NAMES + locates every label (its own knowledge:
-        // joins multi-line/hyphenated terms, fixes spelling), then we SNAP each
-        // AI box to the precise Tesseract word pixels it overlaps. Result:
-        // accurate names + pixel-accurate covers.
-        const tess = await extractTesseractWords(formData.file);
-        let regions: ImageOcrRegion[] = [];
+        // Premium image: Tesseract gives PRECISE boxes (an LLM cannot return
+        // pixel-accurate coordinates, it produced giant misplaced covers). The
+        // premium model only CORRECTS the label text (spelling, joins wrapped
+        // words) for each box, keeping the exact Tesseract geometry.
+        const base = await extractTesseractRegions(formData.file);
+        if (!base.regions.length) {
+          throw new Error("No text detected. Try a clearer image with visible labels.");
+        }
+        let regions = base.regions;
         try {
           const fd = new FormData();
           fd.append("file", formData.file);
+          fd.append("labels", JSON.stringify(base.regions.map((r) => r.char)));
           fd.append("model", model);
           const resp = await fetch("/api/ai/flashcards/ocr-image", { method: "POST", body: fd });
           const json = await resp.json();
-          if (!resp.ok) throw new Error(json.error || `Failed (${resp.status})`);
-          const aiLabels = Array.isArray(json.labels) ? json.labels : [];
-          regions = snapLabelsToWords(aiLabels, tess.words, tess.width, tess.height);
-          refreshUsage(); // a credit was spent, sync the navbar
-        } catch (e) {
-          // Fall back to plain Tesseract grouping so the user still gets a deck.
-          const fallback = await extractTesseractRegions(formData.file);
-          regions = fallback.regions;
-          if (!regions.length) throw e instanceof Error ? e : new Error("No labels detected");
-        }
-        if (!regions.length) {
-          throw new Error("No labels detected. Try a clearer diagram.");
+          if (resp.ok && Array.isArray(json.labels) && json.labels.length === base.regions.length) {
+            regions = base.regions.map((r, i) => ({ ...r, char: String(json.labels[i] ?? r.char) }));
+          }
+          refreshUsage(); // a credit may have been spent, sync the navbar
+        } catch {
+          /* refinement is best-effort, keep the precise Tesseract labels */
         }
         toast.success(`Found ${regions.length} labels, cover and reveal!`, { id: t });
         onCreated?.({
           kind: "image",
           deckName: formData.deckName,
-          imageDataUrl: tess.imageDataUrl,
-          width: tess.width,
-          height: tess.height,
+          imageDataUrl: base.imageDataUrl,
+          width: base.width,
+          height: base.height,
           regions,
           modelLoaded: true,
         });

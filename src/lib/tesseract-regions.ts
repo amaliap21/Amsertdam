@@ -93,6 +93,7 @@ export async function extractTesseractRegions(file: File): Promise<TesseractResu
     return x;
   }
   function union(a: number, b: number) { parent[find(a)] = find(b); }
+  // Same-line words that sit close together form one label.
   for (let i = 0; i < words.length; i++) {
     for (let j = i + 1; j < words.length; j++) {
       const a = words[i], b = words[j];
@@ -105,6 +106,25 @@ export async function extractTesseractRegions(file: File): Promise<TesseractResu
       union(i, j);
     }
   }
+  // Hyphenated line wraps: a word ending in "-" joins the nearest word directly
+  // below it whose x-range overlaps (e.g. "hypothal-" + "amus"). Only hyphenated
+  // continuations merge across lines, so distinct stacked labels stay separate.
+  for (let i = 0; i < words.length; i++) {
+    if (!words[i].text.endsWith("-")) continue;
+    const a = words[i];
+    let best = -1;
+    let bestDy = Infinity;
+    for (let j = 0; j < words.length; j++) {
+      if (j === i) continue;
+      const b = words[j];
+      const dy = b.y0 - a.y1;
+      if (dy < -2 || dy > (a.y1 - a.y0) * 1.6) continue;
+      const xOverlap = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+      if (xOverlap <= 0) continue;
+      if (dy < bestDy) { bestDy = dy; best = j; }
+    }
+    if (best >= 0) union(i, best);
+  }
 
   const groups = new Map<number, number[]>();
   for (let i = 0; i < words.length; i++) {
@@ -115,8 +135,14 @@ export async function extractTesseractRegions(file: File): Promise<TesseractResu
   const pad = Math.max(8, Math.round(height * 0.012));
   const regions: ImageOcrRegion[] = [];
   for (const members of groups.values()) {
-    const grp = members.map((i) => words[i]).sort((a, b) => a.x0 - b.x0);
-    const text = grp.map((g) => g.text).join(" ");
+    // Reading order: top-to-bottom, then left-to-right.
+    const grp = members.map((i) => words[i]).sort((a, b) => (a.y0 - b.y0) || (a.x0 - b.x0));
+    // Join words; a trailing hyphen glues straight onto the next word.
+    let text = "";
+    for (const g of grp) {
+      if (text.endsWith("-")) text = text.slice(0, -1) + g.text;
+      else text = text ? `${text} ${g.text}` : g.text;
+    }
     if (text.length < 4 || !/[a-zA-Z]{3,}/.test(text)) continue;
     const x0 = Math.min(...grp.map((g) => g.x0));
     const y0 = Math.min(...grp.map((g) => g.y0));
@@ -134,63 +160,4 @@ export async function extractTesseractRegions(file: File): Promise<TesseractResu
     });
   }
   return { imageDataUrl, width, height, regions };
-}
-
-/**
- * Snap AI-detected labels (name + approximate normalised box) to the precise
- * Tesseract word pixels they overlap. AI supplies the smart, correctly-spelled
- * label and WHICH region it is; Tesseract supplies the exact box. Where no word
- * matches (AI saw text Tesseract missed), the AI box is used as-is.
- */
-export function snapLabelsToWords(
-  aiLabels: { label: string; x: number; y: number; w: number; h: number }[],
-  words: OcrWord[],
-  width: number,
-  height: number,
-): ImageOcrRegion[] {
-  const pad = Math.max(8, Math.round(height * 0.012));
-  const regions: ImageOcrRegion[] = [];
-
-  for (const a of aiLabels) {
-    // AI box in pixels.
-    const ax0 = a.x * width;
-    const ay0 = a.y * height;
-    const ax1 = (a.x + a.w) * width;
-    const ay1 = (a.y + a.h) * height;
-    // Expand the search box a little so slightly-off AI boxes still catch words.
-    const ex = (ax1 - ax0) * 0.25 + pad;
-    const ey = (ay1 - ay0) * 0.5 + pad;
-    const sx0 = ax0 - ex, sy0 = ay0 - ey, sx1 = ax1 + ex, sy1 = ay1 + ey;
-
-    // Words whose centre falls inside the expanded AI box.
-    const hits = words.filter((w) => {
-      const cx = (w.x0 + w.x1) / 2;
-      const cy = (w.y0 + w.y1) / 2;
-      return cx >= sx0 && cx <= sx1 && cy >= sy0 && cy <= sy1;
-    });
-
-    let x0: number, y0: number, x1: number, y1: number;
-    if (hits.length) {
-      x0 = Math.min(...hits.map((w) => w.x0));
-      y0 = Math.min(...hits.map((w) => w.y0));
-      x1 = Math.max(...hits.map((w) => w.x1));
-      y1 = Math.max(...hits.map((w) => w.y1));
-    } else {
-      // No Tesseract words here: trust the AI box (approximate).
-      x0 = ax0; y0 = ay0; x1 = ax1; y1 = ay1;
-    }
-    const bw = Math.max(2, x1 - x0);
-    const bh = Math.max(2, y1 - y0);
-    regions.push({
-      bbox: [
-        Math.max(0, Math.round(x0 - pad)),
-        Math.max(0, Math.round(y0 - pad)),
-        Math.min(width, Math.round(bw + pad * 2)),
-        Math.min(height, Math.round(bh + pad * 2)),
-      ] as [number, number, number, number],
-      char: a.label.slice(0, 80),
-      confidence: 1,
-    });
-  }
-  return regions;
 }
