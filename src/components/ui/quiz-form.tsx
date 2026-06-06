@@ -47,7 +47,9 @@ export default function CreateQuizModal({
   // The user sets only questions-PER-TOPIC. The generator detects how many
   // distinct topics the material has and makes this many questions for each, so
   // 1 topic gives N, 2 topics give 2N, etc. (no manual topic count).
-  const [perTopic, setPerTopic] = useState<string>("5");
+  // Total questions. When several files are merged, the total is split evenly
+  // across them (each file is one topic).
+  const [numQuestions, setNumQuestions] = useState<string>("10");
   const [language, setLanguage] = useState<Language>("en");
   const [model, setModel] = useState<string>(DEFAULT_MODEL_ID);
   const [recommendedMaxQuestions, setRecommendedMaxQuestions] = useState<number | null>(null);
@@ -141,7 +143,10 @@ export default function CreateQuizModal({
       );
       return;
     }
-    const parsedPerTopic = Math.max(1, Math.floor(Number(perTopic) || 1));
+    let parsedTotal = Math.max(1, Math.floor(Number(numQuestions) || 1));
+    if (recommendedMaxQuestions && parsedTotal > recommendedMaxQuestions) {
+      parsedTotal = recommendedMaxQuestions;
+    }
     setError(null);
     setLoading(true);
     const t = toast.loading("Generating quiz questions…");
@@ -151,11 +156,8 @@ export default function CreateQuizModal({
       for (const f of sources) if (f) fd.append("file", f);
       fd.append("title", formData.title);
       fd.append("course", formData.course);
-      // perTopic drives the count; the server detects topics and makes this many
-      // questions per detected topic. requestedQuestions=0 means "up to the max
-      // the source supports".
-      fd.append("perTopic", String(parsedPerTopic));
-      fd.append("requestedQuestions", "0");
+      // Total questions; the server splits them evenly across merged files.
+      fd.append("requestedQuestions", String(parsedTotal));
       fd.append("language", language);
       fd.append("model", model);
       const resp = await fetch("/api/ai/quiz/generate", {
@@ -287,20 +289,22 @@ export default function CreateQuizModal({
         <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-6">
           <div>
             <label className="mb-1 block text-[11px] font-medium text-black-primary sm:mb-3 sm:text-sm">
-              Questions per topic
+              Number of questions
             </label>
             <input
               type="number"
               min={1}
-              value={perTopic}
-              onChange={(e) => setPerTopic(e.target.value)}
-              onBlur={() => { if (perTopic === "" || Number(perTopic) < 1) setPerTopic("1"); }}
+              value={numQuestions}
+              onChange={(e) => setNumQuestions(e.target.value)}
+              onBlur={() => { if (numQuestions === "" || Number(numQuestions) < 1) setNumQuestions("1"); }}
               disabled={loading || analyzing}
               className="w-full rounded-xl border border-gray-300 px-2.5 py-2 text-[13px] text-black-primary focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary sm:px-4 sm:py-3.5 sm:text-sm"
             />
             <p className="mt-1.5 text-[11px] leading-tight text-gray-primary sm:text-sm">
-              We detect the topics in your file and make this many questions for each one. 1 topic gives {Math.max(1, Number(perTopic) || 1)}, 2 topics give {2 * Math.max(1, Number(perTopic) || 1)}, and so on
-              {recommendedMaxQuestions ? ` (up to ${recommendedMaxQuestions} total for this file)` : analyzing ? " (estimating the maximum…)" : ""}.
+              {formData.files.length > 1
+                ? `Split evenly across your ${formData.files.length} files, about ${Math.max(1, Math.round((Number(numQuestions) || 1) / formData.files.length))} questions each.`
+                : "Exactly this many questions will be generated."}
+              {recommendedMaxQuestions ? ` Up to ${recommendedMaxQuestions} for this material.` : analyzing ? " Estimating the maximum…" : ""}
             </p>
           </div>
 
@@ -411,6 +415,11 @@ export default function CreateQuizModal({
                 onChange={handleFileChange}
               />
             </label>
+            {formData.files.length > 1 && (
+              <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                Tip: merge files from the <span className="font-medium">same subject</span> (for example all Calculus, or all Biology). Mixing unrelated subjects produces a confusing quiz.
+              </p>
+            )}
             {error && (
               <p className="text-sm text-red-500 mt-2">{error}</p>
             )}

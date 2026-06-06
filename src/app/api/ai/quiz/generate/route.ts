@@ -54,10 +54,9 @@ export async function POST(req: NextRequest) {
     const requestedQuestionsRaw = Number(
       formData.get("requestedQuestions") ?? 0,
     );
-    // Questions per detected topic. The model decides how many topics the
-    // source has and writes this many questions for each (1 topic -> perTopic,
-    // 2 topics -> 2x, etc.). Total is still bounded by maxQuestions.
-    const perTopic = Math.max(1, Math.min(20, Math.floor(Number(formData.get("perTopic") ?? 0)) || 0));
+    // Number of merged documents. Each uploaded PDF/text counts as one "topic";
+    // the requested total is split evenly across them. Set during the merge.
+    let mergedSources = 1;
     const langRaw = String(formData.get("language") ?? "en").toLowerCase();
     const language: Language = langRaw === "id" ? "id" : "en";
 
@@ -154,6 +153,7 @@ export async function POST(req: NextRequest) {
         totalWords += extracted.wordCount;
       }
       cleaned = tidyText(segments.join("\n\n"));
+      mergedSources = Math.max(1, segments.length);
       if (cleaned.length < 40 || totalWords < 30) {
         return NextResponse.json(
           {
@@ -187,12 +187,6 @@ export async function POST(req: NextRequest) {
       : 0;
     let effective =
       requested > 0 ? Math.min(requested, maxQuestions) : maxQuestions;
-    // Per-topic mode: the model decides the topic count and makes `perTopic`
-    // each in a SINGLE pass, so cap the reservation to a sane upper bound
-    // (perTopic x up to 12 topics) instead of padding all the way to max.
-    if (perTopic > 0) {
-      effective = Math.min(maxQuestions, perTopic * 12);
-    }
 
     // Billing: ONE unit per QUESTION generated, on BOTH tiers — premium spends
     // durable credits, free spends the daily free quota. We reserve units up
@@ -271,9 +265,10 @@ export async function POST(req: NextRequest) {
         `Use ${lang === "id" ? "Indonesian" : "English"} for all questions and options; do not mix languages unless the source text is mixed.`,
         `Identify the core concepts and important context in the source, and write questions that test understanding of those key points rather than trivial details.`,
         `Respond ONLY with a single valid JSON object matching: {"questions":[{"prompt":"...","options":[{"letter":"A","text":"..."}],"correctAnswer":"A"}]}.`,
-        perTopic > 0
-          ? `First identify the distinct topics or sections actually covered in the source (only as many as genuinely exist). Then write EXACTLY ${perTopic} multiple-choice questions for EACH topic, spread evenly across the topics, up to a maximum of ${n} questions total. If the source has only one topic, produce just ${perTopic} questions. Always include exactly 4 options A/B/C/D. Keep options plausible and the correct answer grounded in the source.`
-          : `Produce ${n} distinct multiple-choice questions derived from the provided source, aim for the full count, only producing fewer if the source genuinely lacks enough material. Always include exactly 4 options A/B/C/D. Keep options plausible and the correct answer grounded in the source.`,
+        `Produce ${n} distinct multiple-choice questions derived from the provided source, aim for the full count, only producing fewer if the source genuinely lacks enough material. Always include exactly 4 options A/B/C/D. Keep options plausible and the correct answer grounded in the source.`,
+        mergedSources > 1
+          ? `The source combines ${mergedSources} separate documents (each begins with a "# Source:" line). Spread the ${n} questions as EVENLY as possible across these ${mergedSources} documents (about ${Math.round(n / mergedSources)} per document), so every document is represented.`
+          : ``,
         `Read everything visible in the source: typed text, handwritten notes, diagrams, equations, and any mathematical or scientific symbols. Do not skip a section because it is handwritten or stylized, read it.`,
         `When the source contains math: transcribe stacked fractions as "a/b", superscripts as "x^n", subscripts as "x_n", square roots as "sqrt(x)", integrals as "integral", limits as "lim", Greek letters by name (alpha, beta, pi), and inequalities exactly as drawn (preserve "<", ">", "<=", ">=" direction).`,
         `Solve every math problem yourself before emitting it: the marked correctAnswer MUST be the mathematically correct option. Do not guess.`,
@@ -411,8 +406,6 @@ export async function POST(req: NextRequest) {
               }
               break;
             }
-            // Per-topic mode: one pass already distributes perTopic per topic.
-            if (perTopic > 0) break;
           }
         } else {
           // ── Text path (PDF / .txt) ───────────────────────────────────
@@ -458,8 +451,6 @@ export async function POST(req: NextRequest) {
                 );
               }
             }
-            // Per-topic mode: one pass already distributes perTopic per topic.
-            if (perTopic > 0) break;
           }
         }
       } catch {
