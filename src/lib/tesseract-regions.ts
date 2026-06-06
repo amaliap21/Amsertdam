@@ -80,12 +80,18 @@ export async function extractTesseractRegions(file: File): Promise<TesseractResu
   for (let i = 0; i < words.length; i++) {
     for (let j = i + 1; j < words.length; j++) {
       const a = words[i], b = words[j];
+      // Same text line: their vertical ranges must overlap by ~a third.
       const overlapY = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
       const minH = Math.min(a.y1 - a.y0, b.y1 - b.y0);
-      if (overlapY < minH * 0.4) continue;
+      if (overlapY < minH * 0.35) continue;
+      // Merge words separated only by a normal word-space. Tesseract word boxes
+      // are tight to the glyphs, so the real inter-word gap can run ~1.5-2x the
+      // glyph height; 1.2x was splitting two-word labels like "Rongga Mulut".
+      // Distinct diagram labels sit far apart (arrows, whitespace), so a 2.2x
+      // line gap still keeps them separate.
       const gap = Math.max(0, Math.max(a.x0 - b.x1, b.x0 - a.x1));
       const maxH = Math.max(a.y1 - a.y0, b.y1 - b.y0);
-      if (gap > maxH * 1.2) continue;
+      if (gap > maxH * 2.2) continue;
       union(i, j);
     }
   }
