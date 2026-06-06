@@ -54,9 +54,6 @@ export async function POST(req: NextRequest) {
     const requestedQuestionsRaw = Number(
       formData.get("requestedQuestions") ?? 0,
     );
-    // Number of merged documents. Each uploaded PDF/text counts as one "topic";
-    // the requested total is split evenly across them. Set during the merge.
-    let mergedSources = 1;
     const langRaw = String(formData.get("language") ?? "en").toLowerCase();
     const language: Language = langRaw === "id" ? "id" : "en";
 
@@ -122,6 +119,10 @@ export async function POST(req: NextRequest) {
     // chunking. Image input skips that (the vision LLM reads the picture
     // directly) and uses a fixed maxQuestions estimate.
     let cleaned = "";
+    // Each merged document kept SEPARATE so we can generate each file's share
+    // from its own text (true per-topic segmentation), not from a blind chunk
+    // of the concatenation.
+    const docs: { name: string; text: string }[] = [];
     let maxQuestions: number;
     let extractedMeta: { pageCount: number | null; wordCount: number } = {
       pageCount: null,
@@ -141,19 +142,15 @@ export async function POST(req: NextRequest) {
       const sources = textFiles.length ? textFiles : [file];
       let totalPages = 0;
       let totalWords = 0;
-      const segments: string[] = [];
       for (const f of sources) {
         const extracted = await extractTextFromUpload(f);
         const segment = tidyText(extracted.text);
         if (segment.length < 40 || extracted.wordCount < 30) continue;
-        segments.push(
-          sources.length > 1 ? `# Source: ${f.name}\n${segment}` : segment,
-        );
+        docs.push({ name: f.name, text: segment });
         totalPages += extracted.pageCount ?? 0;
         totalWords += extracted.wordCount;
       }
-      cleaned = tidyText(segments.join("\n\n"));
-      mergedSources = Math.max(1, segments.length);
+      cleaned = tidyText(docs.map((d) => `# Source: ${d.name}\n${d.text}`).join("\n\n"));
       if (cleaned.length < 40 || totalWords < 30) {
         return NextResponse.json(
           {
@@ -266,9 +263,6 @@ export async function POST(req: NextRequest) {
         `Identify the core concepts and important context in the source, and write questions that test understanding of those key points rather than trivial details.`,
         `Respond ONLY with a single valid JSON object matching: {"questions":[{"prompt":"...","options":[{"letter":"A","text":"..."}],"correctAnswer":"A"}]}.`,
         `Produce ${n} distinct multiple-choice questions derived from the provided source, aim for the full count, only producing fewer if the source genuinely lacks enough material. Always include exactly 4 options A/B/C/D. Keep options plausible and the correct answer grounded in the source.`,
-        mergedSources > 1
-          ? `The source combines ${mergedSources} separate documents (each begins with a "# Source:" line). Spread the ${n} questions as EVENLY as possible across these ${mergedSources} documents (about ${Math.round(n / mergedSources)} per document), so every document is represented.`
-          : ``,
         `Read everything visible in the source: typed text, handwritten notes, diagrams, equations, and any mathematical or scientific symbols. Do not skip a section because it is handwritten or stylized, read it.`,
         `When the source contains math: transcribe stacked fractions as "a/b", superscripts as "x^n", subscripts as "x_n", square roots as "sqrt(x)", integrals as "integral", limits as "lim", Greek letters by name (alpha, beta, pi), and inequalities exactly as drawn (preserve "<", ">", "<=", ">=" direction).`,
         `Solve every math problem yourself before emitting it: the marked correctAnswer MUST be the mathematically correct option. Do not guess.`,
@@ -409,46 +403,59 @@ export async function POST(req: NextRequest) {
           }
         } else {
           // ── Text path (PDF / .txt) ───────────────────────────────────
+          // Generate each merged document's SHARE from its OWN text, so every
+          // file (topic) is represented. Previously the concatenation was
+          // chunked and the loop hit the target inside the first file's first
+          // chunk, so all questions came from one document.
           const CHUNK_SIZE = Number(process.env.AI_CHUNK_SIZE || 4000);
           const CHUNK_OVERLAP = Number(process.env.AI_CHUNK_OVERLAP || 200);
-          const threshold = CHUNK_SIZE * 1;
-          const chunks =
-            cleaned.length > threshold
-              ? splitTextIntoChunks(cleaned, CHUNK_SIZE, CHUNK_OVERLAP)
-              : [cleaned];
-          // Cycle through chunks, topping up until we reach target / run out
-          // of budget. Allow a few passes beyond chunk count for top-ups.
-          const MAX_ATTEMPTS = chunks.length + 4;
-          for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+          const docList = docs.length ? docs : [{ name: "Source", text: cleaned }];
+          const perDocBase = Math.floor(target / docList.length);
+          const remainder = target % docList.length;
+          for (let d = 0; d < docList.length; d++) {
+            // First `remainder` docs get one extra so the shares sum to target.
+            const docTarget = perDocBase + (d < remainder ? 1 : 0);
+            if (docTarget <= 0) continue;
             if (collected.length >= target) break;
-            // Stop before starting a call the budget can't fund — better to
-            // return what we have than to time out.
-            if (remainingBudget() < MIN_CALL_MS) break;
-            const chunk = chunks[attempt % chunks.length];
-            const want = overAsk(target - collected.length);
-            const system = buildSystemPrompt(want, language);
-            const user =
-              `Source text:\n${chunk}\n\nProduce ${want} multiple-choice questions.` +
-              avoidClause();
-            try {
-              pushUnique(
-                await runCall([
-                  { role: "system", content: system },
-                  { role: "user", content: user },
-                ]),
-              );
-            } catch (err) {
-              // Premium errors should surface (we'll refund below); free
-              // errors fall through to the next attempt / extractor.
-              if (isPremium && err instanceof AllModelsFailedError) {
-                if (reservedCredits > 0) {
-                  await refundCredit(userId, reservedCredits);
-                  reservedCredits = 0;
-                }
-                return NextResponse.json(
-                  { error: err.message, credits: await getCredits(userId) },
-                  { status: 503 },
+            const doc = docList[d];
+            const docChunks =
+              doc.text.length > CHUNK_SIZE
+                ? splitTextIntoChunks(doc.text, CHUNK_SIZE, CHUNK_OVERLAP)
+                : [doc.text];
+            const startCount = collected.length;
+            const MAX_ATTEMPTS = docChunks.length + 2;
+            for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+              const got = collected.length - startCount;
+              if (got >= docTarget) break;
+              if (collected.length >= target) break;
+              if (remainingBudget() < MIN_CALL_MS) break;
+              const chunk = docChunks[attempt % docChunks.length];
+              const want = Math.max(1, docTarget - got);
+              const system = buildSystemPrompt(want, language);
+              const user =
+                `${docList.length > 1 ? `This is ONE topic of the quiz (document: ${doc.name}). ` : ""}` +
+                `Source text:\n${chunk}\n\nProduce ${want} multiple-choice questions from THIS material only.` +
+                avoidClause();
+              try {
+                pushUnique(
+                  await runCall([
+                    { role: "system", content: system },
+                    { role: "user", content: user },
+                  ]),
                 );
+              } catch (err) {
+                // Premium errors should surface (we'll refund below).
+                if (isPremium && err instanceof AllModelsFailedError) {
+                  if (reservedCredits > 0) {
+                    await refundCredit(userId, reservedCredits);
+                    reservedCredits = 0;
+                  }
+                  return NextResponse.json(
+                    { error: err.message, credits: await getCredits(userId) },
+                    { status: 503 },
+                  );
+                }
+                break; // free error: stop this document, move to the next
               }
             }
           }
