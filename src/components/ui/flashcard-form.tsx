@@ -173,30 +173,42 @@ export default function CreateFlashcardModal({
     );
     try {
       if (useVision) {
-        // Premium model + image → server-side vision LLM that handles
-        // handwriting, stacked fractions, and other 2D math the Tesseract
-        // cover-and-reveal path can't read.
-        const fd = new FormData();
-        fd.append("file", formData.file);
-        fd.append("deckName", formData.deckName);
-        fd.append("requestedCards", String(finalRequestedCards));
-        fd.append("language", language);
-        fd.append("model", model);
-        const resp = await fetch("/api/ai/flashcards/generate", {
-          method: "POST",
-          body: fd,
+        // Premium model + image → vision LLM detects each label with a bounding
+        // box, producing the SAME cover-and-reveal deck as the free Tesseract
+        // path but with vision-grade accuracy (handwriting, 2D math).
+        const file = formData.file;
+        const imageDataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
         });
-        if (!resp.ok) {
-          const body = await resp.json().catch(() => ({}));
-          throw new Error(body.error || `Failed (${resp.status})`);
-        }
-        const json = (await resp.json()) as {
-          deckName: string;
-          cards: GeneratedFlashcard[];
-        };
-        toast.success(`Generated ${json.cards.length} flashcards`, { id: t });
-        refreshUsage(); // premium vision spent credits, sync the navbar
-        onCreated?.({ deckName: json.deckName, cards: json.cards });
+        const imgEl = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const img = new window.Image();
+          img.onload = () => resolve(img);
+          img.onerror = reject;
+          img.src = imageDataUrl;
+        });
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("width", String(imgEl.naturalWidth));
+        fd.append("height", String(imgEl.naturalHeight));
+        fd.append("model", model);
+        const resp = await fetch("/api/ai/flashcards/ocr-image", { method: "POST", body: fd });
+        const json = await resp.json();
+        if (!resp.ok) throw new Error(json.error || `Failed (${resp.status})`);
+        const regions = (json.regions ?? []) as ImageOcrRegion[];
+        toast.success(`Found ${regions.length} labels, cover and reveal!`, { id: t });
+        refreshUsage(); // premium vision spent a credit, sync the navbar
+        onCreated?.({
+          kind: "image",
+          deckName: formData.deckName,
+          imageDataUrl,
+          width: imgEl.naturalWidth,
+          height: imgEl.naturalHeight,
+          regions,
+          modelLoaded: true,
+        });
       } else if (isImage) {
         // Client-side OCR using Tesseract.js, no server/AI API call.
         const file = formData.file;
@@ -535,7 +547,7 @@ export default function CreateFlashcardModal({
             hint={
               selectedIsImage
                 ? modelTier(model) === "premium"
-                  ? "Premium model, reads handwriting & math from the image into Q&A cards (1 credit per card)."
+                  ? "Premium model, detects labels with AI vision for cover-and-reveal, more accurate on handwriting and math (1 credit)."
                   : "Free model on an image, runs Tesseract OCR for cover-and-reveal labels. For handwriting or math, pick a Premium model."
                 : modelTier(model) === "premium"
                   ? "Premium model, uses 1 credit per card generated."
