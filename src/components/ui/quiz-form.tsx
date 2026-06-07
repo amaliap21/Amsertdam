@@ -323,7 +323,6 @@ export default function CreateQuizModal({
               className="w-full rounded-xl border border-gray-300 px-2.5 py-2 text-[13px] text-black-primary focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary sm:px-4 sm:py-3.5 sm:text-sm"
             />
             <p className="mt-1.5 text-[11px] leading-tight text-gray-primary sm:text-sm">
-              We aim for this many. A thin source can yield fewer, and you only spend credits on questions actually created.
               {recommendedMaxQuestions ? ` This file supports about ${recommendedMaxQuestions}.` : analyzing ? " Estimating how many this file supports…" : ""}
             </p>
           </div>

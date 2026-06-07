@@ -22,6 +22,7 @@ import { normalizeOpenRouterQuiz } from "@/lib/ai/normalizers";
 import { validateQuizPayload } from "@/lib/ai/validator";
 import { splitTextIntoChunks } from "@/lib/ai/splitter";
 import { polishQuizPayload } from "@/lib/ai/polish";
+import { cleanSourceText } from "@/lib/ai/clean-source";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -138,7 +139,9 @@ export async function POST(req: NextRequest) {
       maxQuestions = 8; // vision: one image, can't pre-count terms
     } else {
       const extracted = await extractTextFromUpload(file);
-      cleaned = tidyText(extracted.text);
+      // Strip cover / table-of-contents / page-header front matter so the model
+      // sees substantive content, not navigation it would quiz uselessly.
+      cleaned = cleanSourceText(tidyText(extracted.text));
       if (cleaned.length < 40 || extracted.wordCount < 30) {
         return NextResponse.json(
           {
@@ -249,6 +252,7 @@ export async function POST(req: NextRequest) {
         `You are a careful, accurate study-quiz generator that handles all subjects, including mathematics, science, and humanities.`,
         `Use ${lang === "id" ? "Indonesian" : "English"} for all questions and options; do not mix languages unless the source text is mixed.`,
         `Identify the core concepts and important context in the source, and write questions that test understanding of those key points rather than trivial details.`,
+        `Ignore all non-teaching material: cover pages, author or group member names, student id numbers, lecturer or supervisor names, institution names, the table of contents, lists of figures or tables, page numbers, chapter or section numbering, and running headers or footers. NEVER ask who wrote the document, how many pages or members it has, on which page or in which chapter something appears, or anything about the document's structure. Test only subject-matter concepts, definitions, processes, causes and effects, and reasoning a student must actually learn.`,
         `Respond ONLY with a single valid JSON object matching: {"questions":[{"prompt":"...","options":[{"letter":"A","text":"..."}],"correctAnswer":"A"}]}.`,
         `Produce ${n} distinct multiple-choice questions derived from the provided source, aim for the full count, only producing fewer if the source genuinely lacks enough material. Always include exactly 4 options A/B/C/D. Keep options plausible and the correct answer grounded in the source.`,
         `Read everything visible in the source: typed text, handwritten notes, diagrams, equations, and any mathematical or scientific symbols. Do not skip a section because it is handwritten or stylized, read it.`,
