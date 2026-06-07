@@ -9,6 +9,8 @@ import { modelTier } from "@/lib/ai/openrouter";
 import { useAiAnalyze } from "@/lib/use-ai-analyze";
 import { extractTesseractRegions } from "@/lib/tesseract-regions";
 
+import { createClient } from "@/lib/supabase/client";
+
 export type GeneratedFlashcard = { front: string; back: string };
 
 export type ImageOcrRegion = {
@@ -99,6 +101,19 @@ export default function CreateFlashcardModal({
     setLoading(false);
   };
 
+  const uploadTransientFile = async (f: File) => {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error("Must be logged in to upload");
+    const cleanName = f.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+    const path = `${user.id}/${Date.now()}_${cleanName}`;
+    const { error: uploadError } = await supabase.storage
+      .from("uploads")
+      .upload(path, f);
+    if (uploadError) throw uploadError;
+    return { bucket: "uploads", path, fileName: f.name, fileType: f.type };
+  };
+
   const analyzeFile = async (file: File, deckName: string) => {
     // The analyzer is a PDF-only flow that estimates the max number of
     // generatable cards. For images we do OCR instead, and the "card count"
@@ -113,8 +128,12 @@ export default function CreateFlashcardModal({
     }
     setAnalyzing(true);
     try {
+      const up = await uploadTransientFile(file);
       const fd = new FormData();
-      fd.append("file", file);
+      fd.append("bucket", up.bucket);
+      fd.append("path", up.path);
+      fd.append("fileName", up.fileName);
+      fd.append("fileType", up.fileType);
       fd.append("deckName", deckName || "Untitled Deck");
       fd.append("mode", "analyze");
 
@@ -182,8 +201,12 @@ export default function CreateFlashcardModal({
         }
         let regions = base.regions;
         try {
+          const up = await uploadTransientFile(formData.file);
           const fd = new FormData();
-          fd.append("file", formData.file);
+          fd.append("bucket", up.bucket);
+          fd.append("path", up.path);
+          fd.append("fileName", up.fileName);
+          fd.append("fileType", up.fileType);
           fd.append("labels", JSON.stringify(base.regions.map((r) => r.char)));
           fd.append("model", model);
           const resp = await fetch("/api/ai/flashcards/ocr-image", { method: "POST", body: fd });
@@ -223,8 +246,12 @@ export default function CreateFlashcardModal({
         });
       } else {
         // PDF path, server-side extraction.
+        const up = await uploadTransientFile(formData.file);
         const fd = new FormData();
-        fd.append("file", formData.file);
+        fd.append("bucket", up.bucket);
+        fd.append("path", up.path);
+        fd.append("fileName", up.fileName);
+        fd.append("fileType", up.fileType);
         fd.append("deckName", formData.deckName);
         fd.append("requestedCards", String(finalRequestedCards));
         fd.append("language", language);

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractTextFromUpload } from "@/lib/upload-text";
 import { requireUserId } from "@/lib/get-user-id";
+import { ownsStoragePath, downloadStoredFile, deleteStoredFile, UPLOAD_BUCKETS } from "@/lib/storage-uploads";
 import {
   extractFlashcards,
   estimateMaxCards,
@@ -41,7 +42,20 @@ export async function POST(req: NextRequest) {
 
   try {
     const formData = await req.formData();
-    const file = formData.get("file");
+    let file = formData.get("file") as File | null;
+    const bucket = formData.get("bucket") as string | null;
+    const path = formData.get("path") as string | null;
+    const fileName = formData.get("fileName") as string | null;
+    const fileType = formData.get("fileType") as string | null;
+
+    if (bucket && path && fileName && fileType) {
+      if (!ownsStoragePath(bucket, path, userId, [UPLOAD_BUCKETS.transient, UPLOAD_BUCKETS.materials])) {
+        return NextResponse.json({ error: "Invalid storage path." }, { status: 403 });
+      }
+      file = await downloadStoredFile(bucket, path, fileName, fileType);
+      void deleteStoredFile(bucket, path);
+    }
+    
     const deckName = (formData.get("deckName") as string) || "Untitled Deck";
     const mode = (formData.get("mode") as string) || "generate";
     const requestedCardsRaw = Number(formData.get("requestedCards") ?? 0);

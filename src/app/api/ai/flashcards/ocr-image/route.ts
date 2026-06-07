@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUserId } from "@/lib/get-user-id";
 import { chatWithFallback, AllModelsFailedError, resolveChain, modelTier } from "@/lib/ai/openrouter";
 import { spendCredit, refundCredit, getCredits } from "@/lib/ai/credits";
+import { ownsStoragePath, downloadStoredFile, deleteStoredFile, UPLOAD_BUCKETS } from "@/lib/storage-uploads";
 
 export const runtime = "nodejs";
 export const maxDuration = 40;
@@ -21,7 +22,20 @@ export async function POST(req: NextRequest) {
 
   try {
     const form = await req.formData();
-    const file = form.get("file");
+    let file = form.get("file") as File | null;
+    const bucket = form.get("bucket") as string | null;
+    const path = form.get("path") as string | null;
+    const fileName = form.get("fileName") as string | null;
+    const fileType = form.get("fileType") as string | null;
+
+    if (bucket && path && fileName && fileType) {
+      if (!ownsStoragePath(bucket, path, userId, [UPLOAD_BUCKETS.transient, UPLOAD_BUCKETS.materials])) {
+        return NextResponse.json({ error: "Invalid storage path." }, { status: 403 });
+      }
+      file = await downloadStoredFile(bucket, path, fileName, fileType);
+      void deleteStoredFile(bucket, path);
+    }
+
     const model = typeof form.get("model") === "string" ? (form.get("model") as string) : undefined;
     let labels: string[] = [];
     try {

@@ -21,6 +21,7 @@ import {
   X,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import { createClient } from "@/lib/supabase/client";
 
 /**
  * Community and RealTrack's social layer (Study Buddy now lives here too).
@@ -1739,7 +1740,25 @@ function ShareComposer({
     }
     setSaving(true);
     try {
-      const r = file && kind === "material"
+      let uploadedPath: string | undefined;
+      let uploadedBucket: string | undefined;
+      if (file && kind === "material") {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error("Must be logged in to upload");
+        const safeName = file.name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-");
+        // Must put /<userId>/ so ownsStoragePath validates it
+        uploadedPath = `${user.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
+        uploadedBucket = "shared-materials";
+        const { error: uploadError } = await supabase.storage
+          .from(uploadedBucket)
+          .upload(uploadedPath, file, {
+            contentType: file.type || "application/pdf"
+          });
+        if (uploadError) throw uploadError;
+      }
+
+      const r = file && kind === "material" && uploadedPath
         ? await fetch("/api/social/materials", {
             method: "POST",
             body: (() => {
@@ -1747,7 +1766,8 @@ function ShareComposer({
               fd.append("recipient_ids", JSON.stringify(recipients));
               fd.append("kind", "material");
               fd.append("title", finalTitle);
-              fd.append("file", file);
+              fd.append("bucket", uploadedBucket!);
+              fd.append("path", uploadedPath!);
               return fd;
             })(),
           })
