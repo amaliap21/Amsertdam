@@ -9,7 +9,7 @@ import { modelTier } from "@/lib/ai/openrouter";
 import { useAiAnalyze } from "@/lib/use-ai-analyze";
 import { extractTesseractRegions } from "@/lib/tesseract-regions";
 
-import { createClient } from "@/lib/supabase/client";
+import { uploadToStorage } from "@/lib/upload-to-storage";
 
 export type GeneratedFlashcard = { front: string; back: string };
 
@@ -101,17 +101,11 @@ export default function CreateFlashcardModal({
     setLoading(false);
   };
 
+  // Upload straight to Supabase Storage (via a server-signed URL) so the file
+  // never passes through the Vercel function and its ~4.5 MB body cap.
   const uploadTransientFile = async (f: File) => {
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error("Must be logged in to upload");
-    const cleanName = f.name.replace(/[^a-zA-Z0-9.-]/g, "_");
-    const path = `${user.id}/${Date.now()}_${cleanName}`;
-    const { error: uploadError } = await supabase.storage
-      .from("uploads")
-      .upload(path, f);
-    if (uploadError) throw uploadError;
-    return { bucket: "uploads", path, fileName: f.name, fileType: f.type };
+    const up = await uploadToStorage(f, "flashcard");
+    return { bucket: up.bucket, path: up.path, fileName: up.name, fileType: up.type };
   };
 
   const analyzeFile = async (file: File, deckName: string) => {

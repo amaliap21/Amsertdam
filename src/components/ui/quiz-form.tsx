@@ -10,7 +10,7 @@ import { modelTier } from "@/lib/ai/openrouter";
 import { useAiAnalyze } from "@/lib/use-ai-analyze";
 import { extractTesseractRegions } from "@/lib/tesseract-regions";
 import type { ImageOcrRegion } from "@/store/use-store";
-import { createClient } from "@/lib/supabase/client";
+import { uploadToStorage } from "@/lib/upload-to-storage";
 
 export type GeneratedQuestion = {
   id: string;
@@ -90,18 +90,13 @@ export default function CreateQuizModal({
   const isImageFile = (f: File) =>
     f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name);
 
-  // Upload to Supabase Storage bypasses the Vercel 4.5MB payload limit
+  // Upload straight to Supabase Storage (via a server-signed URL) so the file
+  // never passes through the Vercel function and its ~4.5 MB body cap. The
+  // signed-URL flow also self-provisions the bucket and needs no storage RLS
+  // policy, so it works without any manual Supabase setup.
   const uploadTransientFile = async (f: File) => {
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error("Must be logged in to upload");
-    const cleanName = f.name.replace(/[^a-zA-Z0-9.-]/g, "_");
-    const path = `${user.id}/${Date.now()}_${cleanName}`;
-    const { error: uploadError } = await supabase.storage
-      .from("uploads")
-      .upload(path, f);
-    if (uploadError) throw uploadError;
-    return { bucket: "uploads", path, fileName: f.name, fileType: f.type };
+    const up = await uploadToStorage(f, "quiz");
+    return { bucket: up.bucket, path: up.path, fileName: up.name, fileType: up.type };
   };
 
   const analyzeFile = async (file: File, title: string, course: string) => {
