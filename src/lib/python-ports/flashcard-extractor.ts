@@ -504,7 +504,38 @@ export function extractFlashcards(
 
 export function estimateMaxCards(text: string): number {
   const sentences = splitSentences(text);
-  const rich = sentences.filter((s) => informativeScore(s) >= 3.0).length;
-  const wordCount = tokenize(text).length;
-  return Math.max(5, Math.min(30, Math.max(rich, Math.floor(wordCount / 60))));
+  // Count the GENUINE term/definition cards the source actually contains. We
+  // deliberately exclude cloze fill-in-the-blank padding: the extractor can
+  // generate those almost without limit, so including them would over-promise
+  // the count. Dedupe by term so repeated mentions don't inflate it.
+  const seenTerms = new Set<string>();
+  let defs = 0;
+  for (const sent of sentences) {
+    for (const [term] of extractDefinitionPairs(sent)) {
+      const k = term.toLowerCase().trim();
+      if (k && !seenTerms.has(k)) {
+        seenTerms.add(k);
+        defs++;
+      }
+    }
+    for (const [term] of extractColonDashPairs(sent)) {
+      const k = term.toLowerCase().trim();
+      if (k && !seenTerms.has(k)) {
+        seenTerms.add(k);
+        defs++;
+      }
+    }
+  }
+  // DISTINCT informative sentences (deduped so repeated text can't inflate it).
+  const richSet = new Set<string>();
+  for (const s of sentences) {
+    if (informativeScore(s) >= 3.0) {
+      richSet.add(s.toLowerCase().replace(/\s+/g, " ").trim());
+    }
+  }
+  // Distinct testable content drives the number, NOT raw length. A long-but-
+  // repetitive source can't over-promise, and a short-but-dense one isn't
+  // unfairly capped. The 5..30 clamp bounds the extremes.
+  const facts = Math.max(defs, richSet.size);
+  return Math.max(5, Math.min(30, facts || 5));
 }

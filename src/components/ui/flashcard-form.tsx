@@ -386,10 +386,10 @@ export default function CreateFlashcardModal({
                   />
                   <p className="mt-2 text-sm text-gray-primary">
                     {recommendedMaxCards
-                      ? `This file supports up to ${recommendedMaxCards} cards. You can choose any value up to that limit.`
+                      ? `We aim for this many. This file supports about ${recommendedMaxCards} cards, and a thin source can yield fewer.`
                       : analyzing
-                        ? "Estimating the maximum card count…"
-                        : "Upload a PDF to estimate the maximum card count."}
+                        ? "Estimating how many cards this file supports…"
+                        : "Upload a PDF to estimate how many cards it supports."}
                   </p>
                 </div>
               )}
@@ -465,7 +465,7 @@ export default function CreateFlashcardModal({
                 </p>
                 {recommendedMaxCards ? (
                   <p className="mt-2 text-[11px] text-indigo-primary sm:text-xs">
-                    Estimated max: {recommendedMaxCards} cards
+                    Supports about {recommendedMaxCards} cards
                   </p>
                 ) : null}
               </div>

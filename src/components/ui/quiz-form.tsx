@@ -315,6 +315,7 @@ export default function CreateQuizModal({
             <input
               type="number"
               min={1}
+              max={recommendedMaxQuestions ?? undefined}
               value={numQuestions}
               onChange={(e) => setNumQuestions(e.target.value)}
               onBlur={() => { if (numQuestions === "" || Number(numQuestions) < 1) setNumQuestions("1"); }}
@@ -322,8 +323,8 @@ export default function CreateQuizModal({
               className="w-full rounded-xl border border-gray-300 px-2.5 py-2 text-[13px] text-black-primary focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary sm:px-4 sm:py-3.5 sm:text-sm"
             />
             <p className="mt-1.5 text-[11px] leading-tight text-gray-primary sm:text-sm">
-              Exactly this many questions will be generated.
-              {recommendedMaxQuestions ? ` Up to ${recommendedMaxQuestions} for this file.` : analyzing ? " Estimating the maximum…" : ""}
+              We aim for this many. A thin source can yield fewer, and you only spend credits on questions actually created.
+              {recommendedMaxQuestions ? ` This file supports about ${recommendedMaxQuestions}.` : analyzing ? " Estimating how many this file supports…" : ""}
             </p>
           </div>
 
@@ -417,7 +418,7 @@ export default function CreateQuizModal({
                 </p>
                 {recommendedMaxQuestions ? (
                   <p className="mt-2 text-xs text-indigo-primary">
-                    Estimated max: {recommendedMaxQuestions} questions
+                    Supports about {recommendedMaxQuestions} questions
                   </p>
                 ) : null}
               </div>

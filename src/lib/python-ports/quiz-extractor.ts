@@ -318,9 +318,19 @@ export function extractQuiz(
 
 export function estimateMaxQuestions(text: string): number {
   const sentences = splitSentences(text);
-  const rich = sentences.filter((s) => informativeScore(s) >= 3.0).length;
-  const defs = harvestDefinitions(text).length;
-  const wordCount = tokenize(text).length;
-  const rough = Math.max(rich, defs, Math.floor(wordCount / 80));
-  return Math.max(MIN_QUESTIONS, Math.min(MAX_QUESTIONS, rough));
+  // DISTINCT informative sentences. Deduping matters: repeated text (headers,
+  // boilerplate, copy-pasted paragraphs) must not inflate the count.
+  const richSet = new Set<string>();
+  for (const s of sentences) {
+    if (informativeScore(s) >= 3.0) {
+      richSet.add(s.toLowerCase().replace(/\s+/g, " ").trim());
+    }
+  }
+  const defs = harvestDefinitions(text).length; // already deduped by term
+  // The realistic number of questions is how many DISTINCT testable facts the
+  // source contains (informative sentences / definitions), NOT its raw length.
+  // A long-but-repetitive source therefore can't over-promise, and a short-but-
+  // dense one isn't unfairly capped. MIN/MAX bound the extremes.
+  const facts = Math.max(richSet.size, defs);
+  return Math.max(MIN_QUESTIONS, Math.min(MAX_QUESTIONS, facts || MIN_QUESTIONS));
 }
