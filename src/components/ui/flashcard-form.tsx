@@ -87,7 +87,7 @@ export default function CreateFlashcardModal({
   const [analyzing, setAnalyzing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { refresh: refreshUsage } = useAiAnalyze();
+  const { refresh: refreshUsage, remaining, credits } = useAiAnalyze();
 
   const MAX_SIZE = 50 * 1024 * 1024;
 
@@ -323,6 +323,15 @@ export default function CreateFlashcardModal({
             !!formData.file &&
             (formData.file.type.startsWith("image/") ||
               /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(formData.file.name));
+          // A free model on an image runs fully client-side (Tesseract), so it
+          // never needs budget. Everything else needs either a free generation
+          // (free model) or a credit (premium model).
+          const outOfBudget =
+            modelTier(model) === "premium"
+              ? credits === 0
+              : selectedIsImage
+                ? false
+                : remaining === 0;
           return (
             <form onSubmit={handleSubmit} className="space-y-5 sm:space-y-6">
               {selectedIsImage ? (
@@ -450,15 +459,27 @@ export default function CreateFlashcardModal({
             </label>
           </div>
 
+          {outOfBudget && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              {modelTier(model) === "premium"
+                ? "You have no premium credits left. Buy credits, or switch to a free model."
+                : "You've used all your free generations today (resets at midnight UTC). Switch to a Premium model, upload an image (free cover-and-reveal), or come back tomorrow."}
+            </p>
+          )}
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || outOfBudget}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-primary px-4 py-3.5 font-medium text-white transition-colors hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-70 sm:py-4"
           >
             {loading ? (
               <>
                 <Loader2 size={20} className="animate-spin" />
                 Generating…
+              </>
+            ) : outOfBudget ? (
+              <>
+                <CirclePlus size={20} />
+                {modelTier(model) === "premium" ? "No credits left" : "No free generations left"}
               </>
             ) : (
               <>

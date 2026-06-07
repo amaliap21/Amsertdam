@@ -57,8 +57,12 @@ export default function CreateQuizModal({
   const [loading, setLoading] = useState(false);
   const [courseOptions, setCourseOptions] = useState<string[]>([]);
   const [coursesLoaded, setCoursesLoaded] = useState(false);
-  // Refreshes the navbar credit / free-quota counters after a generation.
-  const { refresh: refreshUsage } = useAiAnalyze();
+  // Usage counters: refresh after a generation, and disable Generate when the
+  // chosen model has no budget left (free quota for free models, credits for
+  // premium). This is the only genuinely "AI unavailable" state for the user.
+  const { refresh: refreshUsage, remaining, credits } = useAiAnalyze();
+  const outOfBudget =
+    modelTier(model) === "premium" ? credits === 0 : remaining === 0;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -195,7 +199,7 @@ export default function CreateQuizModal({
         basic: json.basic ?? false,
       });
       if (json.basic) {
-        toast("Made a basic quiz (AI was busy). Regenerate or use a Premium model for AI-quality questions.", { icon: "ℹ️", duration: 6000 });
+        toast("Made a basic quiz: the free AI models couldn't build a structured quiz this time. Try again, or use a Premium model (Claude Opus) for full AI quality.", { icon: "ℹ️", duration: 7000 });
       }
       setFormData({ title: "", course: "", file: null });
       onClose();
@@ -412,15 +416,27 @@ export default function CreateQuizModal({
             )}
           </div>
 
+          {outOfBudget && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              {modelTier(model) === "premium"
+                ? "You have no premium credits left. Buy credits, or switch to a free model."
+                : "You've used all your free generations today (resets at midnight UTC). Switch to a Premium model, or come back tomorrow."}
+            </p>
+          )}
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || outOfBudget}
             className="w-full flex items-center justify-center gap-2 px-4 py-4 bg-indigo-primary text-white rounded-xl hover:bg-indigo-600 transition-colors font-medium disabled:opacity-70 disabled:cursor-not-allowed"
           >
             {loading ? (
               <>
                 <Loader2 size={20} className="animate-spin" />
                 Generating…
+              </>
+            ) : outOfBudget ? (
+              <>
+                <CirclePlus size={20} />
+                {modelTier(model) === "premium" ? "No credits left" : "No free generations left"}
               </>
             ) : (
               <>
