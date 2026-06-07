@@ -10,6 +10,7 @@ import { modelTier } from "@/lib/ai/openrouter";
 import { useAiAnalyze } from "@/lib/use-ai-analyze";
 import { extractTesseractRegions } from "@/lib/tesseract-regions";
 import type { ImageOcrRegion } from "@/store/use-store";
+import { createClient } from "@/lib/supabase/client";
 
 export type GeneratedQuestion = {
   id: string;
@@ -89,6 +90,20 @@ export default function CreateQuizModal({
   const isImageFile = (f: File) =>
     f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name);
 
+  // Upload to Supabase Storage bypasses the Vercel 4.5MB payload limit
+  const uploadTransientFile = async (f: File) => {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error("Must be logged in to upload");
+    const cleanName = f.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+    const path = `${user.id}/${Date.now()}_${cleanName}`;
+    const { error: uploadError } = await supabase.storage
+      .from("uploads")
+      .upload(path, f);
+    if (uploadError) throw uploadError;
+    return { bucket: "uploads", path, fileName: f.name, fileType: f.type };
+  };
+
   const analyzeFile = async (file: File, title: string, course: string) => {
     // Skip the text-estimate analyze pass for images. The route returns a
     // fixed maxQuestions for image input (no source text to count terms in)
@@ -100,8 +115,12 @@ export default function CreateQuizModal({
     }
     setAnalyzing(true);
     try {
+      const up = await uploadTransientFile(file);
       const fd = new FormData();
-      fd.append("file", file);
+      fd.append("bucket", up.bucket);
+      fd.append("path", up.path);
+      fd.append("fileName", up.fileName);
+      fd.append("fileType", up.fileType);
       fd.append("title", title || "Untitled Quiz");
       fd.append("course", course);
       fd.append("mode", "analyze");
@@ -153,8 +172,12 @@ export default function CreateQuizModal({
     setLoading(true);
     const t = toast.loading("Generating quiz questions…");
     try {
+      const up = await uploadTransientFile(formData.file);
       const fd = new FormData();
-      fd.append("file", formData.file);
+      fd.append("bucket", up.bucket);
+      fd.append("path", up.path);
+      fd.append("fileName", up.fileName);
+      fd.append("fileType", up.fileType);
       fd.append("title", formData.title);
       fd.append("course", formData.course);
       fd.append("requestedQuestions", String(parsedTotal));

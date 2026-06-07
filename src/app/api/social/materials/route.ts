@@ -94,31 +94,49 @@ export async function POST(req: Request) {
       }
 
       const file = form.get("file");
-      if (!file || !(file instanceof File)) {
+      const bucketPayload = form.get("bucket") as string | null;
+      const pathPayload = form.get("path") as string | null;
+      
+      let finalUrl = "";
+      const bucket = "shared-materials";
+      
+      if (bucketPayload && pathPayload && bucketPayload === bucket) {
+        // Direct storage upload flow (bypasses 4.5MB Vercel limit)
+        if (!pathPayload.includes(`/${userId}/`)) {
+          return NextResponse.json({ error: "Invalid storage path" }, { status: 403 });
+        }
+        const { data: publicData } = db.storage.from(bucket).getPublicUrl(pathPayload);
+        finalUrl = publicData.publicUrl;
+      } else if (file && file instanceof File) {
+        // Legacy flow
+        const isPdf =
+          file.type === "application/pdf" ||
+          file.name.toLowerCase().endsWith(".pdf");
+        if (!isPdf) {
+          return NextResponse.json({ error: "Only PDF files are supported" }, { status: 400 });
+        }
+
+        const safeName = file.name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-");
+        // Legacy path included shared-materials folder
+        const path = `shared-materials/${userId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
+        const bytes = Buffer.from(await file.arrayBuffer());
+        
+        const { error: uploadError } = await db.storage
+          .from(bucket)
+          .upload(path, bytes, {
+            contentType: file.type || "application/pdf",
+            upsert: false,
+          });
+        if (uploadError) {
+          return NextResponse.json({ error: uploadError.message }, { status: 500 });
+        }
+        const { data: publicData } = db.storage.from(bucket).getPublicUrl(path);
+        finalUrl = publicData.publicUrl;
+      } else {
         return NextResponse.json({ error: "Missing PDF file" }, { status: 400 });
       }
-      const isPdf =
-        file.type === "application/pdf" ||
-        file.name.toLowerCase().endsWith(".pdf");
-      if (!isPdf) {
-        return NextResponse.json({ error: "Only PDF files are supported" }, { status: 400 });
-      }
 
-      const safeName = file.name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-");
-      const path = `shared-materials/${userId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
-      const bytes = Buffer.from(await file.arrayBuffer());
-      const bucket = "shared-materials";
-      const { error: uploadError } = await db.storage
-        .from(bucket)
-        .upload(path, bytes, {
-          contentType: file.type || "application/pdf",
-          upsert: false,
-        });
-      if (uploadError) {
-        return NextResponse.json({ error: uploadError.message }, { status: 500 });
-      }
-      const { data: publicData } = db.storage.from(bucket).getPublicUrl(path);
-      const url = publicData?.publicUrl ?? "";
+      const url = finalUrl;
       if (!url) return NextResponse.json({ error: "Failed to create file link" }, { status: 500 });
 
       const mutuals = await getMutualIds(db, userId);
