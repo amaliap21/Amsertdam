@@ -236,11 +236,11 @@ export async function POST(req: NextRequest) {
         `Use ${lang === "id" ? "Indonesian" : "English"} for all questions and options; do not mix languages unless the source text is mixed.`,
         `Identify the core concepts and important context in the source, and write questions that test understanding of those key points rather than trivial details.`,
         `Respond ONLY with a single valid JSON object matching: {"questions":[{"prompt":"...","options":[{"letter":"A","text":"..."}],"correctAnswer":"A"}]}.`,
-        `Produce ${n} distinct multiple-choice questions derived from the provided source — aim for the full count, only producing fewer if the source genuinely lacks enough material. Always include exactly 4 options A/B/C/D. Keep options plausible and the correct answer grounded in the source.`,
-        `Read everything visible in the source: typed text, handwritten notes, diagrams, equations, and any mathematical or scientific symbols. Do not skip a section because it is handwritten or stylized — read it.`,
+        `Produce ${n} distinct multiple-choice questions derived from the provided source, aim for the full count, only producing fewer if the source genuinely lacks enough material. Always include exactly 4 options A/B/C/D. Keep options plausible and the correct answer grounded in the source.`,
+        `Read everything visible in the source: typed text, handwritten notes, diagrams, equations, and any mathematical or scientific symbols. Do not skip a section because it is handwritten or stylized, read it.`,
         `When the source contains math: transcribe stacked fractions as "a/b", superscripts as "x^n", subscripts as "x_n", square roots as "sqrt(x)", integrals as "integral", limits as "lim", Greek letters by name (alpha, beta, pi), and inequalities exactly as drawn (preserve "<", ">", "<=", ">=" direction).`,
         `Solve every math problem yourself before emitting it: the marked correctAnswer MUST be the mathematically correct option. Do not guess.`,
-        `Use plain-text math notation throughout — no LaTeX, no Unicode math glyphs that won't render in a plain web textarea. Keep distractors realistic (common algebraic slips, sign errors, off-by-one) so the question actually tests understanding.`,
+        `Use plain-text math notation throughout, no LaTeX, no Unicode math glyphs that won't render in a plain web textarea. Keep distractors realistic (common algebraic slips, sign errors, off-by-one) so the question actually tests understanding.`,
         `If a region of the source is illegible, skip questions from that region rather than fabricating content.`,
       ].join(" ");
 
@@ -258,8 +258,17 @@ export async function POST(req: NextRequest) {
 
     const target = Math.max(1, effective);
     let questions: QuizQuestion[] = [];
+    // True when the LLM produced nothing and we used the deterministic extractor
+    // (lower quality, no content filtering / math formatting). Surfaced to the UI.
+    let basic = false;
     if (AI_USE_LLM) {
       const chain = resolveChain(requestedModel, tier);
+      // Shared across every LLM call in THIS request so a model that hard
+      // rate-limits (429) on one chunk isn't re-hit on the next — that
+      // amplification is what blows the free-tier daily request cap and forces
+      // the basic fallback. With this, one generate costs a handful of requests
+      // instead of dozens.
+      const llmSkip = new Set<string>();
 
       // Accumulate UNIQUE questions across calls. The model routinely under-
       // delivers on a single request (returns fewer than asked), and the
@@ -306,6 +315,7 @@ export async function POST(req: NextRequest) {
         const resp = await chatWithFallback(messages, chain, {
           deadlineMs: remainingBudget(),
           maxTokens: 0,
+          skip: llmSkip,
         });
         const parsed = normalizeOpenRouterQuiz(resp.content);
         if (!parsed || !parsed.questions?.length) return [];
@@ -345,7 +355,7 @@ export async function POST(req: NextRequest) {
               `printed math, diagrams. If a fraction is drawn stacked, render it inline ` +
               `as "a/b". If you see an exponent as a superscript, write it as "x^n". ` +
               `Preserve inequality direction exactly ("<" stays "<", ">=" stays ">="). ` +
-              `Treat any clearly written symbol as readable — never skip math just ` +
+              `Treat any clearly written symbol as readable, never skip math just ` +
               `because it is handwritten. If a region is genuinely illegible, skip ` +
               `questions from it instead of guessing.` + avoidClause();
             try {
@@ -384,13 +394,11 @@ export async function POST(req: NextRequest) {
             cleaned.length > threshold
               ? splitTextIntoChunks(cleaned, CHUNK_SIZE, CHUNK_OVERLAP)
               : [cleaned];
-          // Cycle through chunks, topping up until we reach target / run out
-          // of budget. Allow a few passes beyond chunk count for top-ups.
+          // Cycle through chunks, topping up until we reach target / run out of
+          // budget. Allow a few passes beyond chunk count for top-ups.
           const MAX_ATTEMPTS = chunks.length + 4;
           for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
             if (collected.length >= target) break;
-            // Stop before starting a call the budget can't fund — better to
-            // return what we have than to time out.
             if (remainingBudget() < MIN_CALL_MS) break;
             const chunk = chunks[attempt % chunks.length];
             const want = overAsk(target - collected.length);
@@ -406,8 +414,6 @@ export async function POST(req: NextRequest) {
                 ]),
               );
             } catch (err) {
-              // Premium errors should surface (we'll refund below); free
-              // errors fall through to the next attempt / extractor.
               if (isPremium && err instanceof AllModelsFailedError) {
                 if (reservedCredits > 0) {
                   await refundCredit(userId, reservedCredits);
@@ -454,6 +460,7 @@ export async function POST(req: NextRequest) {
         );
       }
       questions = extractQuiz(cleaned, Math.max(1, effective), 0, language);
+      basic = questions.length > 0; // LLM gave nothing; this is the basic fallback
     }
 
     if (questions.length === 0) {
@@ -466,11 +473,21 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // For image quizzes, return the image so it can be shown on the quiz page
+    // (questions reference "the image").
+    let imageDataUrl: string | undefined;
+    if (isImage) {
+      const buf = Buffer.from(await file.arrayBuffer()).toString("base64");
+      imageDataUrl = `data:${file.type || "image/png"};base64,${buf}`;
+    }
+
     return NextResponse.json({
       title,
       course,
       source: file.name,
       questions,
+      imageDataUrl,
+      basic,
       maxQuestions,
       tier,
       credits: isPremium ? await getCredits(userId) : undefined,

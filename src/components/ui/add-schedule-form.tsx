@@ -387,7 +387,7 @@ function AddScheduleModalInner({ isOpen, onClose, onAdd, initial }: Props) {
               >
                 <option value="">
                   {courses.length === 0
-                    ? "No courses yet — add one in Passing Target"
+                    ? "No courses yet, add one in Passing Target"
                     : "Pick a course (or leave blank for a custom class)"}
                 </option>
                 {courses.map((c) => (
@@ -426,7 +426,7 @@ function AddScheduleModalInner({ isOpen, onClose, onAdd, initial }: Props) {
                 selectedCourse.scheduleEntries.length === 0 && (
                   <p className="text-[11px] text-amber-700">
                     This course doesn&apos;t have a schedule in Passing
-                    Target — pick the date and time manually below.
+                    Target, pick the date and time manually below.
                   </p>
                 )}
             </div>
@@ -453,7 +453,7 @@ function AddScheduleModalInner({ isOpen, onClose, onAdd, initial }: Props) {
             />
             {lockedFromSchedule && (
               <p className="text-[11px] text-gray-primary">
-                Locked to {selectedSchedule?.day ?? "this day"} — this course&apos;s
+                Locked to {selectedSchedule?.day ?? "this day"}, this course&apos;s
                 schedule is set in Passing Target.
               </p>
             )}

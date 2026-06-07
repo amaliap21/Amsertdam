@@ -11,6 +11,7 @@ import {
   Calendar,
   BookOpenCheck,
   MessagesSquare,
+  Globe,
   X,
 } from "lucide-react";
 import FlashcardsIcon from "@/components/icons/flashcards-icon";
@@ -55,6 +56,11 @@ export default function Sidebar({ className, isOpen, onToggle }: SidebarProps) {
       label: "Study Companion",
       href: "/study-companion",
       icon: <MessagesSquare size={18} />,
+    },
+    {
+      label: "Community",
+      href: "/community",
+      icon: <Globe size={18} />,
     },
   ];
 

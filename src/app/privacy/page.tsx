@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 export const metadata = {
-  title: "Privacy Policy — RealTrack",
+  title: "Privacy Policy, RealTrack",
 };
 
 export default function PrivacyPage() {
@@ -20,19 +20,19 @@ export default function PrivacyPage() {
           <h2 className="text-xl font-semibold">What we collect</h2>
           <ul className="list-disc pl-6">
             <li>
-              <strong>Email address</strong> — used to sign you in and to send
+              <strong>Email address</strong>, used to sign you in and to send
               account-related emails (verification, password reset).
             </li>
             <li>
-              <strong>Profile fields you fill in</strong> — name, major,
+              <strong>Profile fields you fill in</strong>, name, major,
               semester. Optional.
             </li>
             <li>
-              <strong>Study data you create</strong> — courses, tasks,
+              <strong>Study data you create</strong>, courses, tasks,
               flashcards, quizzes, schedules. Stored against your account.
             </li>
             <li>
-              <strong>Files you upload to AI features</strong> — PDFs/images
+              <strong>Files you upload to AI features</strong>, PDFs/images
               are processed to generate flashcards or quizzes. They are not
               retained beyond the generation request.
             </li>
@@ -72,7 +72,7 @@ export default function PrivacyPage() {
             <strong>Midtrans</strong> (PT Midtrans), a licensed Indonesian
             payment gateway. When you pay, your payment details (card number,
             e-wallet, bank account) are entered on Midtrans&apos;s secure
-            checkout and handled by Midtrans — <strong>RealTrack never sees or
+            checkout and handled by Midtrans, <strong>RealTrack never sees or
             stores them</strong>. We only receive a payment confirmation
             containing the order ID, amount, status, and your account reference,
             which we use to add credits to your account. See{" "}

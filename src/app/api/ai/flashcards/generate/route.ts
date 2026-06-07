@@ -219,12 +219,12 @@ export async function POST(req: NextRequest) {
         `Use ${lang === "id" ? "Indonesian" : "English"} for all cards; do not mix languages unless the source text is mixed.`,
         `Identify the core concepts and important context in the source, and write cards that capture those key points rather than trivial details.`,
         `Respond ONLY with a single valid JSON object matching: {"cards":[{"front":"...","back":"...","sourceSnippet":"..."}]}.`,
-        `Produce ${n} distinct cards derived from the provided source — aim for the full count, only producing fewer if the source genuinely lacks enough material. Keep back concise (<=300 chars).`,
-        `Read everything visible in the source: typed text, handwritten notes, diagrams, equations, and any mathematical or scientific symbols. Do not skip a section because it is handwritten or stylized — read it.`,
+        `Produce ${n} distinct cards derived from the provided source, aim for the full count, only producing fewer if the source genuinely lacks enough material. Keep back concise (<=300 chars).`,
+        `Read everything visible in the source: typed text, handwritten notes, diagrams, equations, and any mathematical or scientific symbols. Do not skip a section because it is handwritten or stylized, read it.`,
         `When the source contains math: transcribe stacked fractions as "a/b", superscripts as "x^n", subscripts as "x_n", square roots as "sqrt(x)", integrals as "integral", limits as "lim", Greek letters by name (alpha, beta, pi), and inequalities exactly as drawn ("<", ">", "<=", ">=").`,
         `For formulas: name/statement on the front, the formula + one-line meaning on the back (e.g. front: "Quadratic formula", back: "x = (-b ± sqrt(b^2 - 4ac)) / (2a). Solves ax^2 + bx + c = 0").`,
         `For worked problems: prompt on the front, final answer + brief solution path on the back.`,
-        `Use plain-text math notation throughout — no LaTeX, no Unicode math glyphs that won't render in a plain web textarea. Always make sure the back states a definite correct answer or rule, not a guess.`,
+        `Use plain-text math notation throughout, no LaTeX, no Unicode math glyphs that won't render in a plain web textarea. Always make sure the back states a definite correct answer or rule, not a guess.`,
         `If a region of the source is genuinely illegible, skip cards from that region rather than fabricating content.`,
       ].join(" ");
 
@@ -242,6 +242,11 @@ export async function POST(req: NextRequest) {
     let cards: { front: string; back: string }[] = [];
     if (AI_USE_LLM) {
       const chain = resolveChain(requestedModel, tier);
+      // Shared across every LLM call in THIS request so a model that hard
+      // rate-limits (429) on one chunk isn't re-hit on the next — that
+      // amplification is what blows the free-tier daily request cap and forces
+      // the basic fallback.
+      const llmSkip = new Set<string>();
 
       // Accumulate UNIQUE cards across calls. A single request usually under-
       // delivers (model returns fewer than asked) and the polisher drops
@@ -281,6 +286,7 @@ export async function POST(req: NextRequest) {
         const resp = await chatWithFallback(messages, chain, {
           deadlineMs: remainingBudget(),
           maxTokens: 0,
+          skip: llmSkip,
         });
         const parsed = normalizeOpenRouterFlashcards(resp.content);
         if (!parsed || !parsed.cards?.length) return [];
@@ -311,7 +317,7 @@ export async function POST(req: NextRequest) {
               `what it shows. Read EVERYTHING visible: typed text, handwriting, ` +
               `printed math, diagrams. Render stacked fractions inline as "a/b", ` +
               `superscripts as "x^n", and preserve inequality direction. Treat ` +
-              `any clearly written symbol as readable — never skip math just ` +
+              `any clearly written symbol as readable, never skip math just ` +
               `because it is handwritten.` + avoidClause();
             try {
               pushUnique(

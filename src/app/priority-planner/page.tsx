@@ -948,7 +948,7 @@ export default function PriorityPlanner() {
                     day: "numeric",
                     month: "long",
                   })}
-                  {" — "}
+                  {", "}
                   {weekEnd.toLocaleDateString("en-US", {
                     weekday: "long",
                     day: "numeric",
@@ -964,7 +964,7 @@ export default function PriorityPlanner() {
                 day: "numeric",
                 month: "long",
               })}
-              {" — "}
+              {", "}
               {new Date(year, month + 1, 0).toLocaleDateString("en-US", {
                 weekday: "long",
                 day: "numeric",

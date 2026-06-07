@@ -86,7 +86,7 @@ export default function StudyCompanionReview({
       prompt: q.prompt,
       yourAnswer: userOption
         ? `${userOption.letter}. ${userOption.text}`
-        : "—",
+        : "-",
       correctAnswer: correctOption
         ? `${correctOption.letter}. ${correctOption.text}`
         : q.correctAnswer,

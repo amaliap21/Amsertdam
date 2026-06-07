@@ -9,9 +9,9 @@ import type { Tour as ShepherdTour } from "shepherd.js";
 type Router = { push: (href: string) => void };
 
 // Versioned: bump the suffix whenever the tour gains new steps so users who
-// completed an earlier version see the renewed tour once. (v2 adds the
-// Study Companion + premium-credits steps.)
-export const TOUR_STORAGE_KEY = "realtrack-tour-status-v2";
+// completed an earlier version see the renewed tour once. (v3 adds the
+// Community and Kaizen steps.)
+export const TOUR_STORAGE_KEY = "realtrack-tour-status-v3";
 
 /** Mark the tour completed so it does not auto-fire on subsequent visits. */
 export function markTourCompleted() {
@@ -280,7 +280,7 @@ export async function createTour(router: Router): Promise<ShepherdTour> {
       id: "study-companion",
       attachTo: { element: '[data-tour="ai-credits"]', on: pos("bottom") },
       title: "Study Companion",
-      text: "After you take a quiz, this page reviews your answers with AI — it explains mistakes and shows whether each course is on track to pass.",
+      text: "After you take a quiz, this page reviews your answers with AI, it explains mistakes and shows whether each course is on track to pass.",
       beforeShowPromise: waitFor('[data-tour="ai-credits"]'),
       buttons: [
         navigateBack("/quiz-lab", '[data-tour="create-quiz"]'),
@@ -292,19 +292,61 @@ export async function createTour(router: Router): Promise<ShepherdTour> {
       id: "ai-credits",
       attachTo: { element: '[data-tour="buy-credits"]', on: pos("bottom") },
       title: "Free analyses & premium credits",
-      text: "You get free AI analyses every day. For deeper Claude-quality feedback, buy premium credits — pay easily with QRIS, e-wallet, or card. You can pick which model to use on each analysis.",
+      text: "You get free AI analyses every day. For deeper Claude-quality feedback, buy premium credits, pay easily with QRIS, e-wallet, or card. You can pick which model to use on each analysis.",
       beforeShowPromise: waitFor('[data-tour="buy-credits"]'),
-      buttons: [skipBtn, navigateNext("/dashboard", '[data-tour="dashboard-hero"]')],
+      buttons: [
+        skipBtn,
+        nextBtn(async (ctx) => {
+          await ensureSidebarOpen();
+          try {
+            await waitForElement('a[href="/community"]');
+            ctx.next();
+          } catch {
+            ctx.cancel();
+          }
+        }),
+      ],
+    },
+    {
+      id: "community",
+      attachTo: { element: 'a[href="/community"]', on: pos("right") },
+      title: "Community",
+      text: "Find study buddies matched by your courses, connect with mutuals, join tutor-led study sessions, and share your decks and quizzes.",
+      beforeShowPromise: async () => {
+        await ensureSidebarOpen();
+        await waitForElement('a[href="/community"]').catch(() => undefined);
+      },
+      buttons: [
+        skipBtn,
+        nextBtn(async (ctx) => {
+          if (isMobileLayout()) {
+            window.__closeSidebar?.();
+            await new Promise((r) => setTimeout(r, 280));
+          }
+          router.push("/dashboard");
+          try {
+            await waitForElement('[data-tour="kaizen-fab"]');
+            ctx.next();
+          } catch {
+            ctx.cancel();
+          }
+        }),
+      ],
+    },
+    {
+      id: "kaizen",
+      attachTo: { element: '[data-tour="kaizen-fab"]', on: pos("left") },
+      title: "Kaizen, 1% better today",
+      text: "Tap this anytime to set tiny daily goals and track a streak. The Suggest button uses AI to propose next steps from your tasks, decks, and quizzes.",
+      beforeShowPromise: waitFor('[data-tour="kaizen-fab"]'),
+      buttons: [skipBtn, nextBtn()],
     },
     {
       id: "done",
       title: "You're set",
       text: "Restart this tour any time using the ? button in the top bar. Happy studying!",
       beforeShowPromise: waitFor('[data-tour="dashboard-hero"]'),
-      buttons: [
-        navigateBack("/study-companion", '[data-tour="ai-credits"]'),
-        doneBtn,
-      ],
+      buttons: [doneBtn],
     },
   ]);
 

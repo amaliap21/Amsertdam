@@ -6,6 +6,8 @@ import toast from "react-hot-toast";
 import LanguagePicker, { type Language } from "@/components/ui/language-picker";
 import ModelPicker, { DEFAULT_MODEL_ID } from "@/components/ui/model-picker";
 import { modelTier } from "@/lib/ai/openrouter";
+import { useAiAnalyze } from "@/lib/use-ai-analyze";
+import { extractTesseractRegions } from "@/lib/tesseract-regions";
 
 export type GeneratedFlashcard = { front: string; back: string };
 
@@ -85,6 +87,7 @@ export default function CreateFlashcardModal({
   const [analyzing, setAnalyzing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [loading, setLoading] = useState(false);
+  const { refresh: refreshUsage, remaining, credits } = useAiAnalyze();
 
   const MAX_SIZE = 50 * 1024 * 1024;
 
@@ -169,190 +172,53 @@ export default function CreateFlashcardModal({
     );
     try {
       if (useVision) {
-        // Premium model + image → server-side vision LLM that handles
-        // handwriting, stacked fractions, and other 2D math the Tesseract
-        // cover-and-reveal path can't read.
-        const fd = new FormData();
-        fd.append("file", formData.file);
-        fd.append("deckName", formData.deckName);
-        fd.append("requestedCards", String(finalRequestedCards));
-        fd.append("language", language);
-        fd.append("model", model);
-        const resp = await fetch("/api/ai/flashcards/generate", {
-          method: "POST",
-          body: fd,
-        });
-        if (!resp.ok) {
-          const body = await resp.json().catch(() => ({}));
-          throw new Error(body.error || `Failed (${resp.status})`);
+        // Premium image: Tesseract gives PRECISE boxes (an LLM cannot return
+        // pixel-accurate coordinates, it produced giant misplaced covers). The
+        // premium model only CORRECTS the label text (spelling, joins wrapped
+        // words) for each box, keeping the exact Tesseract geometry.
+        const base = await extractTesseractRegions(formData.file);
+        if (!base.regions.length) {
+          throw new Error("No text detected. Try a clearer image with visible labels.");
         }
-        const json = (await resp.json()) as {
-          deckName: string;
-          cards: GeneratedFlashcard[];
-        };
-        toast.success(`Generated ${json.cards.length} flashcards`, { id: t });
-        onCreated?.({ deckName: json.deckName, cards: json.cards });
-      } else if (isImage) {
-        // Client-side OCR using Tesseract.js, no server/AI API call.
-        const file = formData.file;
-        const imageDataUrl = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-
-        // Load image to get dimensions.
-        const imgEl = await new Promise<HTMLImageElement>(
-          (resolve, reject) => {
-            const img = new window.Image();
-            img.onload = () => resolve(img);
-            img.onerror = reject;
-            img.src = imageDataUrl;
-          },
-        );
-        const imgDims = { w: imgEl.naturalWidth, h: imgEl.naturalHeight };
-
-        // Upscale small images so Tesseract can read text clearly.
-        // No sharpening, it creates edge artifacts on coloured diagrams
-        // that Tesseract misreads as characters.
-        const MIN_OCR_SIZE = 2000;
-        const longest = Math.max(imgDims.w, imgDims.h);
-        const scale = longest < MIN_OCR_SIZE ? MIN_OCR_SIZE / longest : 1;
-        let ocrInput: string | HTMLCanvasElement = imageDataUrl;
-        if (scale > 1) {
-          const canvas = document.createElement("canvas");
-          canvas.width = Math.round(imgDims.w * scale);
-          canvas.height = Math.round(imgDims.h * scale);
-          const ctx = canvas.getContext("2d")!;
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = "high";
-          ctx.drawImage(imgEl, 0, 0, canvas.width, canvas.height);
-          ocrInput = canvas;
-        }
-
-        // Run Tesseract with both eng+ind for maximum coverage.
-        const { createWorker } = await import("tesseract.js");
-        const worker = await createWorker("eng+ind");
-        const { data } = await worker.recognize(ocrInput);
-        await worker.terminate();
-
-        const scaleBack = 1 / scale;
-
-        // Strip non-alphanumeric noise from each word.
-        const cleanText = (raw: string) =>
-          raw.replace(/[^a-zA-Z0-9\s'-]/g, "").trim();
-
-        type OcrWord = {
-          x0: number; y0: number; x1: number; y1: number;
-          text: string; confidence: number;
-        };
-        const words: OcrWord[] = (data.words ?? [])
-          .map((w) => ({
-            bbox: w.bbox,
-            text: cleanText(w.text),
-            confidence: w.confidence,
-          }))
-          .filter(
-            (w) =>
-              w.confidence > 40 &&
-              w.text.length >= 2 &&
-              /[a-zA-Z]/.test(w.text),
-          )
-          .map((w) => ({
-            x0: Math.round(w.bbox.x0 * scaleBack),
-            y0: Math.round(w.bbox.y0 * scaleBack),
-            x1: Math.round(w.bbox.x1 * scaleBack),
-            y1: Math.round(w.bbox.y1 * scaleBack),
-            text: w.text,
-            confidence: w.confidence,
-          }));
-
-        // Group words into labels using Union-Find. Two words belong to
-        // the same label only when they overlap vertically AND the
-        // horizontal gap is small (< 1× the taller word's height).
-        // This merges "Right primary bronchus" but keeps "Pharynx" and
-        // "Nasal cavity" (on opposite sides) separate.
-        const parent = words.map((_, i) => i);
-        function find(x: number): number {
-          while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; }
-          return x;
-        }
-        function union(a: number, b: number) {
-          parent[find(a)] = find(b);
-        }
-        for (let i = 0; i < words.length; i++) {
-          for (let j = i + 1; j < words.length; j++) {
-            const a = words[i], b = words[j];
-            // Vertical overlap check: their y-ranges must intersect.
-            const overlapY = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
-            const minH = Math.min(a.y1 - a.y0, b.y1 - b.y0);
-            if (overlapY < minH * 0.4) continue;
-            // Horizontal gap must be small.
-            const gap = Math.max(0, Math.max(a.x0 - b.x1, b.x0 - a.x1));
-            const maxH = Math.max(a.y1 - a.y0, b.y1 - b.y0);
-            if (gap > maxH * 1.2) continue;
-            union(i, j);
+        let regions = base.regions;
+        try {
+          const fd = new FormData();
+          fd.append("file", formData.file);
+          fd.append("labels", JSON.stringify(base.regions.map((r) => r.char)));
+          fd.append("model", model);
+          const resp = await fetch("/api/ai/flashcards/ocr-image", { method: "POST", body: fd });
+          const json = await resp.json();
+          if (resp.ok && Array.isArray(json.labels) && json.labels.length === base.regions.length) {
+            regions = base.regions.map((r, i) => ({ ...r, char: String(json.labels[i] ?? r.char) }));
           }
+          refreshUsage(); // a credit may have been spent, sync the navbar
+        } catch {
+          /* refinement is best-effort, keep the precise Tesseract labels */
         }
-
-        // Build merged labels from groups.
-        const groups = new Map<number, number[]>();
-        for (let i = 0; i < words.length; i++) {
-          const root = find(i);
-          if (!groups.has(root)) groups.set(root, []);
-          groups.get(root)!.push(i);
-        }
-        const labels: OcrWord[] = [];
-        for (const members of groups.values()) {
-          const grp = members.map((i) => words[i]);
-          grp.sort((a, b) => a.x0 - b.x0);
-          labels.push({
-            x0: Math.min(...grp.map((g) => g.x0)),
-            y0: Math.min(...grp.map((g) => g.y0)),
-            x1: Math.max(...grp.map((g) => g.x1)),
-            y1: Math.max(...grp.map((g) => g.y1)),
-            text: grp.map((g) => g.text).join(" "),
-            confidence: Math.min(...grp.map((g) => g.confidence)),
-          });
-        }
-
-        // Drop noise: merged label must be ≥ 4 chars with 3+
-        // consecutive letters (filters "yy", "ET", "NA", "aol", etc.).
-        const validLabels = labels.filter(
-          (m) => m.text.length >= 4 && /[a-zA-Z]{3,}/.test(m.text),
-        );
-
-        // Generous padding so boxes fully cover labels.
-        const pad = Math.max(8, Math.round(imgDims.h * 0.012));
-        const regions: ImageOcrRegion[] = validLabels.map((m) => ({
-          bbox: [
-            Math.max(0, m.x0 - pad),
-            Math.max(0, m.y0 - pad),
-            Math.min(imgDims.w, m.x1 - m.x0 + pad * 2),
-            Math.min(imgDims.h, m.y1 - m.y0 + pad * 2),
-          ] as [number, number, number, number],
-          char: m.text,
-          confidence: m.confidence / 100,
-        }));
-
-        if (!regions.length) {
-          throw new Error(
-            "No text detected. Try a clearer image with visible text labels.",
-          );
-        }
-
-        toast.success(
-          `Found ${regions.length} labels, cover and reveal!`,
-          { id: t },
-        );
+        toast.success(`Found ${regions.length} labels, cover and reveal!`, { id: t });
         onCreated?.({
           kind: "image",
           deckName: formData.deckName,
-          imageDataUrl,
-          width: imgDims.w,
-          height: imgDims.h,
+          imageDataUrl: base.imageDataUrl,
+          width: base.width,
+          height: base.height,
           regions,
+          modelLoaded: true,
+        });
+      } else if (isImage) {
+        // Free image: Tesseract cover-and-reveal, fully client-side.
+        const base = await extractTesseractRegions(formData.file);
+        if (!base.regions.length) {
+          throw new Error("No text detected. Try a clearer image with visible text labels.");
+        }
+        toast.success(`Found ${base.regions.length} labels, cover and reveal!`, { id: t });
+        onCreated?.({
+          kind: "image",
+          deckName: formData.deckName,
+          imageDataUrl: base.imageDataUrl,
+          width: base.width,
+          height: base.height,
+          regions: base.regions,
           modelLoaded: true,
         });
       } else {
@@ -376,6 +242,7 @@ export default function CreateFlashcardModal({
           cards: GeneratedFlashcard[];
         };
         toast.success(`Generated ${json.cards.length} flashcards`, { id: t });
+        refreshUsage(); // credits/quota spent server-side, sync the navbar
         onCreated?.({ deckName: json.deckName, cards: json.cards });
       }
       reset();
@@ -389,40 +256,28 @@ export default function CreateFlashcardModal({
     }
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const f = e.target.files[0];
-      if (f.size > MAX_SIZE) {
-        toast.error("File exceeds the 50 MB limit.");
-        return;
-      }
-      const imgErr = await validateImageFile(f);
-      if (imgErr) {
-        toast.error(imgErr);
-        return;
-      }
-      setFormData({ ...formData, file: f });
-      analyzeFile(f, formData.deckName);
+  const acceptFile = async (f: File) => {
+    if (f.size > MAX_SIZE) {
+      toast.error("File exceeds the 50 MB limit.");
+      return;
     }
+    const imgErr = await validateImageFile(f);
+    if (imgErr) {
+      toast.error(imgErr);
+      return;
+    }
+    setFormData({ ...formData, file: f });
+    analyzeFile(f, formData.deckName);
   };
 
-  const handleDrop = async (e: React.DragEvent<HTMLLabelElement>) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) acceptFile(e.target.files[0]);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLLabelElement>) => {
     e.preventDefault();
     setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const f = e.dataTransfer.files[0];
-      if (f.size > MAX_SIZE) {
-        toast.error("File exceeds the 50 MB limit.");
-        return;
-      }
-      const imgErr = await validateImageFile(f);
-      if (imgErr) {
-        toast.error(imgErr);
-        return;
-      }
-      setFormData({ ...formData, file: f });
-      analyzeFile(f, formData.deckName);
-    }
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) acceptFile(e.dataTransfer.files[0]);
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLLabelElement>) => {
@@ -468,6 +323,15 @@ export default function CreateFlashcardModal({
             !!formData.file &&
             (formData.file.type.startsWith("image/") ||
               /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(formData.file.name));
+          // A free model on an image runs fully client-side (Tesseract), so it
+          // never needs budget. Everything else needs either a free generation
+          // (free model) or a credit (premium model).
+          const outOfBudget =
+            modelTier(model) === "premium"
+              ? credits === 0
+              : selectedIsImage
+                ? false
+                : remaining === 0;
           return (
             <form onSubmit={handleSubmit} className="space-y-5 sm:space-y-6">
               {selectedIsImage ? (
@@ -527,11 +391,11 @@ export default function CreateFlashcardModal({
             hint={
               selectedIsImage
                 ? modelTier(model) === "premium"
-                  ? "Premium model — reads handwriting & math from the image into Q&A cards (1 credit per card)."
-                  : "Free model on an image — runs Tesseract OCR for cover-and-reveal labels. For handwriting or math, pick a Premium model."
+                  ? "Premium model, detects labels with AI vision for cover-and-reveal, more accurate on handwriting and math (1 credit)."
+                  : "Free model on an image, runs Tesseract OCR for cover-and-reveal labels. For handwriting or math, pick a Premium model."
                 : modelTier(model) === "premium"
-                  ? "Premium model — uses 1 credit per card generated."
-                  : "Free model — rate-limited but no cost."
+                  ? "Premium model, uses 1 credit per card generated."
+                  : "Free model, rate-limited but no cost."
             }
           />
 
@@ -575,7 +439,7 @@ export default function CreateFlashcardModal({
                       {formData.file.name}
                     </span>
                   ) : (
-                    "Upload a PDF or text file (max. 50 MB)"
+                    "Upload a PDF or image (max. 50 MB)"
                   )}
                 </p>
                 {recommendedMaxCards ? (
@@ -595,15 +459,27 @@ export default function CreateFlashcardModal({
             </label>
           </div>
 
+          {outOfBudget && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              {modelTier(model) === "premium"
+                ? "You have no premium credits left. Buy credits, or switch to a free model."
+                : "You've used all your free generations today (resets at midnight UTC). Switch to a Premium model, upload an image (free cover-and-reveal), or come back tomorrow."}
+            </p>
+          )}
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || outOfBudget}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-primary px-4 py-3.5 font-medium text-white transition-colors hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-70 sm:py-4"
           >
             {loading ? (
               <>
                 <Loader2 size={20} className="animate-spin" />
                 Generating…
+              </>
+            ) : outOfBudget ? (
+              <>
+                <CirclePlus size={20} />
+                {modelTier(model) === "premium" ? "No credits left" : "No free generations left"}
               </>
             ) : (
               <>

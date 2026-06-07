@@ -1070,7 +1070,7 @@ export default function PassingTarget() {
                         ) : (
                           <div className="flex items-center gap-1 justify-end">
                             <p className="text-right text-xl sm:text-2xl font-medium">
-                              {item.threshold ?? item.passingGrade ?? "—"}
+                              {item.threshold ?? item.passingGrade ?? "-"}
                             </p>
                             <button
                               type="button"

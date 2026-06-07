@@ -183,7 +183,7 @@ export function polishQuizPayload(payload: QuizPayload): PolishedQuizQuestion[] 
 
 // --- flashcard polishing ---------------------------------------------------
 
-const TRAILING_PUNCT = /[.,;:!?\-–—]+\s*$/;
+const TRAILING_PUNCT = /[.,;:!?\-–, ]+\s*$/;
 
 export type PolishedFlashcard = { front: string; back: string };
 

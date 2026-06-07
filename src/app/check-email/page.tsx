@@ -65,10 +65,10 @@ function Shell({ email }: { email?: string }) {
               <ol className="mt-1 list-decimal space-y-1 pl-4">
                 <li>Check your <strong>Spam</strong> or <strong>Promotions</strong> folder.</li>
                 <li>
-                  If it&apos;s there, mark it <strong>Not spam</strong> — next
+                  If it&apos;s there, mark it <strong>Not spam</strong>, next
                   emails from RealTrack will arrive in your inbox.
                 </li>
-                <li>Wait 1–2 minutes — delivery can be slow.</li>
+                <li>Wait 1–2 minutes, delivery can be slow.</li>
                 <li>The sender is <code>amsertdamrealtrack@gmail.com</code>.</li>
               </ol>
             </div>

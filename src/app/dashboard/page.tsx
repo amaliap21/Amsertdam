@@ -74,7 +74,7 @@ export default function Dashboard() {
       const fromTime = totalHours > 0 ? Math.round(totalHours) : credits;
       const toTime = fromTime;
       const threshold =
-        payload.threshold != null ? String(payload.threshold) : "—";
+        payload.threshold != null ? String(payload.threshold) : "Not set";
       const typeTracking = payload.typeTracking ?? "On Track";
       return {
         courseName: co.title ?? "Untitled",

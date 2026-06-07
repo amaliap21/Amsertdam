@@ -42,10 +42,29 @@ export async function POST(req: Request) {
       course: body.course ?? null,
       source: body.source ?? null,
       questions: body.questions ?? null,
+      image_url: body.imageDataUrl ?? body.image_url ?? null,
+      image_regions: body.imageRegions ?? body.image_regions ?? null,
+      generated_basic: body.basic ?? body.generated_basic ?? false,
       user_id: userId,
     }
     const { data, error } = await supabaseAdmin.from('quizzes').insert(payload).select().single()
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) {
+      // If migrations 019/020/021 (image_url, image_regions, generated_basic)
+      // aren't applied yet, retry with only the core columns so quizzes still save.
+      if (/image_url|image_regions|generated_basic|column|schema cache/i.test(String(error.message))) {
+        const rest = {
+          title: payload.title,
+          course: payload.course,
+          source: payload.source,
+          questions: payload.questions,
+          user_id: payload.user_id,
+        }
+        const retry = await supabaseAdmin.from('quizzes').insert(rest).select().single()
+        if (retry.error) return NextResponse.json({ error: retry.error.message }, { status: 500 })
+        return NextResponse.json(retry.data)
+      }
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
     return NextResponse.json(data)
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 })

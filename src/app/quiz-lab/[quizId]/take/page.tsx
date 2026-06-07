@@ -5,6 +5,60 @@ import Link from "next/link";
 import { useRouter, notFound } from "next/navigation";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { useQuizById } from "@/lib/quiz-data";
+import type { ImageOcrRegion } from "@/store/use-store";
+
+/** Quiz reference image with its labels covered so answers aren't readable.
+ *  Tap a box to peek. */
+function CoveredImage({ src, regions }: { src: string; regions: ImageOcrRegion[] }) {
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  const [peeked, setPeeked] = useState<Set<number>>(new Set());
+  const toggle = (i: number) =>
+    setPeeked((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  return (
+    <div className="mb-4 rounded-xl border border-gray-200 bg-white p-2">
+      <div className="relative mx-auto w-fit">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={src}
+          alt="Quiz reference"
+          className="block max-h-[440px] w-auto"
+          onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+        />
+        {dims &&
+          regions.map((r, i) => {
+            const [x, y, w, h] = r.bbox;
+            const revealed = peeked.has(i);
+            return (
+              <button
+                key={i}
+                type="button"
+                onClick={() => toggle(i)}
+                title={revealed ? "Hide label" : "Tap to peek"}
+                className="absolute transition-opacity"
+                style={{
+                  left: `${(x / dims.w) * 100}%`,
+                  top: `${(y / dims.h) * 100}%`,
+                  width: `${(w / dims.w) * 100}%`,
+                  height: `${(h / dims.h) * 100}%`,
+                  background: revealed ? "transparent" : "rgb(79,70,229)",
+                  border: revealed ? "1px solid rgba(79,70,229,0.6)" : "1px solid rgba(255,255,255,0.7)",
+                  borderRadius: 4,
+                }}
+              />
+            );
+          })}
+      </div>
+      {regions.length > 0 && (
+        <p className="mt-1 text-center text-[11px] text-gray-400">Labels are hidden so you answer from memory. Tap a box to peek.</p>
+      )}
+    </div>
+  );
+}
 
 type Answer = "A" | "B" | "C" | "D";
 
@@ -73,6 +127,19 @@ export default function TakeQuiz({
           <h1 className="text-[24px] font-semibold text-black-primary mb-2">
             {quiz.title}
           </h1>
+
+          {quiz.basic && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              <span className="font-medium">This is a basic quiz.</span> The free AI models couldn&apos;t build a
+              structured quiz from this source this time, so a simpler generator was used (no smart content filtering or
+              math formatting). Regenerate it in Quiz Lab, or pick a Premium model (Claude Opus), for AI-quality
+              questions.
+            </div>
+          )}
+
+          {quiz.imageDataUrl && (
+            <CoveredImage src={quiz.imageDataUrl} regions={quiz.imageRegions ?? []} />
+          )}
 
           <div className="rounded-xl border border-gray-200 bg-white p-6">
             <h2 className="text-lg font-medium text-black-primary mb-6">

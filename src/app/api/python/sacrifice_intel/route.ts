@@ -42,10 +42,18 @@ function minimalAdvice(weight: number): string {
 }
 
 function sacrificeAdvice(weight: number, hours: number): string {
-  if (weight <= 5) return "Very small grade contribution, safe to skip entirely.";
-  if (hours >= 10) return `Too costly (${hours}h) for a ${weight}% task. Consider submitting a basic attempt only.`;
-  return "Low efficiency. Submit minimal work to capture partial credit and redirect energy to higher-value tasks.";
+  if (weight <= 5) return `Only ${weight}% of your grade, safe to minimize and protect your energy.`;
+  if (hours >= 10) return `${hours}h is a lot for a ${weight}% task. A solid basic attempt is enough here.`;
+  return "Lower return on effort. A minimal pass captures partial credit and frees energy for higher-impact work.";
 }
+
+// Humane display label for each tier — the engine keeps the internal tier
+// keys, but the UI shows gentler, wellbeing-first language.
+const TIER_LABEL: Record<string, string> = {
+  FOCUS: "Focus first",
+  MINIMAL: "Do lightly",
+  SACRIFICE: "Safe to minimize",
+};
 
 export async function POST(req: NextRequest) {
   const auth = await requireUserId();
@@ -79,7 +87,7 @@ export async function POST(req: NextRequest) {
 
     scored.sort((a, b) => b.efficiency - a.efficiency);
 
-    const results: { name: string; grade_weight: number; estimated_hours: number; deadline_days: number; tier: string; efficiency: number; advice: string }[] = [];
+    const results: { name: string; grade_weight: number; estimated_hours: number; deadline_days: number; tier: string; tier_label: string; efficiency: number; advice: string }[] = [];
     let hoursUsed = 0;
 
     for (const item of scored) {
@@ -111,6 +119,7 @@ export async function POST(req: NextRequest) {
         estimated_hours: item.hours,
         deadline_days: item.days,
         tier,
+        tier_label: TIER_LABEL[tier] ?? tier,
         efficiency: Math.round(item.efficiency * 10000) / 10000,
         advice,
       });
@@ -120,9 +129,9 @@ export async function POST(req: NextRequest) {
     const minimal  = results.filter((r) => r.tier === "MINIMAL").map((r) => r.name);
     const sacrifice = results.filter((r) => r.tier === "SACRIFICE").map((r) => r.name);
     const parts: string[] = [];
-    if (focus.length)    parts.push(`Focus on: ${focus.join(", ")}`);
-    if (minimal.length)  parts.push(`Do minimally: ${minimal.join(", ")}`);
-    if (sacrifice.length) parts.push(`Sacrifice: ${sacrifice.join(", ")}`);
+    if (focus.length)    parts.push(`Focus first: ${focus.join(", ")}`);
+    if (minimal.length)  parts.push(`Do lightly: ${minimal.join(", ")}`);
+    if (sacrifice.length) parts.push(`Safe to minimize: ${sacrifice.join(", ")}`);
     const summary = parts.join(" | ") + `. You'll use ${Math.round(hoursUsed * 10) / 10}/${availableHours}h of your weekly budget.`;
 
     return NextResponse.json({ tasks: results, hours_allocated: Math.round(hoursUsed * 10) / 10, available_hours: availableHours, summary });

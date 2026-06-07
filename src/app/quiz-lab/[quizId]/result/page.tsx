@@ -98,6 +98,12 @@ export default function QuizResult({
         <h2 className="text-lg font-semibold text-black-primary mb-5">
           Answer Review
         </h2>
+        {quiz.imageDataUrl && (
+          <div className="mb-5 overflow-hidden rounded-xl border border-gray-200 bg-white p-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={quiz.imageDataUrl} alt="Quiz reference" className="mx-auto max-h-[360px] w-auto object-contain" />
+          </div>
+        )}
         <div className="flex flex-col gap-3">
           {quiz.questions.map((q, idx) => {
             const userAnswer = answers[q.id];
@@ -128,7 +134,7 @@ export default function QuizResult({
                     Your answer:{" "}
                     {userOption
                       ? `${userOption.letter}. ${userOption.text}`
-                      : "—"}
+                      : "-"}
                   </p>
                   {!isCorrect && correctOption && (
                     <p className="text-sm text-green-700 mt-1">

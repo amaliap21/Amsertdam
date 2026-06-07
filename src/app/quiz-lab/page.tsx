@@ -48,7 +48,7 @@ async function downloadQuizPdf(quiz: GeneratedQuiz) {
   // Header
   writeWrapped(quiz.title || "Quiz", 18, "bold");
   writeWrapped(
-    `${quiz.course || "—"} • ${quiz.questions.length} questions`,
+    `${quiz.course || "-"} • ${quiz.questions.length} questions`,
     11,
     "normal",
   );
@@ -98,6 +98,9 @@ export default function QuizLab() {
     course: string;
     source: string;
     questions: GeneratedQuestion[];
+    imageDataUrl?: string | null;
+    imageRegions?: import("@/store/use-store").ImageOcrRegion[] | null;
+    basic?: boolean;
   }) => {
     addQuiz(data)
       .then(() => toast.success("Quiz saved"))

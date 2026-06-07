@@ -7,6 +7,9 @@ import toast from "react-hot-toast";
 import LanguagePicker, { type Language } from "@/components/ui/language-picker";
 import ModelPicker, { DEFAULT_MODEL_ID } from "@/components/ui/model-picker";
 import { modelTier } from "@/lib/ai/openrouter";
+import { useAiAnalyze } from "@/lib/use-ai-analyze";
+import { extractTesseractRegions } from "@/lib/tesseract-regions";
+import type { ImageOcrRegion } from "@/store/use-store";
 
 export type GeneratedQuestion = {
   id: string;
@@ -23,6 +26,9 @@ type CreateQuizModalProps = {
     course: string;
     source: string;
     questions: GeneratedQuestion[];
+    imageDataUrl?: string | null;
+    imageRegions?: ImageOcrRegion[] | null;
+    basic?: boolean;
   }) => void;
 };
 
@@ -36,9 +42,12 @@ export default function CreateQuizModal({
     course: "",
     file: null as File | null,
   });
-  // Stored as a string so the input can be momentarily empty without
-  // snapping back to "1". The number is parsed at submit time.
-  const [requestedQuestions, setRequestedQuestions] = useState<string>("5");
+  // The user sets only questions-PER-TOPIC. The generator detects how many
+  // distinct topics the material has and makes this many questions for each, so
+  // 1 topic gives N, 2 topics give 2N, etc. (no manual topic count).
+  // Total questions. When several files are merged, the total is split evenly
+  // across them (each file is one topic).
+  const [numQuestions, setNumQuestions] = useState<string>("10");
   const [language, setLanguage] = useState<Language>("en");
   const [model, setModel] = useState<string>(DEFAULT_MODEL_ID);
   const [recommendedMaxQuestions, setRecommendedMaxQuestions] = useState<number | null>(null);
@@ -48,6 +57,12 @@ export default function CreateQuizModal({
   const [loading, setLoading] = useState(false);
   const [courseOptions, setCourseOptions] = useState<string[]>([]);
   const [coursesLoaded, setCoursesLoaded] = useState(false);
+  // Usage counters: refresh after a generation, and disable Generate when the
+  // chosen model has no budget left (free quota for free models, credits for
+  // premium). This is the only genuinely "AI unavailable" state for the user.
+  const { refresh: refreshUsage, remaining, credits } = useAiAnalyze();
+  const outOfBudget =
+    modelTier(model) === "premium" ? credits === 0 : remaining === 0;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -97,11 +112,7 @@ export default function CreateQuizModal({
       });
       const json = await resp.json().catch(() => ({}));
       if (resp.ok && Number.isFinite(Number(json.maxQuestions))) {
-        const maxQuestions = Math.max(1, Math.round(Number(json.maxQuestions)));
-        setRecommendedMaxQuestions(maxQuestions);
-        setRequestedQuestions((current) =>
-          String(Math.min(Number(current) || 1, maxQuestions)),
-        );
+        setRecommendedMaxQuestions(Math.max(1, Math.round(Number(json.maxQuestions))));
         return;
       }
       setRecommendedMaxQuestions(null);
@@ -134,16 +145,9 @@ export default function CreateQuizModal({
       );
       return;
     }
-    const parsedQuestions = Math.max(
-      1,
-      Math.floor(Number(requestedQuestions) || 1),
-    );
-    if (
-      recommendedMaxQuestions &&
-      parsedQuestions > recommendedMaxQuestions
-    ) {
-      setError(`This source supports up to ${recommendedMaxQuestions} questions.`);
-      return;
+    let parsedTotal = Math.max(1, Math.floor(Number(numQuestions) || 1));
+    if (recommendedMaxQuestions && parsedTotal > recommendedMaxQuestions) {
+      parsedTotal = recommendedMaxQuestions;
     }
     setError(null);
     setLoading(true);
@@ -153,7 +157,7 @@ export default function CreateQuizModal({
       fd.append("file", formData.file);
       fd.append("title", formData.title);
       fd.append("course", formData.course);
-      fd.append("requestedQuestions", String(parsedQuestions));
+      fd.append("requestedQuestions", String(parsedTotal));
       fd.append("language", language);
       fd.append("model", model);
       const resp = await fetch("/api/ai/quiz/generate", {
@@ -169,14 +173,34 @@ export default function CreateQuizModal({
         course: string;
         source: string;
         questions: GeneratedQuestion[];
+        imageDataUrl?: string | null;
+        basic?: boolean;
       };
       toast.success(`Generated ${json.questions.length} questions`, { id: t });
+      refreshUsage(); // credits/quota were spent server-side, sync the navbar
+      // For image quizzes, detect label boxes (Tesseract) so the quiz page can
+      // COVER the labels and the student answers without reading the diagram.
+      let imageRegions: ImageOcrRegion[] | null = null;
+      if (formData.file && isImageFile(formData.file)) {
+        try {
+          const tess = await extractTesseractRegions(formData.file);
+          imageRegions = tess.regions;
+        } catch {
+          imageRegions = null;
+        }
+      }
       onCreated?.({
         title: json.title,
         course: json.course,
         source: json.source,
         questions: json.questions,
+        imageDataUrl: json.imageDataUrl ?? null,
+        imageRegions,
+        basic: json.basic ?? false,
       });
+      if (json.basic) {
+        toast("Made a basic quiz: the free AI models couldn't build a structured quiz this time. Try again, or use a Premium model (Claude Opus) for full AI quality.", { icon: "ℹ️", duration: 7000 });
+      }
       setFormData({ title: "", course: "", file: null });
       onClose();
     } catch (err) {
@@ -188,32 +212,24 @@ export default function CreateQuizModal({
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const f = e.target.files[0];
-      if (f.size > MAX_SIZE) {
-        setError("File exceeds the 50 MB limit.");
-        return;
-      }
-      setError(null);
-      setFormData({ ...formData, file: f });
-      analyzeFile(f, formData.title, formData.course);
+  const acceptFile = (f: File) => {
+    if (f.size > MAX_SIZE) {
+      setError("File exceeds the 50 MB limit.");
+      return;
     }
+    setError(null);
+    setFormData({ ...formData, file: f });
+    analyzeFile(f, formData.title, formData.course);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) acceptFile(e.target.files[0]);
   };
 
   const handleDrop = (e: React.DragEvent<HTMLLabelElement>) => {
     e.preventDefault();
     setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const f = e.dataTransfer.files[0];
-      if (f.size > MAX_SIZE) {
-        setError("File exceeds the 50 MB limit.");
-        return;
-      }
-      setError(null);
-      setFormData({ ...formData, file: f });
-      analyzeFile(f, formData.title, formData.course);
-    }
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) acceptFile(e.dataTransfer.files[0]);
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLLabelElement>) => {
@@ -276,28 +292,20 @@ export default function CreateQuizModal({
         <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-6">
           <div>
             <label className="mb-1 block text-[11px] font-medium text-black-primary sm:mb-3 sm:text-sm">
-              Questions to generate
+              Number of questions
             </label>
             <input
               type="number"
               min={1}
-              max={recommendedMaxQuestions ?? undefined}
-              value={requestedQuestions}
-              onChange={(e) => setRequestedQuestions(e.target.value)}
-              onBlur={() => {
-                if (requestedQuestions === "" || Number(requestedQuestions) < 1) {
-                  setRequestedQuestions("1");
-                }
-              }}
+              value={numQuestions}
+              onChange={(e) => setNumQuestions(e.target.value)}
+              onBlur={() => { if (numQuestions === "" || Number(numQuestions) < 1) setNumQuestions("1"); }}
               disabled={loading || analyzing}
               className="w-full rounded-xl border border-gray-300 px-2.5 py-2 text-[13px] text-black-primary focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary sm:px-4 sm:py-3.5 sm:text-sm"
             />
             <p className="mt-1.5 text-[11px] leading-tight text-gray-primary sm:text-sm">
-              {recommendedMaxQuestions
-                ? `This file supports up to ${recommendedMaxQuestions} questions. You can choose any value up to that limit.`
-                : analyzing
-                  ? "Estimating the maximum question count…"
-                  : "Upload a file to estimate the maximum question count."}
+              Exactly this many questions will be generated.
+              {recommendedMaxQuestions ? ` Up to ${recommendedMaxQuestions} for this file.` : analyzing ? " Estimating the maximum…" : ""}
             </p>
           </div>
 
@@ -358,8 +366,8 @@ export default function CreateQuizModal({
             label="AI Model"
             hint={
               modelTier(model) === "premium"
-                ? "Premium model — uses 1 credit per question generated."
-                : "Free model — rate-limited but no cost."
+                ? "Premium model, uses 1 credit per question generated."
+                : "Free model, rate-limited but no cost."
             }
           />
 
@@ -380,7 +388,7 @@ export default function CreateQuizModal({
             >
               <div className="flex flex-col items-center justify-center pt-5 pb-6">
                 <Upload size={24} className="text-gray-400 mb-2" />
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-gray-500 text-center">
                   {formData.file ? (
                     <span className="font-medium text-indigo-primary">
                       {formData.file.name}
@@ -408,15 +416,27 @@ export default function CreateQuizModal({
             )}
           </div>
 
+          {outOfBudget && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              {modelTier(model) === "premium"
+                ? "You have no premium credits left. Buy credits, or switch to a free model."
+                : "You've used all your free generations today (resets at midnight UTC). Switch to a Premium model, or come back tomorrow."}
+            </p>
+          )}
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || outOfBudget}
             className="w-full flex items-center justify-center gap-2 px-4 py-4 bg-indigo-primary text-white rounded-xl hover:bg-indigo-600 transition-colors font-medium disabled:opacity-70 disabled:cursor-not-allowed"
           >
             {loading ? (
               <>
                 <Loader2 size={20} className="animate-spin" />
                 Generating…
+              </>
+            ) : outOfBudget ? (
+              <>
+                <CirclePlus size={20} />
+                {modelTier(model) === "premium" ? "No credits left" : "No free generations left"}
               </>
             ) : (
               <>

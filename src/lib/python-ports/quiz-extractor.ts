@@ -46,6 +46,25 @@ const MIN_QUESTIONS = 4;
 const MAX_QUESTIONS = 25;
 const DISTRACTORS_PER_QUESTION = 3;
 
+// Transition / connective words. A "term" that starts with one of these is a
+// sentence fragment ("Sehingga ...", "Oleh karena itu ...", "Pertama ..."), not
+// a real concept, so we reject it as a quiz term.
+const TERM_BLOCK_STARTERS = new Set<string>([
+  // Indonesian
+  "sehingga", "oleh", "selain", "namun", "jadi", "maka", "kemudian", "selanjutnya",
+  "berikutnya", "adapun", "pertama", "kedua", "ketiga", "keempat", "kelima",
+  "untuk", "dalam", "dengan", "secara", "pada", "misalnya", "contohnya", "semua",
+  "bagaimana", "apa", "mengapa", "kenapa", "akan", "tetapi", "sebagai", "karena",
+  "selama", "setelah", "sebelum", "ketika", "saat", "yakni", "yaitu", "ialah",
+  // English
+  "therefore", "however", "moreover", "furthermore", "first", "second", "third",
+  "thus", "hence", "also", "besides", "meanwhile", "additionally", "consequently",
+  "what", "how", "why", "when", "where", "which",
+]);
+
+// Academic credentials / honorifics that mark an author/lecturer name line.
+const CREDENTIAL_RE = /\b(?:S\.?T|M\.?T|S\.?Kom|M\.?Kom|Ph\.?\s?D|S\.?E|M\.?M|S\.?Si|M\.?Si|S\.?Sos|M\.?Sc|B\.?Sc|Dr|Prof|Ir)\.?\b/i;
+
 export type Letter = "A" | "B" | "C" | "D";
 export type QuizQuestion = {
   id: string;
@@ -60,29 +79,47 @@ function escapeRegex(s: string): string {
 
 function cleanTerm(term: string): string {
   let t = term.replace(/\s+/g, " ").trim();
-  t = t.replace(/^[\s,;:\-—–"'()]+|[\s,;:\-—–"'()]+$/g, "");
+  t = t.replace(/^[\s,;:\-, –"'()]+|[\s,;:\-, –"'()]+$/g, "");
   t = t.replace(/^(?:a|an|the)\s+/i, "");
   return t;
 }
 
+const DEF_VERB_RE = new RegExp(`\\b(?:${DEFINITION_VERB_PATTERN})\\b`, "i");
+
 function isUsefulTerm(term: string): boolean {
   if (!term || term.length < 2 || term.length > 60) return false;
+  if (/\d$/.test(term)) return false; // trailing number -> TOC / page reference
   if (/^\d+$/.test(term)) return false;
   if (isSectionHeading(term)) return false;
+  // A real term is a short noun phrase, not a clause fragment.
   const tokens = term.match(WORD_RE) ?? [];
-  if (tokens.length === 0 || tokens.length > 6) return false;
+  if (tokens.length === 0 || tokens.length > 4) return false;
   if (tokens.every((t) => STOP_WORDS.has(t.toLowerCase()))) return false;
+  // Reject fragments that begin with a transition/connective/question word.
+  if (TERM_BLOCK_STARTERS.has((tokens[0] ?? "").toLowerCase())) return false;
+  // Reject clauses that swallowed a definition verb (e.g. "X adalah Y").
+  if (DEF_VERB_RE.test(term)) return false;
+  // Reject author/lecturer name lines with academic credentials.
+  if (CREDENTIAL_RE.test(term)) return false;
+  // Need at least one substantive (non-stopword, >=4 char) token.
+  if (!tokens.some((t) => t.length >= 4 && !STOP_WORDS.has(t.toLowerCase()))) return false;
   return true;
 }
 
 function isUsefulDefinition(defn: string): boolean {
   if (!defn) return false;
-  if (defn.length < 10 || defn.length > 280) return false;
+  if (defn.length < 20 || defn.length > 280) return false;
   const hasWord = WORD_RE.test(defn);
   WORD_RE.lastIndex = 0;
   if (!hasWord) return false;
   // Reject definitions that look like PDF metadata leftovers.
   if (/@|\bdoi\b|\bissn\b|\bpage\s*\d+\b|\bvol\.?\s*\d+\b/i.test(defn)) return false;
+  // Reject author/credential lines and question fragments masquerading as defns.
+  if (CREDENTIAL_RE.test(defn)) return false;
+  if (/[?]\s*\d*\s*$/.test(defn)) return false; // ends with a question mark
+  if (/\d$/.test(defn.trim())) return false; // trailing page/list number
+  const firstTok = (defn.match(WORD_RE) ?? [])[0]?.toLowerCase();
+  if (firstTok && TERM_BLOCK_STARTERS.has(firstTok)) return false; // fragment
   const wordChars = (defn.match(/[A-Za-zА-Я]/g) ?? []).length;
   if (wordChars < defn.length * 0.5) return false;
   return true;

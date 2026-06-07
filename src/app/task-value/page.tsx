@@ -17,6 +17,7 @@ import Image from "next/image";
 import AddTaskModal, { type TaskFormInitial } from "@/components/ui/task-form";
 import toast from "react-hot-toast";
 import { useStore, type TaskPriority, type TaskItem } from "@/store/use-store";
+import ColorLegend from "@/components/ui/color-legend";
 import {
   parseTaskDate,
   formatTaskDate,
@@ -83,10 +84,10 @@ export default function TaskValue() {
     // formatting happens at render time via formatTaskDate().
     const newDate = data.deadline
       ? new Date(data.deadline).toISOString()
-      : "—";
+      : "Not set";
     const newTimeEstimate = data.estimatedHours
       ? `${data.estimatedHours}h`
-      : "—";
+      : "Not set";
     // Preserve any AI-advice trailing line that was previously appended below
     // the assessment metadata so we don't overwrite useful prioritization context.
     const previousAdvice = (editingTask.description ?? "")
@@ -141,8 +142,8 @@ export default function TaskValue() {
       course: task.course || "General",
       // Store the real ISO timestamp; the year would otherwise be stripped
       // by the short en-US format and have to be guessed at parse time.
-      date: task.deadline ? new Date(task.deadline).toISOString() : "—",
-      timeEstimate: task.estimatedHours ? `${task.estimatedHours}h` : "—",
+      date: task.deadline ? new Date(task.deadline).toISOString() : "Not set",
+      timeEstimate: task.estimatedHours ? `${task.estimatedHours}h` : "Not set",
       priority: "If You Have Energy",
       description: task.description,
       effort: "medium effort",
@@ -163,7 +164,7 @@ export default function TaskValue() {
       const metaMatch = original.match(/^(Assessment:[^\n]*)/i);
       const meta = metaMatch ? metaMatch[1] : "";
       const advice =
-        "Only task on your plate — treat it as your top priority and finish on time.";
+        "Only task on your plate, treat it as your top priority and finish on time.";
       const newDescription = meta ? `${meta}\n${advice}` : advice;
       setTasks([
         { ...only, priority: "Focus First", description: newDescription },
@@ -181,7 +182,7 @@ export default function TaskValue() {
       } catch {
         /* persistence is best-effort; UI already updated */
       }
-      setAiSummary("1 task — defaulted to Focus First.");
+      setAiSummary("1 task, defaulted to Focus First.");
       toast.success("Task prioritized");
       return;
     }
@@ -476,6 +477,13 @@ export default function TaskValue() {
     return tasks.filter((task) => task.priority === priority);
   };
 
+  // A task is overdue when its deadline date is strictly before today.
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const isPastDeadline = (date: string) => {
+    const { isoDate } = parseTaskDate(date);
+    return !!isoDate && isoDate < todayIso;
+  };
+
   const getPriorityBadgeStyles = (priority: TaskPriority) => {
     switch (priority) {
       case "Focus First":
@@ -601,12 +609,15 @@ export default function TaskValue() {
         </div>
       </div>
 
+      {/* Explainable colors — make the red/yellow/green system self-evident */}
+      <ColorLegend variant="priority" className="mb-8" />
+
       {/* Info Message */}
       <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-4 mb-8">
         <p className="text-sm text-gray-700">
           <span className="font-medium">It&apos;s okay to let go.</span> One
-          task can be minimized or skipped without affecting your ability to
-          pass. Protecting your energy is a valid choice.
+          task can be minimized without affecting your ability to pass.
+          Protecting your energy is a valid choice.
         </p>
       </div>
 
@@ -636,9 +647,12 @@ export default function TaskValue() {
                   <p className="text-sm text-gray-primary mb-2">
                     {task.course}
                   </p>
-                  <div className="flex items-center gap-1.5 text-sm text-gray-600">
+                  <div className="flex flex-wrap items-center gap-1.5 text-sm text-gray-600">
                     <Calendar size={14} />
                     <span>{formatTaskDate(task.date)}</span>
+                    {isPastDeadline(task.date) && (
+                      <span className="font-bold text-red-600">· Deadline passed</span>
+                    )}
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-1.5">
@@ -715,9 +729,12 @@ export default function TaskValue() {
                   <p className="text-sm text-gray-primary mb-2">
                     {task.course}
                   </p>
-                  <div className="flex items-center gap-1.5 text-sm text-gray-600">
+                  <div className="flex flex-wrap items-center gap-1.5 text-sm text-gray-600">
                     <Calendar size={14} />
                     <span>{formatTaskDate(task.date)}</span>
+                    {isPastDeadline(task.date) && (
+                      <span className="font-bold text-red-600">· Deadline passed</span>
+                    )}
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-1.5">
@@ -794,9 +811,12 @@ export default function TaskValue() {
                   <p className="text-sm text-gray-primary mb-2">
                     {task.course}
                   </p>
-                  <div className="flex items-center gap-1.5 text-sm text-gray-600">
+                  <div className="flex flex-wrap items-center gap-1.5 text-sm text-gray-600">
                     <Calendar size={14} />
                     <span>{formatTaskDate(task.date)}</span>
+                    {isPastDeadline(task.date) && (
+                      <span className="font-bold text-red-600">· Deadline passed</span>
+                    )}
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-1.5">

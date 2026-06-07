@@ -70,7 +70,7 @@ export default function ModelPicker({
         {MODEL_OPTIONS.map((m) => (
           <option key={m.id} value={m.id}>
             {m.label}
-            {m.tier === "premium" ? " — Premium (uses credits)" : " — Free"}
+            {m.tier === "premium" ? ", Premium (uses credits)" : ", Free"}
           </option>
         ))}
       </select>

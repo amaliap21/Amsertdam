@@ -30,7 +30,7 @@ function decodeTitle(rawTitle: string): { title: string; payload: TaskPayload } 
 }
 
 function hoursToDisplay(h: unknown): string {
-  if (typeof h !== 'number' || !Number.isFinite(h)) return '—'
+  if (typeof h !== 'number' || !Number.isFinite(h)) return '-'
   return `${h}h`
 }
 
@@ -41,13 +41,13 @@ function shapeForClient(row: Record<string, unknown>) {
     id: row.id as string,
     title,
     course: payload.course ?? (typeof row.course === 'string' ? row.course : 'General'),
-    date: payload.date ?? (row.date != null ? String(row.date) : '—'),
+    date: payload.date ?? (row.date != null ? String(row.date) : '-'),
     timeEstimate:
       payload.estimatedHours != null
         ? hoursToDisplay(payload.estimatedHours)
         : row.estimated_hours != null
           ? hoursToDisplay(row.estimated_hours)
-          : '—',
+          : '-',
     priority:
       payload.priority ??
       (typeof row.priority === 'string' ? row.priority : 'If You Have Energy'),

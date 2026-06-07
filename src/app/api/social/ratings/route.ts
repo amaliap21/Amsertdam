@@ -1,0 +1,78 @@
+import { NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getUserId } from "@/lib/get-user-id";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const db = supabaseAdmin as any;
+
+// POST /api/social/ratings { tutor_id, stars, comment? } rates a tutor (1-5).
+// One rating per (tutor, rater), and it is final: a second attempt is rejected.
+// Triggers recompute the tutor's rating_avg / rating_count.
+export async function POST(req: Request) {
+  try {
+    const userId = await getUserId();
+    if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { tutor_id, stars, comment, recommend, session_id } = await req.json();
+    const s = Math.round(Number(stars));
+    if (!tutor_id || typeof tutor_id !== "string") {
+      return NextResponse.json({ error: "Missing tutor_id" }, { status: 400 });
+    }
+    if (tutor_id === userId) {
+      return NextResponse.json({ error: "You can't rate yourself" }, { status: 400 });
+    }
+    if (!Number.isFinite(s) || s < 1 || s > 5) {
+      return NextResponse.json({ error: "Stars must be 1-5" }, { status: 400 });
+    }
+
+    // Attend-first rule: you may only rate a host whose session you joined.
+    const { data: hostSessions } = await db.from("study_sessions").select("id").eq("host_id", tutor_id);
+    const sessionIds = (hostSessions ?? []).map((r: { id: string }) => r.id);
+    if (!sessionIds.length) {
+      return NextResponse.json({ error: "You can only rate a host after attending their session." }, { status: 403 });
+    }
+    const { data: attended } = await db
+      .from("session_participants")
+      .select("session_id")
+      .eq("user_id", userId)
+      .in("session_id", sessionIds)
+      .limit(1);
+    if (!attended || !attended.length) {
+      return NextResponse.json({ error: "Join one of their sessions before rating." }, { status: 403 });
+    }
+
+    // One rating per (tutor, rater), final. Reject a second attempt.
+    const { data: existingRating } = await db
+      .from("tutor_ratings")
+      .select("id")
+      .eq("tutor_id", tutor_id)
+      .eq("rater_id", userId)
+      .maybeSingle();
+    if (existingRating) {
+      return NextResponse.json({ error: "You already rated this host." }, { status: 409 });
+    }
+
+    const { error } = await db.from("tutor_ratings").insert({
+      tutor_id,
+      rater_id: userId,
+      stars: s,
+      comment: comment ? String(comment).slice(0, 1000) : null,
+      recommend: recommend === true,
+      session_id: typeof session_id === "string" ? session_id : null,
+    });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    const { data: tutor } = await db
+      .from("profiles")
+      .select("rating_avg, rating_count, recommend_count")
+      .eq("id", tutor_id)
+      .single();
+    return NextResponse.json({
+      ok: true,
+      rating_avg: tutor?.rating_avg ?? null,
+      rating_count: tutor?.rating_count ?? null,
+      recommend_count: tutor?.recommend_count ?? null,
+    });
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+  }
+}

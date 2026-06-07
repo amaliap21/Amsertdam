@@ -39,6 +39,13 @@ export type GeneratedQuiz = {
   source: string;
   questions: GeneratedQuizQuestion[];
   createdAt: string;
+  // Set when the quiz was generated from an image; shown on the quiz page so
+  // "based on the image" questions have the image to look at.
+  imageDataUrl?: string | null;
+  // Label boxes to COVER on the quiz image, so answers aren't readable.
+  imageRegions?: ImageOcrRegion[] | null;
+  // True when the quiz came from the deterministic fallback (LLM unavailable).
+  basic?: boolean;
 };
 
 export type TaskPriority =
@@ -353,7 +360,7 @@ export const useStore = create<AppState>()(
         addQuiz: async (data) => {
           const id = data.id ?? uid("quiz");
           try {
-            const resp = await fetch('/api/quizzes', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: data.title, course: data.course, source: data.source, questions: data.questions }) })
+            const resp = await fetch('/api/quizzes', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: data.title, course: data.course, source: data.source, questions: data.questions, imageDataUrl: data.imageDataUrl ?? null, imageRegions: data.imageRegions ?? null, basic: data.basic ?? false }) })
             if (resp.ok) {
               const body = await resp.json()
               set((state) => ({
@@ -364,13 +371,20 @@ export const useStore = create<AppState>()(
                   source: body.source,
                   questions: body.questions,
                   createdAt: body.created_at,
+                  imageDataUrl: body.image_url ?? data.imageDataUrl ?? null,
+                  imageRegions: body.image_regions ?? data.imageRegions ?? null,
+                  basic: body.generated_basic ?? data.basic ?? false,
                 }]
               }))
               return body.id
             }
+            // Server responded but not OK (e.g. column missing): still show the
+            // quiz locally so it never silently disappears.
+            set((state) => ({ quizzes: [...state.quizzes, { id, title: data.title, course: data.course, source: data.source, questions: data.questions, createdAt: new Date().toISOString(), imageDataUrl: data.imageDataUrl ?? null, imageRegions: data.imageRegions ?? null, basic: data.basic ?? false }] }))
+            return id
           } catch {
             // fallback local
-            set((state) => ({ quizzes: [...state.quizzes, { id, title: data.title, course: data.course, source: data.source, questions: data.questions, createdAt: new Date().toISOString() }] }))
+            set((state) => ({ quizzes: [...state.quizzes, { id, title: data.title, course: data.course, source: data.source, questions: data.questions, createdAt: new Date().toISOString(), imageDataUrl: data.imageDataUrl ?? null, imageRegions: data.imageRegions ?? null, basic: data.basic ?? false }] }))
           }
           return id
         },
@@ -586,6 +600,9 @@ export const useStore = create<AppState>()(
                   source: string
                   questions?: GeneratedQuiz["questions"]
                   created_at: string
+                  image_url?: string | null
+                  image_regions?: ImageOcrRegion[] | null
+                  generated_basic?: boolean | null
                 }
                 next.quizzes = (quizzes as RawQuiz[]).map((q) => ({
                   id: q.id,
@@ -594,6 +611,9 @@ export const useStore = create<AppState>()(
                   source: q.source,
                   questions: q.questions || [],
                   createdAt: q.created_at,
+                  imageDataUrl: q.image_url ?? null,
+                  imageRegions: q.image_regions ?? null,
+                  basic: q.generated_basic ?? false,
                 }))
               }
               if (Array.isArray(courses) && (courses.length > 0 || cur.coursesCache.length === 0)) next.coursesCache = courses

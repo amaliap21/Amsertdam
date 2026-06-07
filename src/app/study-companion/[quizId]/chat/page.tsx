@@ -286,9 +286,8 @@ export default function StudyCompanionChat({
     setMessages([{ id: "welcome", role: "assistant", content: welcomeContent }]);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = input.trim();
+  const sendMessage = async (raw: string) => {
+    const trimmed = raw.trim();
     if (!trimmed || streaming) return;
 
     const userMsg: Message = {
@@ -403,11 +402,27 @@ export default function StudyCompanionChat({
       );
     } finally {
       setStreaming(false);
-      // Every reply spends a unit server-side (premium → 1 credit, free → 1
-      // daily-quota unit), so refresh both navbar counters without a reload.
+      // Every reply spends a unit server-side (premium uses 1 credit, free uses
+      // 1 daily-quota unit), so refresh both navbar counters without a reload.
       refreshUsage();
     }
   };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    void sendMessage(input);
+    setInput("");
+  };
+
+  // Immersive, Socratic quick prompts. Tapping one sends it straight away so
+  // learning feels interactive and guided rather than a blank text box.
+  const SOCRATIC_CHIPS = [
+    "Quiz me with multiple-choice options",
+    "Give me a hint, do not reveal the answer",
+    "Explain this step by step",
+    "Ask me a question to check my understanding",
+    "Let's discuss why my answer was wrong",
+  ];
 
   return (
     <div className="min-h-dvh bg-white px-4 sm:px-6 md:px-10 lg:px-14.75 py-6 md:py-11.5 flex flex-col">
@@ -482,6 +497,20 @@ export default function StudyCompanionChat({
         className="fixed bottom-3 sm:bottom-6 left-3 right-3 sm:left-6 sm:right-6 lg:left-[calc(16rem+1rem)] lg:right-14.75 flex flex-col gap-1.5 bg-white border border-gray-200 rounded-2xl px-3 sm:px-4 py-2 shadow-md"
         style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
       >
+        {/* Immersive Socratic quick prompts */}
+        <div className="flex gap-1.5 overflow-x-auto pb-1">
+          {SOCRATIC_CHIPS.map((chip) => (
+            <button
+              key={chip}
+              type="button"
+              onClick={() => void sendMessage(chip)}
+              disabled={streaming}
+              className="flex items-center gap-1 whitespace-nowrap rounded-full border border-indigo-primary/40 px-3 py-1 text-xs font-medium text-indigo-primary transition hover:bg-indigo-primary/5 disabled:opacity-50"
+            >
+              <Sparkles size={12} /> {chip}
+            </button>
+          ))}
+        </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           {/* Pick the model. Premium (Opus) charges 1 credit per reply. */}
           <ModelPicker
@@ -510,7 +539,7 @@ export default function StudyCompanionChat({
         </div>
         {modelTier(chatModel) === "premium" && (
           <p className="px-1 text-[10px] text-gray-primary">
-            Premium model — each reply uses 1 credit.
+            Premium model, each reply uses 1 credit.
           </p>
         )}
       </form>

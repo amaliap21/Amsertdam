@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 export const metadata = {
-  title: "Terms of Service — RealTrack",
+  title: "Terms of Service, RealTrack",
 };
 
 export default function TermsPage() {
@@ -58,7 +58,7 @@ export default function TermsPage() {
           <h2 className="text-xl font-semibold">5. Service availability</h2>
           <p>
             RealTrack is provided &quot;as is&quot;. We can&apos;t guarantee
-            uptime, and AI-generated content may occasionally be wrong —
+            uptime, and AI-generated content may occasionally be wrong , 
             always verify against your course materials before relying on it.
           </p>
         </section>
@@ -78,7 +78,7 @@ export default function TermsPage() {
             Payments are processed by <strong>Midtrans</strong> (PT Midtrans), a
             licensed Indonesian payment gateway, which supports QRIS, e-wallets,
             virtual accounts, and cards. RealTrack does not store your card or
-            banking details — they are handled entirely by Midtrans. Prices are
+            banking details, they are handled entirely by Midtrans. Prices are
             shown in Indonesian Rupiah (IDR) and are inclusive of applicable
             fees unless stated otherwise.
           </p>
@@ -114,7 +114,7 @@ export default function TermsPage() {
             </li>
             <li>
               If you were charged but credits did not appear in your account,
-              contact us — we will investigate and either grant the credits or
+              contact us, we will investigate and either grant the credits or
               issue a full refund.
             </li>
           </ul>
