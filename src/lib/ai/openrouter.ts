@@ -6,15 +6,21 @@ const ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
 // its own rate-limit bucket). All slugs verified against OpenRouter's live
 // model list.
 export const FREE_MODEL_CHAIN = [
-    // Lead with the strongest free reasoners for grading accuracy, then fall
-    // back to smaller/faster ones across different providers so a 429 on one
-    // provider doesn't kill the chain.
-    "openai/gpt-oss-120b:free",
+    // Ordered by MEASURED reliability + speed on the structured-JSON task, and
+    // spread across providers so a per-provider 429 doesn't kill the chain.
+    // Lead with fast INSTRUCT models (not reasoning models): reasoning models
+    // burn the token budget "thinking" and are slow (10-46s), which times out
+    // under the route deadline and silently drops to the basic extractor.
+    // Benchmarks: qwen3-next ~6s ok, gemma-4 ~7s ok, gpt-oss-120b ok but slow
+    // (reasoning), nemotron-super ~15s ok. glm-4.5-air (46s) and llama-3.2-3b
+    // (too weak) were dropped; llama-3.3-70b kept last (frequently 429/empty).
     "qwen/qwen3-next-80b-a3b-instruct:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
     "google/gemma-4-31b-it:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "openai/gpt-oss-120b:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
     "openai/gpt-oss-20b:free",
-    "meta-llama/llama-3.2-3b-instruct:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
 ] as const;
 
 // Premium chain — paid Claude models. Reliable (no free-tier rate limits),
@@ -37,10 +43,12 @@ export type Tier = "free" | "premium";
 export type ModelOption = { id: string; label: string; tier: Tier };
 
 export const MODEL_OPTIONS: ModelOption[] = [
-    { id: "openai/gpt-oss-120b:free", label: "GPT-OSS 120B", tier: "free" },
+    // First entry is the UI default. Lead with the fastest, most reliable free
+    // JSON producer (measured) so the default pick actually succeeds.
     { id: "qwen/qwen3-next-80b-a3b-instruct:free", label: "Qwen3 Next 80B", tier: "free" },
-    { id: "meta-llama/llama-3.3-70b-instruct:free", label: "Llama 3.3 70B", tier: "free" },
     { id: "google/gemma-4-31b-it:free", label: "Gemma 4 31B", tier: "free" },
+    { id: "openai/gpt-oss-120b:free", label: "GPT-OSS 120B", tier: "free" },
+    { id: "nvidia/nemotron-3-super-120b-a12b:free", label: "Nemotron 3 Super 120B", tier: "free" },
     { id: "openai/gpt-oss-20b:free", label: "GPT-OSS 20B", tier: "free" },
     { id: "anthropic/claude-opus-4-7", label: "Claude Opus 4.7", tier: "premium" },
 ];
@@ -293,7 +301,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function chatWithFallback(
     messages: ChatMessage[],
     chainOrTier: readonly string[] | Tier = "free",
-    opts: { deadlineMs?: number; maxTokens?: number } = {},
+    opts: { deadlineMs?: number; maxTokens?: number; skip?: Set<string> } = {},
 ): Promise<OpenRouterResult> {
     // Output token cap. Default 500 keeps the analyze route cheap. Pass
     // `maxTokens: 0` for "uncapped" — we send a generous bound (16000) rather
@@ -309,11 +317,25 @@ export async function chatWithFallback(
             ? UNCAPPED_MAX_TOKENS
             : Math.min(8000, Math.max(256, opts.maxTokens ?? 500));
     // Accept either an explicit model chain or a tier (back-compat).
-    const chain: readonly string[] = Array.isArray(chainOrTier)
+    const fullChain: readonly string[] = Array.isArray(chainOrTier)
         ? chainOrTier
         : chainOrTier === "premium"
           ? PREMIUM_MODEL_CHAIN
           : FREE_MODEL_CHAIN;
+
+    // Per-REQUEST skip set: a model that hard rate-limits (429) is throttled
+    // for a while, so retrying it again in the SAME user request just wastes
+    // the free-tier daily request cap (and cascades into the basic fallback).
+    // Callers that fan out across many chunks pass ONE shared set so a model
+    // that 429'd on chunk 1 isn't re-hit on chunks 2..N. This is what collapses
+    // a worst case of dozens of requests per generate down to a handful.
+    const skip = opts.skip ?? new Set<string>();
+    const chain = fullChain.filter((m) => !skip.has(m));
+    // Everything in this chain is already throttled — surface that immediately
+    // rather than spinning passes against a wall.
+    if (chain.length === 0) {
+        throw new AllModelsFailedError(429);
+    }
 
     // Total time budget shared across all attempts. Each pass tries every
     // model once; we retry the whole chain while there's budget and the
@@ -339,6 +361,7 @@ export async function chatWithFallback(
         for (let pass = 0; pass < MAX_PASSES; pass++) {
             let sawRetryable = false;
             for (const model of chain) {
+                if (skip.has(model)) continue; // throttled earlier this request
                 if (Date.now() - startedAt > DEADLINE_MS) {
                     throw new AllModelsFailedError(lastStatus || 503);
                 }
@@ -346,7 +369,15 @@ export async function chatWithFallback(
                     const r = await callModel(model, messages, controller.signal, maxTokens);
                     if (r.ok) return r.result;
                     lastStatus = r.status;
-                    if (r.retryable) sawRetryable = true;
+                    // A 429 means this model is throttled for a while — don't
+                    // burn more of the daily request cap retrying it this pass
+                    // OR on later chunks in the same request. Other retryable
+                    // statuses (5xx / empty) can still be retried.
+                    if (r.status === 429) {
+                        skip.add(model);
+                    } else if (r.retryable) {
+                        sawRetryable = true;
+                    }
                     // non-retryable (400/401/403/404): move to next model.
                 } catch {
                     lastStatus = 503; // network / abort

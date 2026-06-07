@@ -242,6 +242,11 @@ export async function POST(req: NextRequest) {
     let cards: { front: string; back: string }[] = [];
     if (AI_USE_LLM) {
       const chain = resolveChain(requestedModel, tier);
+      // Shared across every LLM call in THIS request so a model that hard
+      // rate-limits (429) on one chunk isn't re-hit on the next — that
+      // amplification is what blows the free-tier daily request cap and forces
+      // the basic fallback.
+      const llmSkip = new Set<string>();
 
       // Accumulate UNIQUE cards across calls. A single request usually under-
       // delivers (model returns fewer than asked) and the polisher drops
@@ -281,6 +286,7 @@ export async function POST(req: NextRequest) {
         const resp = await chatWithFallback(messages, chain, {
           deadlineMs: remainingBudget(),
           maxTokens: 0,
+          skip: llmSkip,
         });
         const parsed = normalizeOpenRouterFlashcards(resp.content);
         if (!parsed || !parsed.cards?.length) return [];

@@ -263,6 +263,12 @@ export async function POST(req: NextRequest) {
     let basic = false;
     if (AI_USE_LLM) {
       const chain = resolveChain(requestedModel, tier);
+      // Shared across every LLM call in THIS request so a model that hard
+      // rate-limits (429) on one chunk isn't re-hit on the next — that
+      // amplification is what blows the free-tier daily request cap and forces
+      // the basic fallback. With this, one generate costs a handful of requests
+      // instead of dozens.
+      const llmSkip = new Set<string>();
 
       // Accumulate UNIQUE questions across calls. The model routinely under-
       // delivers on a single request (returns fewer than asked), and the
@@ -309,6 +315,7 @@ export async function POST(req: NextRequest) {
         const resp = await chatWithFallback(messages, chain, {
           deadlineMs: remainingBudget(),
           maxTokens: 0,
+          skip: llmSkip,
         });
         const parsed = normalizeOpenRouterQuiz(resp.content);
         if (!parsed || !parsed.questions?.length) return [];
