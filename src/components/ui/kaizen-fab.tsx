@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Sprout, Flame, Check, Plus, X, Sparkles, Trash2, Loader2 } from "lucide-react";
 
@@ -20,7 +20,40 @@ type Goal = { id: string; text: string; done: boolean };
 type KaizenState = { date: string; goals: Goal[]; streak: number; lastCompleted: string };
 
 const KEY = "realtrack-kaizen-v2";
+const POS_KEY = "realtrack-kaizen-pos-v1";
+const BTN = 56; // h-14 / w-14
+const EDGE = 12; // keep this far from the viewport edges
 const today = () => new Date().toISOString().slice(0, 10);
+
+type Pos = { x: number; y: number };
+
+const clampPos = (p: Pos): Pos => {
+  if (typeof window === "undefined") return p;
+  const maxX = window.innerWidth - BTN - EDGE;
+  const maxY = window.innerHeight - BTN - EDGE;
+  return {
+    x: Math.min(Math.max(p.x, EDGE), Math.max(EDGE, maxX)),
+    y: Math.min(Math.max(p.y, EDGE), Math.max(EDGE, maxY)),
+  };
+};
+
+const defaultPos = (): Pos => ({
+  x: (typeof window === "undefined" ? 1024 : window.innerWidth) - BTN - 20,
+  y: (typeof window === "undefined" ? 768 : window.innerHeight) - BTN - 20,
+});
+
+function loadPos(): Pos {
+  if (typeof window === "undefined") return defaultPos();
+  try {
+    const raw = JSON.parse(localStorage.getItem(POS_KEY) || "null");
+    if (raw && typeof raw.x === "number" && typeof raw.y === "number") {
+      return clampPos(raw);
+    }
+  } catch {
+    /* ignore */
+  }
+  return defaultPos();
+}
 const yesterday = () => {
   const d = new Date();
   d.setDate(d.getDate() - 1);
@@ -53,7 +86,61 @@ export default function KaizenFab() {
   const [pool, setPool] = useState<string[]>([]);
   const [suggesting, setSuggesting] = useState(false);
 
-  useEffect(() => { setState(load()); }, []);
+  // Free-drag position. `pos` is null until mounted (SSR-safe); once set, the
+  // FAB is anchored by its top-left corner and the user can drag it anywhere.
+  const [pos, setPos] = useState<Pos | null>(null);
+  const [dragging, setDragging] = useState(false);
+  // Drag bookkeeping kept in a ref so the window listeners always see fresh
+  // values without re-subscribing. `moved` lets us tell a drag from a click.
+  const drag = useRef({ startX: 0, startY: 0, origX: 0, origY: 0, moved: false });
+
+  useEffect(() => { setState(load()); setPos(loadPos()); }, []);
+
+  // Re-clamp if the window resizes so the FAB never strands off-screen.
+  useEffect(() => {
+    const onResize = () => setPos((p) => (p ? clampPos(p) : p));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // While dragging, track the pointer on the window so the drag continues even
+  // if the cursor leaves the small button.
+  useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e: PointerEvent) => {
+      const dx = e.clientX - drag.current.startX;
+      const dy = e.clientY - drag.current.startY;
+      if (Math.abs(dx) + Math.abs(dy) > 4) drag.current.moved = true;
+      setPos(clampPos({ x: drag.current.origX + dx, y: drag.current.origY + dy }));
+    };
+    const onUp = () => {
+      setDragging(false);
+      // A press that didn't move is a click: toggle the panel.
+      if (!drag.current.moved) {
+        setOpen((v) => !v);
+      } else {
+        setPos((p) => {
+          if (p) {
+            try { localStorage.setItem(POS_KEY, JSON.stringify(p)); } catch { /* ignore */ }
+          }
+          return p;
+        });
+      }
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [dragging]);
+
+  const onHandleDown = (e: React.PointerEvent) => {
+    if (!pos) return;
+    e.preventDefault();
+    drag.current = { startX: e.clientX, startY: e.clientY, origX: pos.x, origY: pos.y, moved: false };
+    setDragging(true);
+  };
 
   const persist = (next: KaizenState) => {
     setState(next);
@@ -116,10 +203,27 @@ export default function KaizenFab() {
   // The chat page has its own fixed bottom input bar, so skip the FAB there.
   if (pathname?.includes("/study-companion/") && pathname.endsWith("/chat")) return null;
 
+  // Anchor the whole widget by the button's top-left corner once we have a
+  // position; before mount, fall back to the bottom-right corner.
+  const containerStyle: React.CSSProperties = pos
+    ? { left: pos.x, top: pos.y }
+    : { right: 20, bottom: 20 };
+  // Open the panel toward whichever side has room, based on the button's place
+  // in the viewport, so it never spills off-screen wherever you drag it.
+  const vw = typeof window !== "undefined" ? window.innerWidth : 1024;
+  const vh = typeof window !== "undefined" ? window.innerHeight : 768;
+  const openUp = pos ? pos.y > vh / 2 : true;
+  const alignRight = pos ? pos.x > vw / 2 : true;
+  const panelStyle: React.CSSProperties = {
+    ...(openUp ? { bottom: BTN + 12 } : { top: BTN + 12 }),
+    ...(alignRight ? { right: 0 } : { left: 0 }),
+  };
+
   return (
-    <div className="fixed bottom-5 right-5 z-40 flex flex-col items-end gap-3">
+    <div className="fixed z-40" style={containerStyle}>
+      <div className="relative" style={{ width: BTN, height: BTN }}>
       {open && (
-        <div className="w-[min(92vw,22rem)] overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-xl">
+        <div className="absolute w-[min(92vw,22rem)] overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-xl" style={panelStyle}>
           {/* Header with progress */}
           <div className="bg-emerald-50 p-4">
             <div className="mb-2 flex items-center justify-between">
@@ -178,12 +282,21 @@ export default function KaizenFab() {
         </div>
       )}
 
-      {/* Floating toggle button */}
+      {/* Floating toggle + drag handle. Press and move to reposition anywhere,
+          press without moving to open/close. */}
       <button
-        onClick={() => setOpen((v) => !v)}
-        aria-label="Kaizen goals"
+        onPointerDown={onHandleDown}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setOpen((v) => !v);
+          }
+        }}
+        aria-label="Kaizen goals, drag to move"
+        title="Drag to move, click to open"
         data-tour="kaizen-fab"
-        className="relative flex h-14 w-14 items-center justify-center rounded-full bg-emerald-600 text-white shadow-lg transition hover:bg-emerald-700"
+        style={{ touchAction: "none", cursor: dragging ? "grabbing" : "grab" }}
+        className={`relative flex h-14 w-14 items-center justify-center rounded-full bg-emerald-600 text-white shadow-lg transition hover:bg-emerald-700 ${dragging ? "scale-105 ring-2 ring-emerald-300" : ""}`}
       >
         {open ? <X size={22} /> : <Sprout size={24} />}
         {!open && total > 0 && (
@@ -192,6 +305,7 @@ export default function KaizenFab() {
           </span>
         )}
       </button>
+      </div>
     </div>
   );
 }
