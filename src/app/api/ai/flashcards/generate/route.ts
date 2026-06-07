@@ -20,6 +20,7 @@ import { peekQuota, consumeQuotaN, refundQuotaN } from "@/lib/ai/limits";
 import { normalizeOpenRouterFlashcards } from "@/lib/ai/normalizers";
 import { validateFlashcardPayload } from "@/lib/ai/validator";
 import { splitTextIntoChunks } from "@/lib/ai/splitter";
+import { cleanSourceText } from "@/lib/ai/clean-source";
 import { polishFlashcardPayload } from "@/lib/ai/polish";
 
 export const runtime = "nodejs";
@@ -127,7 +128,9 @@ export async function POST(req: NextRequest) {
       maxCards = 12; // vision: one image, no term-counting to bound from
     } else {
       const extracted = await extractTextFromUpload(file);
-      cleanedText = tidyText(extracted.text);
+      // Strip cover / table-of-contents / page-header front matter so cards
+      // capture real concepts, not document navigation.
+      cleanedText = cleanSourceText(tidyText(extracted.text));
       if (cleanedText.length < 40 || extracted.wordCount < 30) {
         return NextResponse.json(
           {
@@ -232,6 +235,7 @@ export async function POST(req: NextRequest) {
         `You are a careful, accurate study-flashcard generator that handles all subjects, including mathematics, science, and humanities.`,
         `Use ${lang === "id" ? "Indonesian" : "English"} for all cards; do not mix languages unless the source text is mixed.`,
         `Identify the core concepts and important context in the source, and write cards that capture those key points rather than trivial details.`,
+        `Ignore all non-teaching material: cover pages, author or group member names, student id numbers, lecturer or supervisor names, institution names, the table of contents, lists of figures or tables, page numbers, chapter or section numbering, and running headers or footers. NEVER make a card about who wrote the document, how many pages or members it has, on which page or in which chapter something appears, or the document's structure. Capture only subject-matter concepts, definitions, processes, and reasoning a student must actually learn.`,
         `Respond ONLY with a single valid JSON object matching: {"cards":[{"front":"...","back":"...","sourceSnippet":"..."}]}.`,
         `Produce ${n} distinct cards derived from the provided source, aim for the full count, only producing fewer if the source genuinely lacks enough material. Keep back concise (<=300 chars).`,
         `Read everything visible in the source: typed text, handwritten notes, diagrams, equations, and any mathematical or scientific symbols. Do not skip a section because it is handwritten or stylized, read it.`,
