@@ -21,7 +21,7 @@ import {
   X,
 } from "lucide-react";
 import toast from "react-hot-toast";
-import { createClient } from "@/lib/supabase/client";
+import { uploadToStorage } from "@/lib/upload-to-storage";
 
 /**
  * Community and RealTrack's social layer (Study Buddy now lives here too).
@@ -1743,19 +1743,12 @@ function ShareComposer({
       let uploadedPath: string | undefined;
       let uploadedBucket: string | undefined;
       if (file && kind === "material") {
-        const supabase = createClient();
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) throw new Error("Must be logged in to upload");
-        const safeName = file.name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-");
-        // Must put /<userId>/ so ownsStoragePath validates it
-        uploadedPath = `${user.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
-        uploadedBucket = "shared-materials";
-        const { error: uploadError } = await supabase.storage
-          .from(uploadedBucket)
-          .upload(uploadedPath, file, {
-            contentType: file.type || "application/pdf"
-          });
-        if (uploadError) throw uploadError;
+        // Upload straight to Supabase Storage via a server-signed URL, bypassing
+        // the Vercel 4.5 MB body cap. Self-provisions the bucket and needs no
+        // storage RLS policy.
+        const up = await uploadToStorage(file, "material");
+        uploadedBucket = up.bucket;
+        uploadedPath = up.path;
       }
 
       const r = file && kind === "material" && uploadedPath

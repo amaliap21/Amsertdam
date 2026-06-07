@@ -10,7 +10,7 @@ import { modelTier } from "@/lib/ai/openrouter";
 import { useAiAnalyze } from "@/lib/use-ai-analyze";
 import { extractTesseractRegions } from "@/lib/tesseract-regions";
 import type { ImageOcrRegion } from "@/store/use-store";
-import { createClient } from "@/lib/supabase/client";
+import { uploadToStorage } from "@/lib/upload-to-storage";
 
 export type GeneratedQuestion = {
   id: string;
@@ -90,18 +90,13 @@ export default function CreateQuizModal({
   const isImageFile = (f: File) =>
     f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name);
 
-  // Upload to Supabase Storage bypasses the Vercel 4.5MB payload limit
+  // Upload straight to Supabase Storage (via a server-signed URL) so the file
+  // never passes through the Vercel function and its ~4.5 MB body cap. The
+  // signed-URL flow also self-provisions the bucket and needs no storage RLS
+  // policy, so it works without any manual Supabase setup.
   const uploadTransientFile = async (f: File) => {
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error("Must be logged in to upload");
-    const cleanName = f.name.replace(/[^a-zA-Z0-9.-]/g, "_");
-    const path = `${user.id}/${Date.now()}_${cleanName}`;
-    const { error: uploadError } = await supabase.storage
-      .from("uploads")
-      .upload(path, f);
-    if (uploadError) throw uploadError;
-    return { bucket: "uploads", path, fileName: f.name, fileType: f.type };
+    const up = await uploadToStorage(f, "quiz");
+    return { bucket: up.bucket, path: up.path, fileName: up.name, fileType: up.type };
   };
 
   const analyzeFile = async (file: File, title: string, course: string) => {
@@ -320,6 +315,7 @@ export default function CreateQuizModal({
             <input
               type="number"
               min={1}
+              max={recommendedMaxQuestions ?? undefined}
               value={numQuestions}
               onChange={(e) => setNumQuestions(e.target.value)}
               onBlur={() => { if (numQuestions === "" || Number(numQuestions) < 1) setNumQuestions("1"); }}
@@ -327,8 +323,8 @@ export default function CreateQuizModal({
               className="w-full rounded-xl border border-gray-300 px-2.5 py-2 text-[13px] text-black-primary focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-primary sm:px-4 sm:py-3.5 sm:text-sm"
             />
             <p className="mt-1.5 text-[11px] leading-tight text-gray-primary sm:text-sm">
-              Exactly this many questions will be generated.
-              {recommendedMaxQuestions ? ` Up to ${recommendedMaxQuestions} for this file.` : analyzing ? " Estimating the maximum…" : ""}
+              We aim for this many. A thin source can yield fewer, and you only spend credits on questions actually created.
+              {recommendedMaxQuestions ? ` This file supports about ${recommendedMaxQuestions}.` : analyzing ? " Estimating how many this file supports…" : ""}
             </p>
           </div>
 
@@ -422,7 +418,7 @@ export default function CreateQuizModal({
                 </p>
                 {recommendedMaxQuestions ? (
                   <p className="mt-2 text-xs text-indigo-primary">
-                    Estimated max: {recommendedMaxQuestions} questions
+                    Supports about {recommendedMaxQuestions} questions
                   </p>
                 ) : null}
               </div>
