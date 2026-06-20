@@ -7,7 +7,6 @@ import {
   estimateMaxCards,
   type Language,
 } from "@/lib/python-ports/flashcard-extractor";
-import { AI_USE_LLM } from "@/lib/ai/config";
 import {
   chatWithFallback,
   AllModelsFailedError,
@@ -258,157 +257,144 @@ export async function POST(req: NextRequest) {
 
     const target = Math.max(1, effective);
     let cards: { front: string; back: string }[] = [];
-    if (AI_USE_LLM) {
-      const chain = resolveChain(requestedModel, tier);
-      // Shared across every LLM call in THIS request so a model that hard
-      // rate-limits (429) on one chunk isn't re-hit on the next — that
-      // amplification is what blows the free-tier daily request cap and forces
-      // the basic fallback.
-      const llmSkip = new Set<string>();
+    const chain = resolveChain(requestedModel, tier);
+    // Shared across every LLM call in THIS request so a model that hard
+    // rate-limits (429) on one chunk isn't re-hit on the next.
+    const llmSkip = new Set<string>();
 
-      // Accumulate UNIQUE cards across calls. A single request usually under-
-      // delivers (model returns fewer than asked) and the polisher drops
-      // malformed/placeholder cards — so we over-request and run top-up
-      // passes until we reach `target`, exhaust the budget, or hit the cap.
-      const seenFronts = new Set<string>();
-      const collected: { front: string; back: string }[] = [];
-      const frontKey = (f: string) =>
-        f.toLowerCase().replace(/\s+/g, " ").trim();
-      const pushUnique = (cs: { front: string; back: string }[]) => {
-        for (const c of cs) {
-          if (collected.length >= target) break;
-          const key = frontKey(c.front);
-          if (seenFronts.has(key)) continue;
-          seenFronts.add(key);
-          collected.push(c);
-        }
-      };
-      const overAsk = (want: number) =>
-        Math.min(maxCards, want + Math.ceil(want * 0.5) + 1);
-      const avoidClause = () => {
-        if (!collected.length) return "";
-        const recent = collected
-          .slice(-15)
-          .map((c) => `- ${c.front}`)
-          .join("\n");
-        return `\n\nDo NOT repeat or rephrase any of these already-created card fronts:\n${recent}`;
-      };
-
-      // No output token cap (`maxTokens: 0`) — the model returns as many
-      // tokens as it wants, so the JSON array is never truncated mid-way
-      // regardless of how many cards it produces. Runtime is still bounded by
-      // the per-call `deadlineMs` and the route's maxDuration.
-      const runCall = async (
-        messages: Parameters<typeof chatWithFallback>[0],
-      ): Promise<{ front: string; back: string }[]> => {
-        const resp = await chatWithFallback(messages, chain, {
-          deadlineMs: remainingBudget(),
-          maxTokens: 0,
-          skip: llmSkip,
-        });
-        const parsed = normalizeOpenRouterFlashcards(resp.content);
-        if (!parsed || !parsed.cards?.length) return [];
-        // LLM JSON → regex polish (markdown / Q-A labels / numbering / smart
-        // quotes / trailing punctuation; reject placeholders), then validate.
-        const polished = polishFlashcardPayload(parsed);
-        if (!polished.length || !validateFlashcardPayload({ cards: polished }))
-          return [];
-        return polished;
-      };
-
-      try {
-        if (isImage) {
-          // ── Vision path ─────────────────────────────────────────────
-          // Reads handwriting and 2D math layouts that Tesseract can't.
-          const arrayBuf = await file.arrayBuffer();
-          const base64 = Buffer.from(arrayBuf).toString("base64");
-          const mime = file.type || "image/png";
-          const dataUrl = `data:${mime};base64,${base64}`;
-          const MAX_VISION_PASSES = 3;
-          for (let pass = 0; pass < MAX_VISION_PASSES; pass++) {
-            if (collected.length >= target) break;
-            if (remainingBudget() < MIN_CALL_MS) break;
-            const want = overAsk(target - collected.length);
-            const system = buildSystemPrompt(want, language);
-            const userInstruction =
-              `Look at the image and produce ${want} flashcards from ` +
-              `what it shows. Read EVERYTHING visible: typed text, handwriting, ` +
-              `printed math, diagrams. Render stacked fractions inline as "a/b", ` +
-              `superscripts as "x^n", and preserve inequality direction. Treat ` +
-              `any clearly written symbol as readable, never skip math just ` +
-              `because it is handwritten.` + avoidClause();
-            try {
-              pushUnique(
-                await runCall([
-                  { role: "system", content: system },
-                  {
-                    role: "user",
-                    content: [
-                      { type: "text", text: userInstruction },
-                      { type: "image_url", image_url: { url: dataUrl } },
-                    ],
-                  },
-                ]),
-              );
-            } catch (err) {
-              if (isPremium && err instanceof AllModelsFailedError) {
-                if (reservedCredits > 0) {
-                  await refundCredit(userId, reservedCredits);
-                  reservedCredits = 0;
-                }
-                return NextResponse.json(
-                  { error: err.message, credits: await getCredits(userId) },
-                  { status: 503 },
-                );
-              }
-              break;
-            }
-          }
-        } else {
-          // ── Text path (PDF) ─────────────────────────────────────────
-          const CHUNK_SIZE = Number(process.env.AI_CHUNK_SIZE || 4000);
-          const CHUNK_OVERLAP = Number(process.env.AI_CHUNK_OVERLAP || 200);
-          const chunks =
-            cleanedText.length > CHUNK_SIZE
-              ? splitTextIntoChunks(cleanedText, CHUNK_SIZE, CHUNK_OVERLAP)
-              : [cleanedText];
-          const MAX_ATTEMPTS = chunks.length + 4;
-          for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-            if (collected.length >= target) break;
-            if (remainingBudget() < MIN_CALL_MS) break;
-            const chunk = chunks[attempt % chunks.length];
-            const want = overAsk(target - collected.length);
-            const system = buildSystemPrompt(want, language);
-            const user =
-              `Source text:\n${chunk}\n\nProduce ${want} flashcards.` +
-              avoidClause();
-            try {
-              pushUnique(
-                await runCall([
-                  { role: "system", content: system },
-                  { role: "user", content: user },
-                ]),
-              );
-            } catch (err) {
-              if (isPremium && err instanceof AllModelsFailedError) {
-                if (reservedCredits > 0) {
-                  await refundCredit(userId, reservedCredits);
-                  reservedCredits = 0;
-                }
-                return NextResponse.json(
-                  { error: err.message, credits: await getCredits(userId) },
-                  { status: 503 },
-                );
-              }
-            }
-          }
-        }
-      } catch {
-        // fall back to deterministic extractor (text path only)
+    // Accumulate UNIQUE cards across calls. A single request usually under-
+    // delivers (model returns fewer than asked) and the polisher drops
+    // malformed/placeholder cards — so we over-request and run top-up
+    // passes until we reach `target`, exhaust the budget, or hit the cap.
+    const seenFronts = new Set<string>();
+    const collected: { front: string; back: string }[] = [];
+    const frontKey = (f: string) =>
+      f.toLowerCase().replace(/\s+/g, " ").trim();
+    const pushUnique = (cs: { front: string; back: string }[]) => {
+      for (const c of cs) {
+        if (collected.length >= target) break;
+        const key = frontKey(c.front);
+        if (seenFronts.has(key)) continue;
+        seenFronts.add(key);
+        collected.push(c);
       }
+    };
+    const overAsk = (want: number) =>
+      Math.min(maxCards, want + Math.ceil(want * 0.5) + 1);
+    const avoidClause = () => {
+      if (!collected.length) return "";
+      const recent = collected
+        .slice(-15)
+        .map((c) => `- ${c.front}`)
+        .join("\n");
+      return `\n\nDo NOT repeat or rephrase any of these already-created card fronts:\n${recent}`;
+    };
 
-      cards = collected.slice(0, target);
+    const runCall = async (
+      messages: Parameters<typeof chatWithFallback>[0],
+    ): Promise<{ front: string; back: string }[]> => {
+      const resp = await chatWithFallback(messages, chain, {
+        deadlineMs: remainingBudget(),
+        maxTokens: 0,
+        skip: llmSkip,
+      });
+      const parsed = normalizeOpenRouterFlashcards(resp.content);
+      if (!parsed || !parsed.cards?.length) return [];
+      const polished = polishFlashcardPayload(parsed);
+      if (!polished.length || !validateFlashcardPayload({ cards: polished }))
+        return [];
+      return polished;
+    };
+
+    try {
+      if (isImage) {
+        const arrayBuf = await file.arrayBuffer();
+        const base64 = Buffer.from(arrayBuf).toString("base64");
+        const mime = file.type || "image/png";
+        const dataUrl = `data:${mime};base64,${base64}`;
+        const MAX_VISION_PASSES = 3;
+        for (let pass = 0; pass < MAX_VISION_PASSES; pass++) {
+          if (collected.length >= target) break;
+          if (remainingBudget() < MIN_CALL_MS) break;
+          const want = overAsk(target - collected.length);
+          const system = buildSystemPrompt(want, language);
+          const userInstruction =
+            `Look at the image and produce ${want} flashcards from ` +
+            `what it shows. Read EVERYTHING visible: typed text, handwriting, ` +
+            `printed math, diagrams. Render stacked fractions inline as "a/b", ` +
+            `superscripts as "x^n", and preserve inequality direction. Treat ` +
+            `any clearly written symbol as readable, never skip math just ` +
+            `because it is handwritten.` + avoidClause();
+          try {
+            pushUnique(
+              await runCall([
+                { role: "system", content: system },
+                {
+                  role: "user",
+                  content: [
+                    { type: "text", text: userInstruction },
+                    { type: "image_url", image_url: { url: dataUrl } },
+                  ],
+                },
+              ]),
+            );
+          } catch (err) {
+            if (isPremium && err instanceof AllModelsFailedError) {
+              if (reservedCredits > 0) {
+                await refundCredit(userId, reservedCredits);
+                reservedCredits = 0;
+              }
+              return NextResponse.json(
+                { error: err.message, credits: await getCredits(userId) },
+                { status: 503 },
+              );
+            }
+            break;
+          }
+        }
+      } else {
+        const CHUNK_SIZE = Number(process.env.AI_CHUNK_SIZE || 4000);
+        const CHUNK_OVERLAP = Number(process.env.AI_CHUNK_OVERLAP || 200);
+        const chunks =
+          cleanedText.length > CHUNK_SIZE
+            ? splitTextIntoChunks(cleanedText, CHUNK_SIZE, CHUNK_OVERLAP)
+            : [cleanedText];
+        const MAX_ATTEMPTS = chunks.length + 4;
+        for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+          if (collected.length >= target) break;
+          if (remainingBudget() < MIN_CALL_MS) break;
+          const chunk = chunks[attempt % chunks.length];
+          const want = overAsk(target - collected.length);
+          const system = buildSystemPrompt(want, language);
+          const user =
+            `Source text:\n${chunk}\n\nProduce ${want} flashcards.` +
+            avoidClause();
+          try {
+            pushUnique(
+              await runCall([
+                { role: "system", content: system },
+                { role: "user", content: user },
+              ]),
+            );
+          } catch (err) {
+            if (isPremium && err instanceof AllModelsFailedError) {
+              if (reservedCredits > 0) {
+                await refundCredit(userId, reservedCredits);
+                reservedCredits = 0;
+              }
+              return NextResponse.json(
+                { error: err.message, credits: await getCredits(userId) },
+                { status: 503 },
+              );
+            }
+          }
+        }
+      }
+    } catch {
+      // fall back to deterministic extractor (text path only)
     }
+
+    cards = collected.slice(0, target);
 
     // Bill 1 unit per card actually produced. Refund the gap between what we
     // reserved up front and what we generated (covers the zero-card case too —

@@ -15,8 +15,6 @@ export const PROVIDER_RETRY = Number(
 	process.env.AI_PROVIDER_RETRY || process.env.PROVIDER_RETRY || 1,
 );
 
-export const AI_USE_LLM = process.env.AI_USE_LLM !== "false";
-
 // Per-provider ordered list of models for fallback.
 // Environment variables are expected in the form `AI_PROVIDER_MODELS_<PROVIDER>`
 // Example: AI_PROVIDER_MODELS_ANTHROPIC=claude-opus-4-7,claude-2

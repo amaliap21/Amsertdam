@@ -217,7 +217,10 @@ export default function CreateQuizModal({
         basic: json.basic ?? false,
       });
       if (json.basic) {
-        toast("Made a basic quiz: the free AI models couldn't build a structured quiz this time. Try again, or use a Premium model (Claude Opus) for full AI quality.", { icon: "ℹ️", duration: 7000 });
+        toast(
+          "Made a basic quiz: the AI couldn't build a structured quiz this time. Try again, or switch models for better results.",
+          { icon: "ℹ️", duration: 7000 },
+        );
       }
       setFormData({ title: "", course: "", file: null });
       onClose();

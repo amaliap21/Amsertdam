@@ -8,7 +8,6 @@ import {
   type Language,
   type QuizQuestion,
 } from "@/lib/python-ports/quiz-extractor";
-import { AI_USE_LLM } from "@/lib/ai/config";
 import {
   chatWithFallback,
   AllModelsFailedError,
@@ -276,181 +275,158 @@ export async function POST(req: NextRequest) {
 
     const target = Math.max(1, effective);
     let questions: QuizQuestion[] = [];
-    // True when the LLM produced nothing and we used the deterministic extractor
-    // (lower quality, no content filtering / math formatting). Surfaced to the UI.
+    // The LLM produced nothing or its output failed validation.
     let basic = false;
-    if (AI_USE_LLM) {
-      const chain = resolveChain(requestedModel, tier);
-      // Shared across every LLM call in THIS request so a model that hard
-      // rate-limits (429) on one chunk isn't re-hit on the next — that
-      // amplification is what blows the free-tier daily request cap and forces
-      // the basic fallback. With this, one generate costs a handful of requests
-      // instead of dozens.
-      const llmSkip = new Set<string>();
 
-      // Accumulate UNIQUE questions across calls. The model routinely under-
-      // delivers on a single request (returns fewer than asked), and the
-      // polisher drops any malformed ones — so one call rarely yields the
-      // full count (this is why "ask 10, get 6" happened). We over-request
-      // each call and run top-up passes until we reach `target`, exhaust the
-      // time budget, or hit the attempt cap.
-      const seenPrompts = new Set<string>();
-      const collected: QuizQuestion[] = [];
-      const promptKey = (p: string) =>
-        p.toLowerCase().replace(/\s+/g, " ").trim();
-      const pushUnique = (qs: QuizQuestion[]) => {
-        for (const q of qs) {
-          if (collected.length >= target) break;
-          const key = promptKey(q.prompt);
-          if (seenPrompts.has(key)) continue;
-          seenPrompts.add(key);
-          collected.push(q);
-        }
-      };
-      // Over-request so polish drops + dedup still leave enough. Capped at the
-      // source's estimated max so we never ask for more than it can support.
-      const overAsk = (want: number) =>
-        Math.min(maxQuestions, want + Math.ceil(want * 0.5) + 1);
-      // Tell the model which prompts already exist so top-up calls add NEW
-      // questions instead of repeating.
-      const avoidClause = () => {
-        if (!collected.length) return "";
-        const recent = collected
-          .slice(-12)
-          .map((q) => `- ${q.prompt}`)
-          .join("\n");
-        return `\n\nDo NOT repeat or rephrase any of these already-created questions:\n${recent}`;
-      };
+    const chain = resolveChain(requestedModel, tier);
+    // Shared across every LLM call in THIS request so a model that hard
+    // rate-limits (429) on one chunk isn't re-hit on the next.
+    const llmSkip = new Set<string>();
 
-      // Run one call → polish → validate, returning the usable questions.
-      // No output token cap (`maxTokens: 0`) — the model returns as many
-      // tokens as it wants, so the JSON array is never truncated mid-way
-      // regardless of how many questions it produces. Runtime is still bounded
-      // by the per-call `deadlineMs` and the route's maxDuration.
-      const runCall = async (
-        messages: Parameters<typeof chatWithFallback>[0],
-      ): Promise<QuizQuestion[]> => {
-        const resp = await chatWithFallback(messages, chain, {
-          deadlineMs: remainingBudget(),
-          maxTokens: 0,
-          skip: llmSkip,
-        });
-        const parsed = normalizeOpenRouterQuiz(resp.content);
-        if (!parsed || !parsed.questions?.length) return [];
-        // Two-stage pipeline: LLM JSON → regex polish (strip option prefixes,
-        // markdown, numbering, smart quotes; reassign A/B/C/D; re-resolve
-        // correctAnswer). Anything unsalvageable is dropped here.
-        const polished = polishQuizPayload(parsed).map((q, idx) => ({
-          id: `llm_${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 6)}`,
-          prompt: q.prompt,
-          options: q.options,
-          correctAnswer: q.correctAnswer,
-        })) as QuizQuestion[];
-        if (!polished.length || !validateQuizPayload({ questions: polished }))
-          return [];
-        return polished;
-      };
-
-      try {
-        if (isImage) {
-          // ── Vision path ──────────────────────────────────────────────
-          // Stacked fractions, exponents, and integrals are 2D layouts that
-          // Tesseract can't read. A vision-capable model reads the image
-          // directly and emits the same JSON contract the text path uses.
-          const arrayBuf = await file.arrayBuffer();
-          const base64 = Buffer.from(arrayBuf).toString("base64");
-          const mime = file.type || "image/png";
-          const dataUrl = `data:${mime};base64,${base64}`;
-          const MAX_VISION_PASSES = 3;
-          for (let pass = 0; pass < MAX_VISION_PASSES; pass++) {
-            if (collected.length >= target) break;
-            if (remainingBudget() < MIN_CALL_MS) break;
-            const want = overAsk(target - collected.length);
-            const system = buildSystemPrompt(want, language);
-            const userInstruction =
-              `Look at the image and produce ${want} multiple-choice questions ` +
-              `from what it shows. Read EVERYTHING visible: typed text, handwriting, ` +
-              `printed math, diagrams. If a fraction is drawn stacked, render it inline ` +
-              `as "a/b". If you see an exponent as a superscript, write it as "x^n". ` +
-              `Preserve inequality direction exactly ("<" stays "<", ">=" stays ">="). ` +
-              `Treat any clearly written symbol as readable, never skip math just ` +
-              `because it is handwritten. If a region is genuinely illegible, skip ` +
-              `questions from it instead of guessing.` + avoidClause();
-            try {
-              pushUnique(
-                await runCall([
-                  { role: "system", content: system },
-                  {
-                    role: "user",
-                    content: [
-                      { type: "text", text: userInstruction },
-                      { type: "image_url", image_url: { url: dataUrl } },
-                    ],
-                  },
-                ]),
-              );
-            } catch (err) {
-              if (isPremium && err instanceof AllModelsFailedError) {
-                if (reservedCredits > 0) {
-                  await refundCredit(userId, reservedCredits);
-                  reservedCredits = 0;
-                }
-                return NextResponse.json(
-                  { error: err.message, credits: await getCredits(userId) },
-                  { status: 503 },
-                );
-              }
-              break;
-            }
-          }
-        } else {
-          // ── Text path (PDF / .txt) ───────────────────────────────────
-          const CHUNK_SIZE = Number(process.env.AI_CHUNK_SIZE || 4000);
-          const CHUNK_OVERLAP = Number(process.env.AI_CHUNK_OVERLAP || 200);
-          const threshold = CHUNK_SIZE * 1;
-          const chunks =
-            cleaned.length > threshold
-              ? splitTextIntoChunks(cleaned, CHUNK_SIZE, CHUNK_OVERLAP)
-              : [cleaned];
-          // Cycle through chunks, topping up until we reach target / run out of
-          // budget. Allow a few passes beyond chunk count for top-ups.
-          const MAX_ATTEMPTS = chunks.length + 4;
-          for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-            if (collected.length >= target) break;
-            if (remainingBudget() < MIN_CALL_MS) break;
-            const chunk = chunks[attempt % chunks.length];
-            const want = overAsk(target - collected.length);
-            const system = buildSystemPrompt(want, language);
-            const user =
-              `Source text:\n${chunk}\n\nProduce ${want} multiple-choice questions.` +
-              avoidClause();
-            try {
-              pushUnique(
-                await runCall([
-                  { role: "system", content: system },
-                  { role: "user", content: user },
-                ]),
-              );
-            } catch (err) {
-              if (isPremium && err instanceof AllModelsFailedError) {
-                if (reservedCredits > 0) {
-                  await refundCredit(userId, reservedCredits);
-                  reservedCredits = 0;
-                }
-                return NextResponse.json(
-                  { error: err.message, credits: await getCredits(userId) },
-                  { status: 503 },
-                );
-              }
-            }
-          }
-        }
-      } catch {
-        // fall back to extractor below (text path) or hard error (image)
+    // Accumulate UNIQUE questions across calls. The model routinely under-
+    // delivers on a single request (returns fewer than asked), and the
+    // polisher drops any malformed ones — so one call rarely yields the
+    // full count. We over-request each call and run top-up passes until we
+    // reach `target`, exhaust the time budget, or hit the attempt cap.
+    const seenPrompts = new Set<string>();
+    const collected: QuizQuestion[] = [];
+    const promptKey = (p: string) =>
+      p.toLowerCase().replace(/\s+/g, " ").trim();
+    const pushUnique = (qs: QuizQuestion[]) => {
+      for (const q of qs) {
+        if (collected.length >= target) break;
+        const key = promptKey(q.prompt);
+        if (seenPrompts.has(key)) continue;
+        seenPrompts.add(key);
+        collected.push(q);
       }
+    };
+    const overAsk = (want: number) =>
+      Math.min(maxQuestions, want + Math.ceil(want * 0.5) + 1);
+    const avoidClause = () => {
+      if (!collected.length) return "";
+      const recent = collected
+        .slice(-12)
+        .map((q) => `- ${q.prompt}`)
+        .join("\n");
+      return `\n\nDo NOT repeat or rephrase any of these already-created questions:\n${recent}`;
+    };
 
-      questions = collected.slice(0, target);
+    const runCall = async (
+      messages: Parameters<typeof chatWithFallback>[0],
+    ): Promise<QuizQuestion[]> => {
+      const resp = await chatWithFallback(messages, chain, {
+        deadlineMs: remainingBudget(),
+        maxTokens: 0,
+        skip: llmSkip,
+      });
+      console.log("LLM response:", resp);
+      const parsed = normalizeOpenRouterQuiz(resp.content);
+      console.log("LLM parsed:", parsed);
+      if (!parsed || !parsed.questions?.length) return [];
+      const polished = polishQuizPayload(parsed).map((q, idx) => ({
+        id: `llm_${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 6)}`,
+        prompt: q.prompt,
+        options: q.options,
+        correctAnswer: q.correctAnswer,
+      })) as QuizQuestion[];
+      if (!polished.length || !validateQuizPayload({ questions: polished }))
+        return [];
+      return polished;
+    };
+
+    try {
+      if (isImage) {
+        const arrayBuf = await file.arrayBuffer();
+        const base64 = Buffer.from(arrayBuf).toString("base64");
+        const mime = file.type || "image/png";
+        const dataUrl = `data:${mime};base64,${base64}`;
+        const MAX_VISION_PASSES = 3;
+        for (let pass = 0; pass < MAX_VISION_PASSES; pass++) {
+          if (collected.length >= target) break;
+          if (remainingBudget() < MIN_CALL_MS) break;
+          const want = overAsk(target - collected.length);
+          const system = buildSystemPrompt(want, language);
+          const userInstruction =
+            `Look at the image and produce ${want} multiple-choice questions ` +
+            `from what it shows. Read EVERYTHING visible: typed text, handwriting, ` +
+            `printed math, diagrams. If a fraction is drawn stacked, render it inline ` +
+            `as "a/b". If you see an exponent as a superscript, write it as "x^n". ` +
+            `Preserve inequality direction exactly ("<" stays "<", ">=" stays ">="). ` +
+            `Treat any clearly written symbol as readable, never skip math just ` +
+            `because it is handwritten. If a region is genuinely illegible, skip ` +
+            `questions from it instead of guessing.` + avoidClause();
+          try {
+            pushUnique(
+              await runCall([
+                { role: "system", content: system },
+                {
+                  role: "user",
+                  content: [
+                    { type: "text", text: userInstruction },
+                    { type: "image_url", image_url: { url: dataUrl } },
+                  ],
+                },
+              ]),
+            );
+          } catch (err) {
+            if (isPremium && err instanceof AllModelsFailedError) {
+              if (reservedCredits > 0) {
+                await refundCredit(userId, reservedCredits);
+                reservedCredits = 0;
+              }
+              return NextResponse.json(
+                { error: err.message, credits: await getCredits(userId) },
+                { status: 503 },
+              );
+            }
+            break;
+          }
+        }
+      } else {
+        const CHUNK_SIZE = Number(process.env.AI_CHUNK_SIZE || 4000);
+        const CHUNK_OVERLAP = Number(process.env.AI_CHUNK_OVERLAP || 200);
+        const threshold = CHUNK_SIZE * 1;
+        const chunks =
+          cleaned.length > threshold
+            ? splitTextIntoChunks(cleaned, CHUNK_SIZE, CHUNK_OVERLAP)
+            : [cleaned];
+        const MAX_ATTEMPTS = chunks.length + 4;
+        for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+          if (collected.length >= target) break;
+          if (remainingBudget() < MIN_CALL_MS) break;
+          const chunk = chunks[attempt % chunks.length];
+          const want = overAsk(target - collected.length);
+          const system = buildSystemPrompt(want, language);
+          const user =
+            `Source text:\n${chunk}\n\nProduce ${want} multiple-choice questions.` +
+            avoidClause();
+          try {
+            pushUnique(
+              await runCall([
+                { role: "system", content: system },
+                { role: "user", content: user },
+              ]),
+            );
+          } catch (err) {
+            if (isPremium && err instanceof AllModelsFailedError) {
+              if (reservedCredits > 0) {
+                await refundCredit(userId, reservedCredits);
+                reservedCredits = 0;
+              }
+              return NextResponse.json(
+                { error: err.message, credits: await getCredits(userId) },
+                { status: 503 },
+              );
+            }
+          }
+        }
+      }
+    } catch {
+      // fall back to extractor below (text path) or hard error (image)
     }
+
+    questions = collected.slice(0, target);
 
     // Bill 1 unit per question actually produced. Refund the gap between what
     // we reserved up front and what we generated (covers the zero-question case
@@ -478,7 +454,7 @@ export async function POST(req: NextRequest) {
         );
       }
       questions = extractQuiz(cleaned, Math.max(1, effective), 0, language);
-      basic = questions.length > 0; // LLM gave nothing; this is the basic fallback
+      basic = questions.length > 0; // deterministic fallback used after LLM produced nothing
     }
 
     if (questions.length === 0) {

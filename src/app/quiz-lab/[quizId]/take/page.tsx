@@ -130,10 +130,9 @@ export default function TakeQuiz({
 
           {quiz.basic && (
             <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              <span className="font-medium">This is a basic quiz.</span> The free AI models couldn&apos;t build a
+              <span className="font-medium">This is a basic quiz.</span> The AI couldn&apos;t build a
               structured quiz from this source this time, so a simpler generator was used (no smart content filtering or
-              math formatting). Regenerate it in Quiz Lab, or pick a Premium model (Claude Opus), for AI-quality
-              questions.
+              math formatting). Regenerate it in Quiz Lab, or switch models for better results.
             </div>
           )}
 
