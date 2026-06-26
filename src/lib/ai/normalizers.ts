@@ -143,7 +143,12 @@ function repairQuizOption(option: unknown): QuizOption | null {
   }
 
   const stringEntries = Object.entries(anyOption).filter(
-    ([key, value]) => key !== "label" && key !== "letter" && key !== "text" && typeof value === "string" && value.trim().length > 0,
+    (entry): entry is [string, string] =>
+      entry[0] !== "label" &&
+      entry[0] !== "letter" &&
+      entry[0] !== "text" &&
+      typeof entry[1] === "string" &&
+      entry[1].trim().length > 0,
   );
   if (stringEntries.length === 0) return null;
 
